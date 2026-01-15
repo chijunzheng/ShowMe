@@ -1,5 +1,6 @@
 import express from 'express'
 import cors from 'cors'
+import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
 import { WebSocketServer } from 'ws'
 import { createServer } from 'http'
@@ -11,19 +12,83 @@ dotenv.config()
 const app = express()
 const PORT = process.env.PORT || 3001
 
-// Middleware
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
-}))
-app.use(express.json())
+// Allowed origins for CORS - only allow frontend
+const ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  process.env.CORS_ORIGIN,
+].filter(Boolean)
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 30, // 30 requests per minute
-  message: { error: 'Too many requests, please try again later.' },
+// Security headers with helmet
+// F006: Content Security Policy headers
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      // Allow scripts from self only
+      scriptSrc: ["'self'"],
+      // Allow inline styles for Tailwind CSS (required for dynamic styles)
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      // Allow images from self, data URIs (for base64), and placehold.co
+      imgSrc: ["'self'", "data:", "https://placehold.co"],
+      // Allow fonts from self and common CDNs
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      // Allow API connections to self and WebSocket
+      connectSrc: ["'self'", "ws://localhost:3001", "wss://localhost:3001"],
+      // Disallow object/embed/applet
+      objectSrc: ["'none'"],
+      // Only allow HTTPS for upgrades in production
+      upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null,
+    },
+  },
+  // Cross-Origin settings
+  crossOriginEmbedderPolicy: false, // Required for external images
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+}))
+
+// F005: CORS configuration - only allow frontend origin
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests in dev)
+    if (!origin) {
+      return callback(null, true)
+    }
+
+    if (ALLOWED_ORIGINS.includes(origin)) {
+      return callback(null, true)
+    }
+
+    callback(new Error('Not allowed by CORS'))
+  },
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  // Handle preflight requests
+  preflightContinue: false,
+  optionsSuccessStatus: 204,
+}))
+
+// Parse JSON bodies with size limit (security measure)
+app.use(express.json({ limit: '10kb' }))
+
+// F003: Rate limiting - 100 requests per 15 minutes for /api/* endpoints
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // 100 requests per 15 minutes
+  message: {
+    error: 'Too many requests, please try again later.',
+    retryAfter: '15 minutes'
+  },
+  standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
+  legacyHeaders: false, // Disable `X-RateLimit-*` headers
+  // Return retry-after header when rate limited
+  handler: (req, res, next, options) => {
+    res.status(429).json({
+      error: 'Too many requests, please try again later.',
+      retryAfter: Math.ceil(options.windowMs / 1000),
+    })
+  },
 })
-app.use('/api/', limiter)
+app.use('/api/', apiLimiter)
 
 // Health check
 app.get('/health', (req, res) => {
@@ -37,14 +102,58 @@ import classifyRoutes from './routes/classify.js'
 app.use('/api/generate', generateRoutes)
 app.use('/api/classify', classifyRoutes)
 
+// Error handler for CORS and other errors (returns JSON instead of HTML)
+app.use((err, req, res, next) => {
+  // Handle CORS errors
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({
+      error: 'CORS error: Origin not allowed',
+    })
+  }
+
+  // Handle JSON parsing errors (body size exceeded, malformed JSON)
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({
+      error: 'Request body too large',
+    })
+  }
+
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({
+      error: 'Invalid JSON in request body',
+    })
+  }
+
+  // Generic error handler
+  console.error('Server error:', err)
+  res.status(500).json({
+    error: 'Internal server error',
+  })
+})
+
 // Create HTTP server
 const server = createServer(app)
 
-// WebSocket server for generation progress
-const wss = new WebSocketServer({ server, path: '/ws/generation' })
+// F007: WebSocket server with origin validation
+const wss = new WebSocketServer({
+  server,
+  path: '/ws/generation',
+  // Verify origin before accepting WebSocket connections
+  verifyClient: (info, callback) => {
+    const origin = info.origin || info.req.headers.origin
 
-wss.on('connection', (ws) => {
-  console.log('WebSocket client connected')
+    // Allow connections from allowed origins or no origin (local tools)
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+      callback(true)
+    } else {
+      console.warn(`WebSocket connection rejected from origin: ${origin}`)
+      callback(false, 403, 'Forbidden')
+    }
+  },
+})
+
+wss.on('connection', (ws, req) => {
+  console.log('WebSocket client connected from:', req.headers.origin || 'unknown')
 
   ws.on('message', (message) => {
     try {

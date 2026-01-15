@@ -1,4 +1,5 @@
 import express from 'express'
+import { sanitizeQuery, escapeHtml } from '../utils/sanitize.js'
 // import { generateSlides, generateEngagement } from '../services/gemini.js'
 
 const router = express.Router()
@@ -125,32 +126,11 @@ router.post('/', async (req, res) => {
   try {
     const { query, topicId, conversationHistory = [] } = req.body
 
-    // Validate required fields
-    if (query === undefined || query === null) {
+    // F004: Sanitize and validate query input
+    const { sanitized: sanitizedQuery, error: queryError } = sanitizeQuery(query)
+    if (queryError) {
       return res.status(400).json({
-        error: 'Query is required',
-        field: 'query'
-      })
-    }
-
-    if (typeof query !== 'string') {
-      return res.status(400).json({
-        error: 'Query must be a string',
-        field: 'query'
-      })
-    }
-
-    const trimmedQuery = query.trim()
-    if (trimmedQuery.length === 0) {
-      return res.status(400).json({
-        error: 'Query cannot be empty',
-        field: 'query'
-      })
-    }
-
-    if (trimmedQuery.length > 500) {
-      return res.status(400).json({
-        error: 'Query must be 500 characters or less',
+        error: queryError,
         field: 'query'
       })
     }
@@ -159,12 +139,12 @@ router.post('/', async (req, res) => {
     const segmentId = generateId('seg')
     const generatedTopicId = topicId || generateId('topic')
 
-    // Extract topic metadata from query
-    const topicMetadata = extractTopicFromQuery(trimmedQuery)
+    // Extract topic metadata from query (using sanitized input)
+    const topicMetadata = extractTopicFromQuery(sanitizedQuery)
 
     // Generate slides (mock implementation)
     // In production: parallel calls to Gemini for script, diagrams, and TTS
-    const slides = generateMockSlides(trimmedQuery, generatedTopicId, segmentId)
+    const slides = generateMockSlides(sanitizedQuery, generatedTopicId, segmentId)
 
     res.json({
       slides,
@@ -198,14 +178,16 @@ router.post('/follow-up', async (req, res) => {
   try {
     const { query, topicId, conversationHistory = [] } = req.body
 
-    // Validate required fields
-    if (!query || typeof query !== 'string' || !query.trim()) {
+    // F004: Sanitize and validate query input
+    const { sanitized: sanitizedQuery, error: queryError } = sanitizeQuery(query)
+    if (queryError) {
       return res.status(400).json({
-        error: 'Query is required',
+        error: queryError,
         field: 'query'
       })
     }
 
+    // Validate topicId is provided and non-empty
     if (!topicId || typeof topicId !== 'string' || !topicId.trim()) {
       return res.status(400).json({
         error: 'topicId is required for follow-up questions',
@@ -213,11 +195,10 @@ router.post('/follow-up', async (req, res) => {
       })
     }
 
-    const trimmedQuery = query.trim()
     const segmentId = generateId('seg')
 
     // Generate follow-up slides (uses existing topic context)
-    const slides = generateMockSlides(trimmedQuery, topicId, segmentId)
+    const slides = generateMockSlides(sanitizedQuery, topicId.trim(), segmentId)
 
     res.json({
       slides,
@@ -391,31 +372,17 @@ router.post('/engagement', async (req, res) => {
   try {
     const { query } = req.body
 
-    // Validate required fields
-    if (query === undefined || query === null) {
+    // F004: Sanitize and validate query input
+    const { sanitized: sanitizedQuery, error: queryError } = sanitizeQuery(query)
+    if (queryError) {
       return res.status(400).json({
-        error: 'Query is required',
+        error: queryError,
         field: 'query'
       })
     }
 
-    if (typeof query !== 'string') {
-      return res.status(400).json({
-        error: 'Query must be a string',
-        field: 'query'
-      })
-    }
-
-    const trimmedQuery = query.trim()
-    if (trimmedQuery.length === 0) {
-      return res.status(400).json({
-        error: 'Query cannot be empty',
-        field: 'query'
-      })
-    }
-
-    // Get topic-relevant engagement content
-    const content = getEngagementForQuery(trimmedQuery)
+    // Get topic-relevant engagement content (using sanitized input)
+    const content = getEngagementForQuery(sanitizedQuery)
 
     // Select a random fun fact from the topic
     const randomFact = content.funFacts[Math.floor(Math.random() * content.funFacts.length)]

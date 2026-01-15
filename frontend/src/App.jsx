@@ -9,6 +9,15 @@ const UI_STATE = {
   LISTENING: 'listening',
   GENERATING: 'generating',
   SLIDESHOW: 'slideshow',
+  ERROR: 'error',
+}
+
+// Generation timeout configuration (F053)
+const GENERATION_TIMEOUT = {
+  // Time before showing "Still working..." message (15 seconds)
+  STILL_WORKING_MS: 15000,
+  // Maximum time before allowing user to cancel (60 seconds)
+  MAX_TIMEOUT_MS: 60000,
 }
 
 // Microphone permission states
@@ -69,6 +78,15 @@ function App() {
   const [textInput, setTextInput] = useState('')
   const [engagement, setEngagement] = useState(null)
   const [questionQueue, setQuestionQueue] = useState([])
+
+  // Error handling state (F052)
+  const [errorMessage, setErrorMessage] = useState('')
+  const [lastFailedQuery, setLastFailedQuery] = useState('')
+
+  // Generation timeout state (F053)
+  const [isStillWorking, setIsStillWorking] = useState(false)
+  const abortControllerRef = useRef(null)
+  const stillWorkingTimerRef = useRef(null)
 
   /**
    * Topics state structure (F041):
@@ -135,6 +153,9 @@ function App() {
   // Track whether slideshow just finished (for auto-trigger of queued questions - F048)
   const hasFinishedSlideshowRef = useRef(false)
 
+  // Audio playback ref for slide narration (F037)
+  const slideAudioRef = useRef(null)
+
   // Default slide duration in milliseconds (used when slide.duration is not available)
   const DEFAULT_SLIDE_DURATION = 5000
 
@@ -191,6 +212,38 @@ function App() {
   const isQuestionQueued = useCallback((question) => {
     return questionQueue.includes(question)
   }, [questionQueue])
+
+  /**
+   * Cancel ongoing generation request (F053)
+   * Aborts the fetch request and returns to listening state
+   */
+  const cancelGeneration = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+    if (stillWorkingTimerRef.current) {
+      clearTimeout(stillWorkingTimerRef.current)
+      stillWorkingTimerRef.current = null
+    }
+    setIsStillWorking(false)
+    setUiState(UI_STATE.LISTENING)
+  }, [])
+
+  /**
+   * Retry the last failed request (F052)
+   * Re-attempts the query that previously failed
+   */
+  const retryLastRequest = useCallback(() => {
+    if (lastFailedQuery) {
+      setErrorMessage('')
+      setUiState(UI_STATE.LISTENING)
+      // Use setTimeout to ensure state is updated before calling handleQuestion
+      setTimeout(() => {
+        handleQuestion(lastFailedQuery)
+      }, 0)
+    }
+  }, [lastFailedQuery])
 
   // Auto-advance slideshow when playing (F044)
   // Uses slide.duration if available, otherwise falls back to DEFAULT_SLIDE_DURATION
@@ -273,6 +326,50 @@ function App() {
       setIsPlaying(true)
     }
   }, [uiState, allSlides.length])
+
+  /**
+   * F037: Restart audio when navigating to a new slide
+   * Stops current audio and starts audio for the new slide from the beginning
+   */
+  useEffect(() => {
+    // Only manage audio in slideshow state with valid slides
+    if (uiState !== UI_STATE.SLIDESHOW || allSlides.length === 0) {
+      // Stop any playing audio when leaving slideshow
+      if (slideAudioRef.current) {
+        slideAudioRef.current.pause()
+        slideAudioRef.current = null
+      }
+      return
+    }
+
+    const currentSlide = allSlides[currentIndex]
+
+    // Stop previous audio if playing
+    if (slideAudioRef.current) {
+      slideAudioRef.current.pause()
+      slideAudioRef.current = null
+    }
+
+    // Only play audio for content slides (not header slides) that have an audioUrl
+    if (currentSlide?.type !== 'header' && currentSlide?.audioUrl && isPlaying) {
+      const audio = new Audio(currentSlide.audioUrl)
+      slideAudioRef.current = audio
+
+      // Start from the beginning
+      audio.currentTime = 0
+      audio.play().catch((error) => {
+        // Autoplay may be blocked by browser policy - log but don't crash
+        console.warn('Audio playback failed:', error.message)
+      })
+    }
+
+    // Cleanup on unmount or when slide changes
+    return () => {
+      if (slideAudioRef.current) {
+        slideAudioRef.current.pause()
+      }
+    }
+  }, [uiState, currentIndex, allSlides, isPlaying])
 
   // Auto-trigger queued questions after slideshow ends (F048)
   // This creates a seamless learning flow where users can queue questions
@@ -430,6 +527,13 @@ function App() {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current)
       }
+      // Cleanup generation-related refs
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+      if (stillWorkingTimerRef.current) {
+        clearTimeout(stillWorkingTimerRef.current)
+      }
     }
   }, [])
 
@@ -550,9 +654,10 @@ function App() {
   /**
    * Classify a query to determine if it's a follow-up or new topic
    * @param {string} query - The user's question
+   * @param {AbortSignal} signal - AbortController signal for cancellation (F053)
    * @returns {Promise<{classification: string, shouldEvictOldest: boolean, evictTopicId: string|null}>}
    */
-  const classifyQuery = async (query) => {
+  const classifyQuery = async (query, signal) => {
     // If no active topic, it's always a new topic
     if (!activeTopic) {
       return {
@@ -577,6 +682,7 @@ function App() {
           topicCount: topics.length,
           oldestTopicId: topics.length > 0 ? topics[0].id : null,
         }),
+        signal,
       })
 
       if (!response.ok) {
@@ -585,6 +691,10 @@ function App() {
 
       return await response.json()
     } catch (error) {
+      // Re-throw abort errors to be handled upstream
+      if (error.name === 'AbortError') {
+        throw error
+      }
       console.error('Classification failed:', error)
       // Default to new topic on error
       return {
@@ -602,6 +712,8 @@ function App() {
    * F040: New topic creates header card
    * F041: Max 3 topics retained
    * F042: 4th topic evicts oldest (LRU)
+   * F052: Network error shows retry option
+   * F053: Generation timeout handled with AbortController
    */
   const handleQuestion = async (query) => {
     if (!query.trim()) return
@@ -612,8 +724,19 @@ function App() {
     setUiState(UI_STATE.GENERATING)
     setLiveTranscription('')
     setTextInput('')
+    setErrorMessage('')
+    setIsStillWorking(false)
     // Reset the slideshow finished flag when starting new generation
     hasFinishedSlideshowRef.current = false
+
+    // Create AbortController for timeout handling (F053)
+    abortControllerRef.current = new AbortController()
+    const { signal } = abortControllerRef.current
+
+    // Start "Still working..." timer (F053)
+    stillWorkingTimerRef.current = setTimeout(() => {
+      setIsStillWorking(true)
+    }, GENERATION_TIMEOUT.STILL_WORKING_MS)
 
     try {
       // Start engagement call immediately for fast feedback
@@ -621,6 +744,7 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: query.trim() }),
+        signal,
       })
         .then((res) => {
           if (!res.ok) throw new Error(`Engagement API failed: ${res.status}`)
@@ -634,11 +758,14 @@ function App() {
         })
         .catch((err) => {
           // Engagement failure is non-critical, log but continue
-          console.warn('Engagement fetch failed:', err.message)
+          // Ignore abort errors
+          if (err.name !== 'AbortError') {
+            console.warn('Engagement fetch failed:', err.message)
+          }
         })
 
       // Classify the query to determine if it's a follow-up or new topic
-      const classifyResult = await classifyQuery(query)
+      const classifyResult = await classifyQuery(query, signal)
       const isFollowUp = classifyResult.classification === 'follow_up'
 
       let generateData
@@ -654,6 +781,7 @@ function App() {
             topicId: activeTopic.id,
             conversationHistory: [],
           }),
+          signal,
         })
 
         if (!response.ok) {
@@ -671,6 +799,7 @@ function App() {
             topicId: null,
             conversationHistory: [],
           }),
+          signal,
         })
 
         if (!response.ok) {
@@ -680,6 +809,13 @@ function App() {
         generateData = await response.json()
         newTopicData = generateData.topic
       }
+
+      // Clear the "Still working..." timer on success (F053)
+      if (stillWorkingTimerRef.current) {
+        clearTimeout(stillWorkingTimerRef.current)
+        stillWorkingTimerRef.current = null
+      }
+      setIsStillWorking(false)
 
       // Wait for engagement to complete before transitioning (if still pending)
       await engagementPromise
@@ -759,9 +895,25 @@ function App() {
         setUiState(UI_STATE.LISTENING)
       }
     } catch (error) {
+      // Clear timers on error (F053)
+      if (stillWorkingTimerRef.current) {
+        clearTimeout(stillWorkingTimerRef.current)
+        stillWorkingTimerRef.current = null
+      }
+      setIsStillWorking(false)
+
+      // Handle abort/cancellation (F053)
+      if (error.name === 'AbortError') {
+        // User cancelled - return to listening state silently
+        setUiState(UI_STATE.LISTENING)
+        return
+      }
+
+      // Handle network errors (F052)
       console.error('API request failed:', error)
-      // Return to listening state on error so user can try again
-      setUiState(UI_STATE.LISTENING)
+      setLastFailedQuery(query)
+      setErrorMessage('Something went wrong. Please check your connection and try again.')
+      setUiState(UI_STATE.ERROR)
     }
   }
 
@@ -775,10 +927,12 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4">
-      <main className="w-full max-w-[800px]">
+    // F055, F056, F058: Responsive container with bottom padding for fixed mic button
+    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-4 pb-24 md:pb-4">
+      {/* F055: max-width 800px centered on desktop, F056: full-width on mobile */}
+      <main className="w-full max-w-4xl mx-auto">
         {uiState === UI_STATE.LISTENING && (
-          <div className="flex flex-col items-center gap-6">
+          <div className="flex flex-col items-center gap-6 px-4 md:px-0">
             {/* Waveform visualization - responds to audio input when listening */}
             <div className="flex items-center justify-center gap-1 h-16">
               {[...Array(AUDIO_CONFIG.WAVEFORM_BARS)].map((_, i) => {
@@ -827,33 +981,38 @@ function App() {
               {liveTranscription || "Ask me anything..."}
             </p>
 
-            {/* Permission denied message */}
+            {/* Permission denied message (F054) - directs user to text input */}
             {permissionState === PERMISSION_STATE.DENIED && (
-              <p className="text-sm text-red-500">
-                Microphone access denied. Please enable it in your browser settings.
-              </p>
+              <div className="text-center">
+                <p className="text-sm text-red-500 mb-2">
+                  Microphone access denied. Please enable it in your browser settings.
+                </p>
+                <p className="text-sm text-gray-500">
+                  You can still use the text input below to ask questions.
+                </p>
+              </div>
             )}
 
-            {/* Text input fallback */}
+            {/* Text input fallback - F057: min-height 44px for touch target */}
             <form onSubmit={handleTextSubmit} className="w-full max-w-md">
               <input
                 type="text"
                 value={textInput}
                 onChange={(e) => setTextInput(e.target.value)}
                 placeholder="Or type your question here..."
-                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-primary focus:outline-none"
+                className="w-full px-4 py-3 min-h-[44px] border border-gray-200 rounded-lg focus:border-primary focus:outline-none"
               />
             </form>
 
-            {/* Example questions (cold start only) */}
+            {/* Example questions (cold start only) - F057: touch targets 44px */}
             {isColdStart && (
-              <div className="mt-4 space-y-3">
+              <div className="mt-4 space-y-3 w-full max-w-md">
                 <p className="text-sm text-gray-400">Try asking:</p>
                 {EXAMPLE_QUESTIONS.map((question, i) => (
                   <button
                     key={i}
                     onClick={() => handleExampleClick(question)}
-                    className="block w-full px-4 py-3 text-left bg-surface hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
+                    className="block w-full px-4 py-3 min-h-[44px] text-left bg-surface hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
                     style={{ animationDelay: `${i * 150}ms` }}
                   >
                     "{question}"
@@ -865,12 +1024,25 @@ function App() {
         )}
 
         {uiState === UI_STATE.GENERATING && (
-          <div className="flex flex-col items-center gap-6">
+          <div className="flex flex-col items-center gap-6 px-4 md:px-0">
             {/* Loader */}
             <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin" />
 
-            <p className="text-lg">Creating your explanation...</p>
+            {/* Status message - shows "Still working..." after 15 seconds (F053) */}
+            <p className="text-lg">
+              {isStillWorking ? 'Still working...' : 'Creating your explanation...'}
+            </p>
             <p className="text-sm text-gray-500">[0/4 slides ready]</p>
+
+            {/* Cancel button - shown when taking too long (F053) - F057: 44px touch target */}
+            {isStillWorking && (
+              <button
+                onClick={cancelGeneration}
+                className="px-4 py-2 min-h-[44px] text-gray-500 hover:text-gray-700 border border-gray-300 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+            )}
 
             {/* Fun fact card - displays while slides are generating (F045) */}
             {engagement?.funFact && (
@@ -894,37 +1066,81 @@ function App() {
           </div>
         )}
 
-        {uiState === UI_STATE.SLIDESHOW && allSlides.length > 0 && (
-          <div className="flex flex-col items-center gap-4">
-            {/* Current slide content - F043, F044: handles both header and content slides */}
-            {allSlides[currentIndex]?.type === 'header' ? (
-              // F043: Render topic header card with TopicHeader component
-              <div className="w-full aspect-video bg-surface rounded-xl shadow-lg overflow-hidden">
-                <TopicHeader
-                  icon={allSlides[currentIndex].topicIcon}
-                  name={allSlides[currentIndex].topicName}
+        {/* Error state with retry button (F052) */}
+        {uiState === UI_STATE.ERROR && (
+          <div className="flex flex-col items-center gap-6 px-4 md:px-0">
+            {/* Error icon */}
+            <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="w-8 h-8 text-red-500"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
                 />
-              </div>
-            ) : (
-              // Regular content slide with image and subtitle
-              <>
+              </svg>
+            </div>
+
+            <p className="text-lg text-gray-700 text-center">{errorMessage}</p>
+
+            {/* Retry button - F057: 44px touch target */}
+            <button
+              onClick={retryLastRequest}
+              className="px-6 py-3 min-h-[44px] bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors font-medium"
+            >
+              Try Again
+            </button>
+
+            {/* Option to go back to listening state */}
+            <button
+              onClick={() => setUiState(UI_STATE.LISTENING)}
+              className="px-4 py-2 min-h-[44px] text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              Ask a different question
+            </button>
+          </div>
+        )}
+
+        {uiState === UI_STATE.SLIDESHOW && allSlides.length > 0 && (
+          <div className="flex flex-col items-center gap-4 px-4 md:px-0">
+            {/* F050: Slide content with fade transition - key triggers animation on slide change */}
+            {/* F043, F044: handles both header and content slides */}
+            <div key={allSlides[currentIndex]?.id || currentIndex} className="slide-fade w-full">
+              {allSlides[currentIndex]?.type === 'header' ? (
+                // F043: Render topic header card with TopicHeader component
                 <div className="w-full aspect-video bg-surface rounded-xl shadow-lg overflow-hidden">
-                  <img
-                    src={allSlides[currentIndex]?.imageUrl}
-                    alt="Slide diagram"
-                    className="w-full h-full object-contain"
+                  <TopicHeader
+                    icon={allSlides[currentIndex].topicIcon}
+                    name={allSlides[currentIndex].topicName}
                   />
                 </div>
+              ) : (
+                // Regular content slide with image and subtitle
+                <>
+                  <div className="w-full aspect-video bg-surface rounded-xl shadow-lg overflow-hidden">
+                    <img
+                      src={allSlides[currentIndex]?.imageUrl}
+                      alt="Slide diagram"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
 
-                {/* Subtitle - only shown for content slides */}
-                <p className="text-lg text-center max-h-20 overflow-hidden">
-                  {allSlides[currentIndex]?.subtitle}
-                </p>
-              </>
-            )}
+                  {/* Subtitle - only shown for content slides */}
+                  <p className="text-lg text-center max-h-20 overflow-hidden mt-4">
+                    {allSlides[currentIndex]?.subtitle}
+                  </p>
+                </>
+              )}
+            </div>
 
-            {/* F044: Progress dots - show all slides across all topics */}
-            <div className="flex items-center gap-2 flex-wrap justify-center" role="tablist" aria-label="Slide navigation">
+            {/* F044, F057: Progress dots - show all slides across all topics with 44px touch target */}
+            <div className="flex items-center gap-1 flex-wrap justify-center" role="tablist" aria-label="Slide navigation">
               {allSlides.map((slide, i) => {
                 // Use different styling for header vs content dots
                 const isHeader = slide.type === 'header'
@@ -939,12 +1155,17 @@ function App() {
                         ? `Go to ${slide.topicName} topic header`
                         : `Go to slide ${i + 1} of ${allSlides.length}`
                     }
-                    className={`transition-colors cursor-pointer hover:scale-125 ${
-                      isHeader
-                        ? `w-4 h-3 rounded ${i === currentIndex ? 'bg-primary' : 'bg-gray-400 hover:bg-gray-500'}`
-                        : `w-3 h-3 rounded-full ${i === currentIndex ? 'bg-primary' : 'bg-gray-300 hover:bg-gray-400'}`
-                    }`}
-                  />
+                    className="p-2 transition-colors cursor-pointer hover:scale-125"
+                  >
+                    {/* Inner dot - visual indicator, outer padding provides 44px touch target */}
+                    <span
+                      className={`block ${
+                        isHeader
+                          ? `w-4 h-3 rounded ${i === currentIndex ? 'bg-primary' : 'bg-gray-400'}`
+                          : `w-3 h-3 rounded-full ${i === currentIndex ? 'bg-primary' : 'bg-gray-300'}`
+                      }`}
+                    />
+                  </button>
                 )
               })}
             </div>
@@ -994,18 +1215,22 @@ function App() {
         )}
       </main>
 
-      {/* Mic button - always visible, with pulse animation when listening */}
+      {/* F038, F058: Mic button - fixed on mobile with safe area inset for notched devices */}
       <button
         onClick={handleMicClick}
-        disabled={uiState === UI_STATE.GENERATING}
+        disabled={uiState === UI_STATE.GENERATING || uiState === UI_STATE.ERROR}
         aria-label={isListening ? 'Stop recording' : 'Start recording'}
-        className={`fixed bottom-6 left-1/2 -translate-x-1/2 w-16 h-16 rounded-full shadow-lg flex items-center justify-center text-2xl transition-all ${
-          uiState === UI_STATE.GENERATING
+        className={`fixed left-1/2 -translate-x-1/2 z-50 w-16 h-16 rounded-full shadow-lg flex items-center justify-center text-2xl transition-all ${
+          uiState === UI_STATE.GENERATING || uiState === UI_STATE.ERROR
             ? 'bg-gray-300 cursor-not-allowed'
             : isListening
               ? 'bg-red-500 hover:bg-red-600 scale-110 mic-pulse'
               : 'bg-primary hover:scale-105'
         } text-white`}
+        style={{
+          // F058: Use safe area inset for notched devices, fallback to 24px
+          bottom: 'max(24px, env(safe-area-inset-bottom, 24px))',
+        }}
       >
         {/* Show stop icon when listening, mic icon otherwise */}
         {isListening ? (

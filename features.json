@@ -14,12 +14,36 @@
       "dependencies": [],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Load frontend application in browser", "status": "pending"},
-        {"id": "T002", "description": "Open browser DevTools Network tab", "status": "pending"},
-        {"id": "T003", "description": "Trigger a generation request", "status": "pending"},
-        {"id": "T004", "description": "Inspect all outgoing requests - no API key in headers or body", "status": "pending"},
-        {"id": "T005", "description": "Search page source for 'GEMINI' - no matches", "status": "pending"},
-        {"id": "T006", "description": "Check localStorage/sessionStorage - no API keys stored", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Load frontend application in browser",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Open browser DevTools Network tab",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Trigger a generation request",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Inspect all outgoing requests - no API key in headers or body",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Search page source for 'GEMINI' - no matches",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Check localStorage/sessionStorage - no API keys stored",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -30,11 +54,23 @@
       "description": "Verify sensitive env vars are not bundled into frontend JavaScript",
       "priority": 1,
       "dependencies": [],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Build frontend for production", "status": "pending"},
-        {"id": "T002", "description": "Search dist/*.js files for GEMINI_API_KEY - no matches", "status": "pending"},
-        {"id": "T003", "description": "Verify only VITE_* prefixed vars are accessible", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Build frontend for production",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Search dist/*.js files for GEMINI_API_KEY - no matches",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify only VITE_* prefixed vars are accessible",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -44,13 +80,31 @@
       "name": "API rate limiting",
       "description": "Backend implements rate limiting to prevent abuse",
       "priority": 2,
-      "dependencies": ["F010"],
-      "status": "pending",
+      "dependencies": [
+        "F010"
+      ],
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Send 100 requests in 10 seconds to /api/generate", "status": "pending"},
-        {"id": "T002", "description": "Verify rate limit response (429) after threshold", "status": "pending"},
-        {"id": "T003", "description": "Wait for rate limit window to reset", "status": "pending"},
-        {"id": "T004", "description": "Verify requests succeed again after reset", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Send 100 requests in 10 seconds to /api/generate",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify rate limit response (429) after threshold",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Wait for rate limit window to reset",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify requests succeed again after reset",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -61,14 +115,38 @@
       "description": "User queries are sanitized before processing",
       "priority": 1,
       "dependencies": [],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Submit query with <script> tags", "status": "pending"},
-        {"id": "T002", "description": "Verify tags are escaped in response", "status": "pending"},
-        {"id": "T003", "description": "Submit query with SQL injection attempt", "status": "pending"},
-        {"id": "T004", "description": "Verify no SQL errors or unexpected behavior", "status": "pending"},
-        {"id": "T005", "description": "Submit query with path traversal (../)", "status": "pending"},
-        {"id": "T006", "description": "Verify path traversal is neutralized", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Submit query with <script> tags",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify tags are escaped in response",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Submit query with SQL injection attempt",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify no SQL errors or unexpected behavior",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Submit query with path traversal (../)",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify path traversal is neutralized",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -78,12 +156,26 @@
       "name": "CORS configuration",
       "description": "Backend only accepts requests from allowed origins",
       "priority": 1,
-      "dependencies": ["F010"],
-      "status": "pending",
+      "dependencies": [
+        "F010"
+      ],
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Send request from allowed origin - succeeds", "status": "pending"},
-        {"id": "T002", "description": "Send request from unknown origin - blocked", "status": "pending"},
-        {"id": "T003", "description": "Verify CORS headers in response", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Send request from allowed origin - succeeds",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Send request from unknown origin - blocked",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify CORS headers in response",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -93,12 +185,26 @@
       "name": "Content Security Policy headers",
       "description": "Appropriate CSP headers prevent XSS attacks",
       "priority": 2,
-      "dependencies": ["F010"],
-      "status": "pending",
+      "dependencies": [
+        "F010"
+      ],
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Check response headers for Content-Security-Policy", "status": "pending"},
-        {"id": "T002", "description": "Verify inline scripts blocked unless nonced", "status": "pending"},
-        {"id": "T003", "description": "Verify external scripts from unknown origins blocked", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Check response headers for Content-Security-Policy",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify inline scripts blocked unless nonced",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify external scripts from unknown origins blocked",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -108,13 +214,31 @@
       "name": "WebSocket connection validation",
       "description": "WebSocket connections are validated before accepting",
       "priority": 2,
-      "dependencies": ["F015"],
-      "status": "pending",
+      "dependencies": [
+        "F015"
+      ],
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Connect to /ws/generation from allowed origin", "status": "pending"},
-        {"id": "T002", "description": "Verify connection accepted", "status": "pending"},
-        {"id": "T003", "description": "Attempt connection from blocked origin", "status": "pending"},
-        {"id": "T004", "description": "Verify connection rejected", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Connect to /ws/generation from allowed origin",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify connection accepted",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Attempt connection from blocked origin",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify connection rejected",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -125,11 +249,23 @@
       "description": "API keys and sensitive data not passed via query params",
       "priority": 1,
       "dependencies": [],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Monitor all HTTP requests during app usage", "status": "pending"},
-        {"id": "T002", "description": "Verify no sensitive data in URL query strings", "status": "pending"},
-        {"id": "T003", "description": "Verify POST body used for sensitive data", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Monitor all HTTP requests during app usage",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify no sensitive data in URL query strings",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify POST body used for sensitive data",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -142,11 +278,31 @@
       "dependencies": [],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Open browser DevTools console", "status": "pending"},
-        {"id": "T002", "description": "Navigate to app URL (localhost:5173)", "status": "pending"},
-        {"id": "T003", "description": "Wait for app to fully load", "status": "pending"},
-        {"id": "T004", "description": "Verify no red errors in console", "status": "pending"},
-        {"id": "T005", "description": "Verify main UI elements visible", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Open browser DevTools console",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Navigate to app URL (localhost:5173)",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Wait for app to fully load",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify no red errors in console",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify main UI elements visible",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -159,10 +315,26 @@
       "dependencies": [],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Run npm run dev in backend directory", "status": "pending"},
-        {"id": "T002", "description": "Wait for 'Server listening' message", "status": "pending"},
-        {"id": "T003", "description": "Send GET request to health endpoint", "status": "pending"},
-        {"id": "T004", "description": "Verify 200 response", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Run npm run dev in backend directory",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Wait for 'Server listening' message",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Send GET request to health endpoint",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify 200 response",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -172,14 +344,37 @@
       "name": "Frontend connects to backend",
       "description": "Frontend successfully communicates with backend API",
       "priority": 1,
-      "dependencies": ["F009", "F010"],
+      "dependencies": [
+        "F009",
+        "F010"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Start both frontend and backend servers", "status": "pending"},
-        {"id": "T002", "description": "Open frontend in browser", "status": "pending"},
-        {"id": "T003", "description": "Trigger an API call (e.g., generation)", "status": "pending"},
-        {"id": "T004", "description": "Verify request reaches backend (server logs)", "status": "pending"},
-        {"id": "T005", "description": "Verify response received by frontend", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Start both frontend and backend servers",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Open frontend in browser",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Trigger an API call (e.g., generation)",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify request reaches backend (server logs)",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify response received by frontend",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -189,14 +384,36 @@
       "name": "Generate endpoint accepts query",
       "description": "POST /api/generate accepts text query and returns slides",
       "priority": 1,
-      "dependencies": ["F010"],
+      "dependencies": [
+        "F010"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Send POST to /api/generate with valid query", "status": "pending"},
-        {"id": "T002", "description": "Verify 200 response status", "status": "pending"},
-        {"id": "T003", "description": "Verify response contains slides array", "status": "pending"},
-        {"id": "T004", "description": "Verify each slide has id, imageUrl, audioUrl, subtitle", "status": "pending"},
-        {"id": "T005", "description": "Verify topic object returned with id, name", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Send POST to /api/generate with valid query",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify 200 response status",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify response contains slides array",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify each slide has id, imageUrl, audioUrl, subtitle",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify topic object returned with id, name",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -206,14 +423,36 @@
       "name": "Classify endpoint categorizes queries",
       "description": "POST /api/classify determines if query is follow_up or new_topic",
       "priority": 1,
-      "dependencies": ["F010"],
+      "dependencies": [
+        "F010"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Send query related to active topic", "status": "pending"},
-        {"id": "T002", "description": "Verify classification is 'follow_up'", "status": "pending"},
-        {"id": "T003", "description": "Send query unrelated to active topic", "status": "pending"},
-        {"id": "T004", "description": "Verify classification is 'new_topic'", "status": "pending"},
-        {"id": "T005", "description": "Verify reasoning field is populated", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Send query related to active topic",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify classification is 'follow_up'",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Send query unrelated to active topic",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify classification is 'new_topic'",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify reasoning field is populated",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -223,14 +462,36 @@
       "name": "Engagement endpoint returns fun fact",
       "description": "POST /api/generate/engagement returns fun fact and suggestions",
       "priority": 1,
-      "dependencies": ["F010"],
+      "dependencies": [
+        "F010"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Send POST with query about hearts", "status": "pending"},
-        {"id": "T002", "description": "Verify response contains funFact object", "status": "pending"},
-        {"id": "T003", "description": "Verify funFact has emoji and text", "status": "pending"},
-        {"id": "T004", "description": "Verify suggestedQuestions array has 3 items", "status": "pending"},
-        {"id": "T005", "description": "Verify response time < 3 seconds", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Send POST with query about hearts",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify response contains funFact object",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify funFact has emoji and text",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify suggestedQuestions array has 3 items",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify response time < 3 seconds",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -240,14 +501,36 @@
       "name": "WebSocket connection established",
       "description": "Client can connect to /ws/generation for progress updates",
       "priority": 1,
-      "dependencies": ["F010"],
+      "dependencies": [
+        "F010"
+      ],
       "status": "pending",
       "test_cases": [
-        {"id": "T001", "description": "Create WebSocket connection to /ws/generation", "status": "pending"},
-        {"id": "T002", "description": "Verify connection opens successfully", "status": "pending"},
-        {"id": "T003", "description": "Start a generation request", "status": "pending"},
-        {"id": "T004", "description": "Verify progress messages received via WebSocket", "status": "pending"},
-        {"id": "T005", "description": "Verify connection closes cleanly", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Create WebSocket connection to /ws/generation",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify connection opens successfully",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Start a generation request",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify progress messages received via WebSocket",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify connection closes cleanly",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -257,14 +540,36 @@
       "name": "Generated slides contain real images",
       "description": "Slides contain actual generated images, not placeholders",
       "priority": 1,
-      "dependencies": ["F012"],
+      "dependencies": [
+        "F012"
+      ],
       "status": "pending",
       "test_cases": [
-        {"id": "T001", "description": "Generate slides for 'How does photosynthesis work?'", "status": "pending"},
-        {"id": "T002", "description": "Verify imageUrl is valid base64 or URL", "status": "pending"},
-        {"id": "T003", "description": "Decode and display image - verify it's a real diagram", "status": "pending"},
-        {"id": "T004", "description": "Verify image content relates to photosynthesis", "status": "pending"},
-        {"id": "T005", "description": "Generate for different query - verify different image", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Generate slides for 'How does photosynthesis work?'",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify imageUrl is valid base64 or URL",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Decode and display image - verify it's a real diagram",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify image content relates to photosynthesis",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Generate for different query - verify different image",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -274,14 +579,36 @@
       "name": "Generated audio is real TTS",
       "description": "Audio URLs contain actual speech, not silence or placeholder",
       "priority": 1,
-      "dependencies": ["F012"],
+      "dependencies": [
+        "F012"
+      ],
       "status": "pending",
       "test_cases": [
-        {"id": "T001", "description": "Generate slides for a topic", "status": "pending"},
-        {"id": "T002", "description": "Extract audioUrl from first slide", "status": "pending"},
-        {"id": "T003", "description": "Decode and play audio", "status": "pending"},
-        {"id": "T004", "description": "Verify audio is spoken narration (not silence)", "status": "pending"},
-        {"id": "T005", "description": "Verify audio content matches subtitle text", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Generate slides for a topic",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Extract audioUrl from first slide",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Decode and play audio",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify audio is spoken narration (not silence)",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify audio content matches subtitle text",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -291,13 +618,31 @@
       "name": "Subtitles match narration content",
       "description": "Subtitle text accurately represents what is spoken in audio",
       "priority": 1,
-      "dependencies": ["F017"],
+      "dependencies": [
+        "F017"
+      ],
       "status": "pending",
       "test_cases": [
-        {"id": "T001", "description": "Generate slides and extract subtitle and audio", "status": "pending"},
-        {"id": "T002", "description": "Play audio while reading subtitle", "status": "pending"},
-        {"id": "T003", "description": "Verify spoken words match subtitle text", "status": "pending"},
-        {"id": "T004", "description": "Check all slides for subtitle-audio consistency", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Generate slides and extract subtitle and audio",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Play audio while reading subtitle",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify spoken words match subtitle text",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Check all slides for subtitle-audio consistency",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -307,13 +652,31 @@
       "name": "Slide duration reflects actual audio length",
       "description": "Duration field matches actual audio playback time",
       "priority": 1,
-      "dependencies": ["F017"],
+      "dependencies": [
+        "F017"
+      ],
       "status": "pending",
       "test_cases": [
-        {"id": "T001", "description": "Generate slides and get duration field", "status": "pending"},
-        {"id": "T002", "description": "Play audio and measure actual duration", "status": "pending"},
-        {"id": "T003", "description": "Verify duration matches within 0.5 seconds", "status": "pending"},
-        {"id": "T004", "description": "Check multiple slides for duration accuracy", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Generate slides and get duration field",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Play audio and measure actual duration",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify duration matches within 0.5 seconds",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Check multiple slides for duration accuracy",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -323,15 +686,41 @@
       "name": "Cold start shows example questions",
       "description": "First app load displays three clickable example questions",
       "priority": 1,
-      "dependencies": ["F009"],
+      "dependencies": [
+        "F009"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Open app in fresh browser/incognito", "status": "pending"},
-        {"id": "T002", "description": "Verify three example question cards visible", "status": "pending"},
-        {"id": "T003", "description": "Verify 'How do black holes work?' is shown", "status": "pending"},
-        {"id": "T004", "description": "Verify 'Why do we dream?' is shown", "status": "pending"},
-        {"id": "T005", "description": "Verify 'How does WiFi work?' is shown", "status": "pending"},
-        {"id": "T006", "description": "Verify each card is clickable (cursor pointer)", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Open app in fresh browser/incognito",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify three example question cards visible",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify 'How do black holes work?' is shown",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify 'Why do we dream?' is shown",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify 'How does WiFi work?' is shown",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify each card is clickable (cursor pointer)",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -341,15 +730,42 @@
       "name": "Clicking example triggers generation",
       "description": "Clicking an example question starts slideshow generation",
       "priority": 1,
-      "dependencies": ["F020", "F012"],
+      "dependencies": [
+        "F020",
+        "F012"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Open app showing example questions", "status": "pending"},
-        {"id": "T002", "description": "Click 'How do black holes work?'", "status": "pending"},
-        {"id": "T003", "description": "Verify UI transitions to generating state", "status": "pending"},
-        {"id": "T004", "description": "Verify generation request sent to backend", "status": "pending"},
-        {"id": "T005", "description": "Wait for generation to complete", "status": "pending"},
-        {"id": "T006", "description": "Verify slideshow displays", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Open app showing example questions",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Click 'How do black holes work?'",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify UI transitions to generating state",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify generation request sent to backend",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Wait for generation to complete",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify slideshow displays",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -359,14 +775,36 @@
       "name": "Example questions disappear after first query",
       "description": "Example questions hidden after any question is asked",
       "priority": 1,
-      "dependencies": ["F021"],
+      "dependencies": [
+        "F021"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Open app showing example questions", "status": "pending"},
-        {"id": "T002", "description": "Ask a question (text or voice)", "status": "pending"},
-        {"id": "T003", "description": "Wait for generation to complete", "status": "pending"},
-        {"id": "T004", "description": "Return to listening state", "status": "pending"},
-        {"id": "T005", "description": "Verify example questions no longer visible", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Open app showing example questions",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Ask a question (text or voice)",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Wait for generation to complete",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Return to listening state",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify example questions no longer visible",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -376,14 +814,36 @@
       "name": "Text input fallback available",
       "description": "Text input field visible for typing questions when mic fails",
       "priority": 1,
-      "dependencies": ["F009"],
+      "dependencies": [
+        "F009"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Open app in listening state", "status": "pending"},
-        {"id": "T002", "description": "Locate text input field below waveform", "status": "pending"},
-        {"id": "T003", "description": "Verify placeholder text 'Or type your question...'", "status": "pending"},
-        {"id": "T004", "description": "Click to focus the input field", "status": "pending"},
-        {"id": "T005", "description": "Verify cursor appears and can type", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Open app in listening state",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Locate text input field below waveform",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify placeholder text 'Or type your question...'",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Click to focus the input field",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify cursor appears and can type",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -393,15 +853,42 @@
       "name": "Text input submits on Enter",
       "description": "Pressing Enter in text input triggers generation",
       "priority": 1,
-      "dependencies": ["F023", "F012"],
+      "dependencies": [
+        "F023",
+        "F012"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Focus text input field", "status": "pending"},
-        {"id": "T002", "description": "Type 'How does gravity work?'", "status": "pending"},
-        {"id": "T003", "description": "Press Enter key", "status": "pending"},
-        {"id": "T004", "description": "Verify generation starts", "status": "pending"},
-        {"id": "T005", "description": "Verify text input clears", "status": "pending"},
-        {"id": "T006", "description": "Wait for slideshow to appear", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Focus text input field",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Type 'How does gravity work?'",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Press Enter key",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify generation starts",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify text input clears",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Wait for slideshow to appear",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -411,14 +898,36 @@
       "name": "Empty text input blocked",
       "description": "Cannot submit empty or whitespace-only query",
       "priority": 1,
-      "dependencies": ["F023"],
+      "dependencies": [
+        "F023"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Focus text input, leave empty", "status": "pending"},
-        {"id": "T002", "description": "Press Enter - nothing happens", "status": "pending"},
-        {"id": "T003", "description": "Type only spaces", "status": "pending"},
-        {"id": "T004", "description": "Press Enter - nothing happens", "status": "pending"},
-        {"id": "T005", "description": "Verify no API request sent", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Focus text input, leave empty",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Press Enter - nothing happens",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Type only spaces",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Press Enter - nothing happens",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify no API request sent",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -428,14 +937,36 @@
       "name": "Microphone permission requested",
       "description": "App requests microphone permission on first use",
       "priority": 1,
-      "dependencies": ["F009"],
+      "dependencies": [
+        "F009"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Open app in fresh browser", "status": "pending"},
-        {"id": "T002", "description": "Click mic button", "status": "pending"},
-        {"id": "T003", "description": "Verify browser permission prompt appears", "status": "pending"},
-        {"id": "T004", "description": "Grant permission", "status": "pending"},
-        {"id": "T005", "description": "Verify mic activates after permission granted", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Open app in fresh browser",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Click mic button",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify browser permission prompt appears",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Grant permission",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify mic activates after permission granted",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -445,13 +976,31 @@
       "name": "Voice input captures speech",
       "description": "Microphone captures user speech and sends to STT",
       "priority": 1,
-      "dependencies": ["F026"],
+      "dependencies": [
+        "F026"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Enable microphone", "status": "pending"},
-        {"id": "T002", "description": "Speak a question clearly", "status": "pending"},
-        {"id": "T003", "description": "Verify audio data is captured", "status": "pending"},
-        {"id": "T004", "description": "Verify STT API receives audio", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Enable microphone",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Speak a question clearly",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify audio data is captured",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify STT API receives audio",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -461,13 +1010,31 @@
       "name": "Live transcription displays",
       "description": "Real-time transcription shows while user speaks",
       "priority": 1,
-      "dependencies": ["F027"],
+      "dependencies": [
+        "F027"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Start speaking into microphone", "status": "pending"},
-        {"id": "T002", "description": "Verify transcription text appears below waveform", "status": "pending"},
-        {"id": "T003", "description": "Verify text updates as more words spoken", "status": "pending"},
-        {"id": "T004", "description": "Verify transcription matches spoken words", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Start speaking into microphone",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify transcription text appears below waveform",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify text updates as more words spoken",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify transcription matches spoken words",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -477,14 +1044,36 @@
       "name": "Waveform animates during listening",
       "description": "Visual waveform responds to audio input amplitude",
       "priority": 2,
-      "dependencies": ["F027"],
+      "dependencies": [
+        "F027"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Activate microphone", "status": "pending"},
-        {"id": "T002", "description": "Speak loudly", "status": "pending"},
-        {"id": "T003", "description": "Verify waveform bars increase in height", "status": "pending"},
-        {"id": "T004", "description": "Stay silent", "status": "pending"},
-        {"id": "T005", "description": "Verify waveform bars decrease/stabilize", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Activate microphone",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Speak loudly",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify waveform bars increase in height",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Stay silent",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify waveform bars decrease/stabilize",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -494,13 +1083,31 @@
       "name": "Voice triggers generation on silence",
       "description": "Generation starts automatically after user stops speaking",
       "priority": 1,
-      "dependencies": ["F028"],
+      "dependencies": [
+        "F028"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Speak a complete question", "status": "pending"},
-        {"id": "T002", "description": "Stop speaking and wait 1-2 seconds", "status": "pending"},
-        {"id": "T003", "description": "Verify UI transitions to generating state", "status": "pending"},
-        {"id": "T004", "description": "Verify transcribed text used as query", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Speak a complete question",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Stop speaking and wait 1-2 seconds",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify UI transitions to generating state",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify transcribed text used as query",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -510,14 +1117,37 @@
       "name": "Slideshow auto-plays on completion",
       "description": "Slides automatically play after generation finishes",
       "priority": 1,
-      "dependencies": ["F011", "F012"],
+      "dependencies": [
+        "F011",
+        "F012"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Trigger a generation request", "status": "pending"},
-        {"id": "T002", "description": "Wait for generation to complete", "status": "pending"},
-        {"id": "T003", "description": "Verify first slide displays automatically", "status": "pending"},
-        {"id": "T004", "description": "Verify audio starts playing", "status": "pending"},
-        {"id": "T005", "description": "Verify slide advances after audio completes", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Trigger a generation request",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Wait for generation to complete",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify first slide displays automatically",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify audio starts playing",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify slide advances after audio completes",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -527,14 +1157,37 @@
       "name": "Audio plays with each slide",
       "description": "TTS audio plays synchronized with slide display",
       "priority": 1,
-      "dependencies": ["F017", "F031"],
+      "dependencies": [
+        "F017",
+        "F031"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "View slideshow with audio", "status": "pending"},
-        {"id": "T002", "description": "Verify audio plays for current slide", "status": "pending"},
-        {"id": "T003", "description": "Navigate to next slide", "status": "pending"},
-        {"id": "T004", "description": "Verify new slide's audio starts", "status": "pending"},
-        {"id": "T005", "description": "Verify previous audio stops", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "View slideshow with audio",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify audio plays for current slide",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Navigate to next slide",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify new slide's audio starts",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify previous audio stops",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -544,15 +1197,41 @@
       "name": "Play/pause button toggles playback",
       "description": "Central play/pause button controls auto-advance",
       "priority": 1,
-      "dependencies": ["F031"],
+      "dependencies": [
+        "F031"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Start slideshow in auto-play mode", "status": "pending"},
-        {"id": "T002", "description": "Click pause button", "status": "pending"},
-        {"id": "T003", "description": "Verify audio pauses", "status": "pending"},
-        {"id": "T004", "description": "Verify slide does not advance", "status": "pending"},
-        {"id": "T005", "description": "Click play button", "status": "pending"},
-        {"id": "T006", "description": "Verify audio resumes and slides advance", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Start slideshow in auto-play mode",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Click pause button",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify audio pauses",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify slide does not advance",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Click play button",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify audio resumes and slides advance",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -562,14 +1241,36 @@
       "name": "Arrow buttons navigate slides",
       "description": "Left/right arrows move between slides",
       "priority": 1,
-      "dependencies": ["F031"],
+      "dependencies": [
+        "F031"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "View slideshow on slide 2", "status": "pending"},
-        {"id": "T002", "description": "Click left arrow", "status": "pending"},
-        {"id": "T003", "description": "Verify slide 1 displays", "status": "pending"},
-        {"id": "T004", "description": "Click right arrow", "status": "pending"},
-        {"id": "T005", "description": "Verify slide 2 displays again", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "View slideshow on slide 2",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Click left arrow",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify slide 1 displays",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Click right arrow",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify slide 2 displays again",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -579,13 +1280,31 @@
       "name": "Progress dots are clickable",
       "description": "Clicking a dot navigates to that slide",
       "priority": 1,
-      "dependencies": ["F031"],
+      "dependencies": [
+        "F031"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "View slideshow with 4 slides on slide 1", "status": "pending"},
-        {"id": "T002", "description": "Click the 3rd progress dot", "status": "pending"},
-        {"id": "T003", "description": "Verify slide 3 displays", "status": "pending"},
-        {"id": "T004", "description": "Verify dot 3 is highlighted/active", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "View slideshow with 4 slides on slide 1",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Click the 3rd progress dot",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify slide 3 displays",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify dot 3 is highlighted/active",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -595,16 +1314,46 @@
       "name": "Keyboard navigation works",
       "description": "Arrow keys and space bar control slideshow",
       "priority": 2,
-      "dependencies": ["F031"],
+      "dependencies": [
+        "F031"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "View slideshow on slide 1", "status": "pending"},
-        {"id": "T002", "description": "Press Right arrow key", "status": "pending"},
-        {"id": "T003", "description": "Verify slide 2 displays", "status": "pending"},
-        {"id": "T004", "description": "Press Left arrow key", "status": "pending"},
-        {"id": "T005", "description": "Verify slide 1 displays", "status": "pending"},
-        {"id": "T006", "description": "Press Space bar", "status": "pending"},
-        {"id": "T007", "description": "Verify play/pause toggles", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "View slideshow on slide 1",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Press Right arrow key",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify slide 2 displays",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Press Left arrow key",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify slide 1 displays",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Press Space bar",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify play/pause toggles",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -614,13 +1363,32 @@
       "name": "Audio restarts on slide navigation",
       "description": "Navigating to a slide restarts its audio from beginning",
       "priority": 1,
-      "dependencies": ["F032", "F034"],
-      "status": "pending",
+      "dependencies": [
+        "F032",
+        "F034"
+      ],
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Start playing slide with audio", "status": "pending"},
-        {"id": "T002", "description": "Wait for audio to play halfway", "status": "pending"},
-        {"id": "T003", "description": "Navigate away and back to same slide", "status": "pending"},
-        {"id": "T004", "description": "Verify audio restarts from beginning", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Start playing slide with audio",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Wait for audio to play halfway",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Navigate away and back to same slide",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify audio restarts from beginning",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -630,14 +1398,36 @@
       "name": "Mic button visible during slideshow",
       "description": "Microphone button remains accessible during playback",
       "priority": 1,
-      "dependencies": ["F031"],
-      "status": "pending",
+      "dependencies": [
+        "F031"
+      ],
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "View slideshow", "status": "pending"},
-        {"id": "T002", "description": "Verify mic button visible at bottom", "status": "pending"},
-        {"id": "T003", "description": "Verify mic button is clickable", "status": "pending"},
-        {"id": "T004", "description": "Click mic button", "status": "pending"},
-        {"id": "T005", "description": "Verify can start voice input", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "View slideshow",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify mic button visible at bottom",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify mic button is clickable",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Click mic button",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify can start voice input",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -647,14 +1437,37 @@
       "name": "Follow-up query appends slides",
       "description": "Related question adds slides to current topic",
       "priority": 1,
-      "dependencies": ["F013", "F031"],
+      "dependencies": [
+        "F013",
+        "F031"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Generate slides for 'How does the heart work?'", "status": "pending"},
-        {"id": "T002", "description": "Ask follow-up 'What about the valves?'", "status": "pending"},
-        {"id": "T003", "description": "Verify classify returns 'follow_up'", "status": "pending"},
-        {"id": "T004", "description": "Verify new slides appended (not replaced)", "status": "pending"},
-        {"id": "T005", "description": "Verify can navigate back to original slides", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Generate slides for 'How does the heart work?'",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Ask follow-up 'What about the valves?'",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify classify returns 'follow_up'",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify new slides appended (not replaced)",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify can navigate back to original slides",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -664,14 +1477,37 @@
       "name": "New topic creates header card",
       "description": "Unrelated question creates topic divider slide",
       "priority": 1,
-      "dependencies": ["F013", "F031"],
+      "dependencies": [
+        "F013",
+        "F031"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Generate slides for 'How does photosynthesis work?'", "status": "pending"},
-        {"id": "T002", "description": "Ask unrelated 'How do airplanes fly?'", "status": "pending"},
-        {"id": "T003", "description": "Verify classify returns 'new_topic'", "status": "pending"},
-        {"id": "T004", "description": "Verify topic header card inserted", "status": "pending"},
-        {"id": "T005", "description": "Verify header shows topic name and icon", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Generate slides for 'How does photosynthesis work?'",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Ask unrelated 'How do airplanes fly?'",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify classify returns 'new_topic'",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify topic header card inserted",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify header shows topic name and icon",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -681,14 +1517,36 @@
       "name": "Max 3 topics retained",
       "description": "Only 3 topics kept in session at once",
       "priority": 1,
-      "dependencies": ["F040"],
+      "dependencies": [
+        "F040"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Create topic 1 (e.g., hearts)", "status": "pending"},
-        {"id": "T002", "description": "Create topic 2 (e.g., airplanes)", "status": "pending"},
-        {"id": "T003", "description": "Create topic 3 (e.g., weather)", "status": "pending"},
-        {"id": "T004", "description": "Verify all 3 topics navigable", "status": "pending"},
-        {"id": "T005", "description": "Verify topics array has length 3", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Create topic 1 (e.g., hearts)",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Create topic 2 (e.g., airplanes)",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Create topic 3 (e.g., weather)",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify all 3 topics navigable",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify topics array has length 3",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -698,14 +1556,36 @@
       "name": "4th topic evicts oldest",
       "description": "Adding 4th topic removes first topic (LRU)",
       "priority": 1,
-      "dependencies": ["F041"],
+      "dependencies": [
+        "F041"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Have 3 topics (hearts, airplanes, weather)", "status": "pending"},
-        {"id": "T002", "description": "Ask new topic 'How do computers work?'", "status": "pending"},
-        {"id": "T003", "description": "Verify hearts topic slides removed", "status": "pending"},
-        {"id": "T004", "description": "Verify airplanes, weather, computers remain", "status": "pending"},
-        {"id": "T005", "description": "Verify only 3 topics in state", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Have 3 topics (hearts, airplanes, weather)",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Ask new topic 'How do computers work?'",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify hearts topic slides removed",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify airplanes, weather, computers remain",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify only 3 topics in state",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -715,14 +1595,36 @@
       "name": "Topic header card displays correctly",
       "description": "Header shows emoji icon, topic name, and divider",
       "priority": 1,
-      "dependencies": ["F040"],
+      "dependencies": [
+        "F040"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Navigate to a topic header card", "status": "pending"},
-        {"id": "T002", "description": "Verify emoji/icon displays large and centered", "status": "pending"},
-        {"id": "T003", "description": "Verify topic name displays below icon", "status": "pending"},
-        {"id": "T004", "description": "Verify horizontal divider present", "status": "pending"},
-        {"id": "T005", "description": "Verify 'Swipe to continue' hint shows", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Navigate to a topic header card",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify emoji/icon displays large and centered",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify topic name displays below icon",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify horizontal divider present",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify 'Swipe to continue' hint shows",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -732,15 +1634,42 @@
       "name": "Navigation works across topics",
       "description": "Can swipe through all slides from all topics",
       "priority": 1,
-      "dependencies": ["F041", "F034"],
+      "dependencies": [
+        "F041",
+        "F034"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Have 2 topics with slides", "status": "pending"},
-        {"id": "T002", "description": "Navigate to last slide of topic 1", "status": "pending"},
-        {"id": "T003", "description": "Click right arrow", "status": "pending"},
-        {"id": "T004", "description": "Verify topic 2 header or first slide shows", "status": "pending"},
-        {"id": "T005", "description": "Navigate backwards", "status": "pending"},
-        {"id": "T006", "description": "Verify can return to topic 1", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Have 2 topics with slides",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Navigate to last slide of topic 1",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Click right arrow",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify topic 2 header or first slide shows",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Navigate backwards",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify can return to topic 1",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -750,14 +1679,37 @@
       "name": "Fun fact displays during generation",
       "description": "Fun fact card appears while slides are generating",
       "priority": 1,
-      "dependencies": ["F014", "F011"],
+      "dependencies": [
+        "F014",
+        "F011"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Ask a question to trigger generation", "status": "pending"},
-        {"id": "T002", "description": "Verify generating state shows", "status": "pending"},
-        {"id": "T003", "description": "Verify fun fact card appears within 2 seconds", "status": "pending"},
-        {"id": "T004", "description": "Verify fun fact has emoji and text", "status": "pending"},
-        {"id": "T005", "description": "Verify fun fact relates to the question", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Ask a question to trigger generation",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify generating state shows",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify fun fact card appears within 2 seconds",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify fun fact has emoji and text",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify fun fact relates to the question",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -767,14 +1719,37 @@
       "name": "Suggestion cards display during generation",
       "description": "Three follow-up suggestions shown while generating",
       "priority": 1,
-      "dependencies": ["F014", "F011"],
+      "dependencies": [
+        "F014",
+        "F011"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Ask a question to trigger generation", "status": "pending"},
-        {"id": "T002", "description": "Verify 3 suggestion cards appear", "status": "pending"},
-        {"id": "T003", "description": "Verify each card has question text", "status": "pending"},
-        {"id": "T004", "description": "Verify cards have [+] icon", "status": "pending"},
-        {"id": "T005", "description": "Verify suggestions relate to original question", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Ask a question to trigger generation",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify 3 suggestion cards appear",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify each card has question text",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify cards have [+] icon",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify suggestions relate to original question",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -784,14 +1759,36 @@
       "name": "Clicking suggestion queues question",
       "description": "Tapping suggestion adds it to question queue",
       "priority": 1,
-      "dependencies": ["F046"],
+      "dependencies": [
+        "F046"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "View suggestions during generation", "status": "pending"},
-        {"id": "T002", "description": "Click first suggestion card", "status": "pending"},
-        {"id": "T003", "description": "Verify [+] icon changes to [✓]", "status": "pending"},
-        {"id": "T004", "description": "Verify question added to queue state", "status": "pending"},
-        {"id": "T005", "description": "Verify toast notification appears", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "View suggestions during generation",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Click first suggestion card",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify [+] icon changes to [✓]",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify question added to queue state",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify toast notification appears",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -801,13 +1798,32 @@
       "name": "Queued questions auto-trigger",
       "description": "Queued questions play automatically after slideshow",
       "priority": 1,
-      "dependencies": ["F047", "F031"],
+      "dependencies": [
+        "F047",
+        "F031"
+      ],
       "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Queue a suggestion during generation", "status": "pending"},
-        {"id": "T002", "description": "Wait for slideshow to complete all slides", "status": "pending"},
-        {"id": "T003", "description": "Verify queued question auto-triggers generation", "status": "pending"},
-        {"id": "T004", "description": "Verify new slides append as follow-up", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Queue a suggestion during generation",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Wait for slideshow to complete all slides",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify queued question auto-triggers generation",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify new slides append as follow-up",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -817,13 +1833,31 @@
       "name": "Loading spinner displays correctly",
       "description": "Animated spinner shows during generation",
       "priority": 2,
-      "dependencies": ["F011"],
-      "status": "pending",
+      "dependencies": [
+        "F011"
+      ],
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Trigger a generation request", "status": "pending"},
-        {"id": "T002", "description": "Verify spinner is visible", "status": "pending"},
-        {"id": "T003", "description": "Verify spinner animates (rotates)", "status": "pending"},
-        {"id": "T004", "description": "Verify spinner disappears when complete", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Trigger a generation request",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify spinner is visible",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify spinner animates (rotates)",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify spinner disappears when complete",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -833,13 +1867,31 @@
       "name": "Slide transitions are smooth",
       "description": "Slides transition with fade/slide animation",
       "priority": 2,
-      "dependencies": ["F034"],
-      "status": "pending",
+      "dependencies": [
+        "F034"
+      ],
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Navigate between slides", "status": "pending"},
-        {"id": "T002", "description": "Verify transition animation occurs", "status": "pending"},
-        {"id": "T003", "description": "Verify no jarring instant switch", "status": "pending"},
-        {"id": "T004", "description": "Verify animation duration ~300ms", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Navigate between slides",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify transition animation occurs",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify no jarring instant switch",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify animation duration ~300ms",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -849,14 +1901,36 @@
       "name": "Mic button pulses when listening",
       "description": "Microphone button has pulse animation during voice capture",
       "priority": 2,
-      "dependencies": ["F027"],
-      "status": "pending",
+      "dependencies": [
+        "F027"
+      ],
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Activate microphone", "status": "pending"},
-        {"id": "T002", "description": "Verify mic button has pulse animation", "status": "pending"},
-        {"id": "T003", "description": "Verify pulse ring expands and fades", "status": "pending"},
-        {"id": "T004", "description": "Stop listening", "status": "pending"},
-        {"id": "T005", "description": "Verify pulse stops", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Activate microphone",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify mic button has pulse animation",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify pulse ring expands and fades",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Stop listening",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify pulse stops",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -866,15 +1940,41 @@
       "name": "Network error shows retry option",
       "description": "Failed API calls display error with retry button",
       "priority": 1,
-      "dependencies": ["F011"],
-      "status": "pending",
+      "dependencies": [
+        "F011"
+      ],
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Disable network/backend", "status": "pending"},
-        {"id": "T002", "description": "Trigger a generation request", "status": "pending"},
-        {"id": "T003", "description": "Verify error message displays", "status": "pending"},
-        {"id": "T004", "description": "Verify retry button is visible", "status": "pending"},
-        {"id": "T005", "description": "Re-enable network, click retry", "status": "pending"},
-        {"id": "T006", "description": "Verify request succeeds", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Disable network/backend",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Trigger a generation request",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify error message displays",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify retry button is visible",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Re-enable network, click retry",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify request succeeds",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -884,13 +1984,31 @@
       "name": "Generation timeout handled",
       "description": "Long generation shows timeout message after 45s",
       "priority": 2,
-      "dependencies": ["F011"],
-      "status": "pending",
+      "dependencies": [
+        "F011"
+      ],
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Trigger generation with very slow response", "status": "pending"},
-        {"id": "T002", "description": "Wait 45+ seconds", "status": "pending"},
-        {"id": "T003", "description": "Verify 'Still working...' message appears", "status": "pending"},
-        {"id": "T004", "description": "Verify user can cancel or continue waiting", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Trigger generation with very slow response",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Wait 45+ seconds",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify 'Still working...' message appears",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify user can cancel or continue waiting",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -900,14 +2018,36 @@
       "name": "Mic permission denied handled",
       "description": "Graceful fallback when microphone permission denied",
       "priority": 1,
-      "dependencies": ["F026"],
-      "status": "pending",
+      "dependencies": [
+        "F026"
+      ],
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Click mic button", "status": "pending"},
-        {"id": "T002", "description": "Deny microphone permission", "status": "pending"},
-        {"id": "T003", "description": "Verify error message displays", "status": "pending"},
-        {"id": "T004", "description": "Verify text input fallback is highlighted", "status": "pending"},
-        {"id": "T005", "description": "Verify app remains functional", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Click mic button",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Deny microphone permission",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify error message displays",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify text input fallback is highlighted",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify app remains functional",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -917,13 +2057,31 @@
       "name": "Desktop layout centered with max-width",
       "description": "Content centered with 800px max-width on desktop",
       "priority": 1,
-      "dependencies": ["F009"],
-      "status": "pending",
+      "dependencies": [
+        "F009"
+      ],
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "View app on 1920px wide screen", "status": "pending"},
-        {"id": "T002", "description": "Verify content is horizontally centered", "status": "pending"},
-        {"id": "T003", "description": "Verify content max-width is ~800px", "status": "pending"},
-        {"id": "T004", "description": "Verify side margins are equal", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "View app on 1920px wide screen",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify content is horizontally centered",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify content max-width is ~800px",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify side margins are equal",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -933,13 +2091,31 @@
       "name": "Mobile layout is full-width",
       "description": "Content uses full width on mobile screens",
       "priority": 2,
-      "dependencies": ["F009"],
-      "status": "pending",
+      "dependencies": [
+        "F009"
+      ],
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "View app on 375px wide screen", "status": "pending"},
-        {"id": "T002", "description": "Verify content spans full width", "status": "pending"},
-        {"id": "T003", "description": "Verify appropriate padding on sides", "status": "pending"},
-        {"id": "T004", "description": "Verify no horizontal scroll", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "View app on 375px wide screen",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify content spans full width",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify appropriate padding on sides",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify no horizontal scroll",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -949,14 +2125,36 @@
       "name": "Touch targets are 44px minimum",
       "description": "All interactive elements meet touch accessibility size",
       "priority": 1,
-      "dependencies": ["F009"],
-      "status": "pending",
+      "dependencies": [
+        "F009"
+      ],
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "Measure mic button size", "status": "pending"},
-        {"id": "T002", "description": "Verify mic button >= 44px", "status": "pending"},
-        {"id": "T003", "description": "Measure navigation arrows", "status": "pending"},
-        {"id": "T004", "description": "Verify arrows >= 44px tap area", "status": "pending"},
-        {"id": "T005", "description": "Measure progress dots tap area", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Measure mic button size",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify mic button >= 44px",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Measure navigation arrows",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify arrows >= 44px tap area",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Measure progress dots tap area",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -966,13 +2164,31 @@
       "name": "Mic button fixed on mobile",
       "description": "Microphone button stays fixed at bottom on mobile",
       "priority": 1,
-      "dependencies": ["F056"],
-      "status": "pending",
+      "dependencies": [
+        "F056"
+      ],
+      "status": "completed",
       "test_cases": [
-        {"id": "T001", "description": "View app on mobile", "status": "pending"},
-        {"id": "T002", "description": "Scroll content up and down", "status": "pending"},
-        {"id": "T003", "description": "Verify mic button stays fixed at bottom", "status": "pending"},
-        {"id": "T004", "description": "Verify button doesn't scroll with content", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "View app on mobile",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Scroll content up and down",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify mic button stays fixed at bottom",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify button doesn't scroll with content",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -982,14 +2198,38 @@
       "name": "Generation completes under 30 seconds",
       "description": "Full slide generation pipeline completes in target time",
       "priority": 1,
-      "dependencies": ["F012", "F016", "F017"],
+      "dependencies": [
+        "F012",
+        "F016",
+        "F017"
+      ],
       "status": "pending",
       "test_cases": [
-        {"id": "T001", "description": "Start timer", "status": "pending"},
-        {"id": "T002", "description": "Ask a question", "status": "pending"},
-        {"id": "T003", "description": "Wait for slides to display", "status": "pending"},
-        {"id": "T004", "description": "Stop timer", "status": "pending"},
-        {"id": "T005", "description": "Verify total time < 30 seconds", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Start timer",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Ask a question",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Wait for slides to display",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Stop timer",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify total time < 30 seconds",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     },
@@ -999,14 +2239,36 @@
       "name": "Engagement loads within 2 seconds",
       "description": "Fun fact and suggestions appear quickly",
       "priority": 1,
-      "dependencies": ["F014"],
+      "dependencies": [
+        "F014"
+      ],
       "status": "pending",
       "test_cases": [
-        {"id": "T001", "description": "Start timer", "status": "pending"},
-        {"id": "T002", "description": "Ask a question", "status": "pending"},
-        {"id": "T003", "description": "Wait for fun fact card to appear", "status": "pending"},
-        {"id": "T004", "description": "Stop timer", "status": "pending"},
-        {"id": "T005", "description": "Verify time < 2 seconds", "status": "pending"}
+        {
+          "id": "T001",
+          "description": "Start timer",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Ask a question",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Wait for fun fact card to appear",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Stop timer",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify time < 2 seconds",
+          "status": "pending"
+        }
       ],
       "files_modified": []
     }

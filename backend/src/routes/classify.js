@@ -1,4 +1,5 @@
 import express from 'express'
+import { sanitizeQuery } from '../utils/sanitize.js'
 // import { classifyQuery } from '../services/gemini.js'
 
 const router = express.Router()
@@ -155,25 +156,11 @@ router.post('/', async (req, res) => {
       oldestTopicId = null
     } = req.body
 
-    // Validate required fields
-    if (query === undefined || query === null) {
+    // F004: Sanitize and validate query input
+    const { sanitized: sanitizedQuery, error: queryError } = sanitizeQuery(query)
+    if (queryError) {
       return res.status(400).json({
-        error: 'Query is required',
-        field: 'query'
-      })
-    }
-
-    if (typeof query !== 'string') {
-      return res.status(400).json({
-        error: 'Query must be a string',
-        field: 'query'
-      })
-    }
-
-    const trimmedQuery = query.trim()
-    if (trimmedQuery.length === 0) {
-      return res.status(400).json({
-        error: 'Query cannot be empty',
+        error: queryError,
         field: 'query'
       })
     }
@@ -188,9 +175,9 @@ router.post('/', async (req, res) => {
       })
     }
 
-    // Classify the query against the active topic
+    // Classify the query against the active topic (using sanitized input)
     const { isFollowUp, reasoning } = classifyQueryRelation(
-      trimmedQuery,
+      sanitizedQuery,
       activeTopic,
       conversationHistory
     )
