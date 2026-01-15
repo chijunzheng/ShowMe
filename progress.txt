@@ -136,3 +136,70 @@ cd backend && npm install && npm run dev &
 - Frontend-backend integration working with placeholder data
 - Real AI integration (Gemini) not yet implemented
 - API stubs return hardcoded responses for testing
+
+---
+
+## Session 3: Core Features Implementation (2026-01-15)
+
+### Completed Features (15 new, 19 total)
+
+#### API Endpoints (F012-F014)
+- **F012: Generate endpoint accepts query** - IMPLEMENTED
+  - POST /api/generate returns slides with proper structure
+  - Topic-aware responses with id, name, slides array
+  - Placeholder images and audio URLs for testing
+
+- **F013: Classify endpoint categorizes queries** - IMPLEMENTED
+  - Keyword-based follow-up detection (what about, tell me more, etc.)
+  - Returns classification, confidence, reasoning
+  - shouldEvictOldest flag when topicCount >= 3
+
+- **F014: Engagement endpoint returns fun fact** - IMPLEMENTED
+  - Topic-relevant fun facts with emoji
+  - 3 suggested follow-up questions
+  - Fast response for parallel loading
+
+#### Workflow Features (F020-F025)
+- **F020: Cold start shows example questions** - VERIFIED
+- **F021: Clicking example triggers generation** - VERIFIED
+- **F022: Example questions disappear after first query** - VERIFIED
+- **F023: Text input fallback available** - VERIFIED
+- **F024: Text input submits on Enter** - VERIFIED
+- **F025: Empty text input blocked** - VERIFIED
+
+#### Playback Features (F031-F036)
+- **F031: Slideshow auto-plays on completion** - IMPLEMENTED
+  - Auto-advance with configurable interval
+  - Respects slide duration when available
+
+- **F032: Audio plays with each slide** - IMPLEMENTED
+  - Audio element with src from slide data
+  - Synchronized with slide transitions
+
+- **F033: Play/pause button toggles playback** - IMPLEMENTED
+  - Central control button with icon toggle
+
+- **F034: Arrow buttons navigate slides** - IMPLEMENTED
+  - Previous/next navigation with bounds checking
+
+- **F035: Progress dots are clickable** - IMPLEMENTED
+  - Direct navigation to any slide
+  - Active dot highlighting
+
+- **F036: Keyboard navigation works** - IMPLEMENTED
+  - Arrow keys for navigation
+  - Space bar for play/pause toggle
+
+### Git Commits
+- 076aec1: feat: implement core features F012-F036
+
+### Features Status
+- Completed: 19/60 features
+- Next priority: F026-F030 (voice input), F037-F044 (playback + topics)
+
+### Context for Next Agent
+- Full slideshow playback working with mock data
+- Text input and example questions functional
+- Voice features (F026-F030) not yet implemented
+- Real Gemini AI integration pending
+- Topic eviction logic in classify.js ready for frontend integration
