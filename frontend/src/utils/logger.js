@@ -261,12 +261,71 @@ function setLogCategories(categories) {
   }
 }
 
+// Performance timing storage
+const timers = new Map()
+
+/**
+ * Start a performance timer for measuring operation duration (F067)
+ * @param {string} category - Log category (AUDIO, API, WS, etc.)
+ * @param {string} label - Unique label to identify the timing operation
+ */
+function time(category, label) {
+  const key = `${category}:${label}`
+  timers.set(key, {
+    start: performance.now(),
+    category,
+    label,
+  })
+}
+
+/**
+ * End a performance timer and log the duration (F067)
+ * @param {string} category - Log category (must match time() call)
+ * @param {string} label - Label used in time() call
+ */
+function timeEnd(category, label) {
+  const key = `${category}:${label}`
+  const timer = timers.get(key)
+
+  if (!timer) {
+    console.warn(`[Logger] Timer not found: ${key}`)
+    return
+  }
+
+  const duration = performance.now() - timer.start
+  timers.delete(key)
+
+  // Use the PERF category color for timing logs
+  const perfColor = CATEGORY_COLORS.PERF || '#059669'
+  const categoryColor = getCategoryColor(category)
+
+  // Only log if PERF category is allowed (or using the original category)
+  if (!shouldLog('info', category) && !shouldLog('info', 'PERF')) {
+    return
+  }
+
+  const timestamp = formatTimestamp()
+  const formattedDuration = duration < 1000
+    ? `${duration.toFixed(2)}ms`
+    : `${(duration / 1000).toFixed(2)}s`
+
+  console.info(
+    `%c[${timestamp}] ⏱️ PERF%c [${category}] ${label}: ${formattedDuration}`,
+    `color: ${perfColor}; font-weight: bold`,
+    `color: ${categoryColor}; font-weight: bold`
+  )
+}
+
 // Create the logger object with methods for each level
 const logger = {
   debug: createLogFunction('debug'),
   info: createLogFunction('info'),
   warn: createLogFunction('warn'),
   error: createLogFunction('error'),
+
+  // Performance timing methods (F067)
+  time,
+  timeEnd,
 
   // Utility methods for runtime configuration
   enable: enableLogging,

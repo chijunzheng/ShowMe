@@ -2548,35 +2548,37 @@
       "dependencies": [
         "F061"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Call logger.time('API', 'fetch-test')",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Wait 500ms",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Call logger.timeEnd('API', 'fetch-test')",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Verify duration ~500ms logged",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify timing label identifies the operation",
-          "status": "pending"
+          "status": "passed"
         }
       ],
-      "files_modified": []
+      "files_modified": [
+        "frontend/src/utils/logger.js"
+      ]
     },
     {
       "id": "F068",

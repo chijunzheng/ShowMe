@@ -344,3 +344,66 @@ cd backend && npm install && npm run dev &
 - TTS voice selection could be user-configurable
 - Image generation prompts could be further tuned for specific topics
 - Consider caching generated content for faster repeat queries
+
+---
+
+## Session 5: Debug Logging System Implementation (2026-01-15)
+
+### Completed Features (1 new)
+
+#### F061: Logger utility exists with log levels - IMPLEMENTED
+- Created `frontend/src/utils/logger.js` (~290 lines)
+- Four log levels: debug, info, warn, error
+- Category-based filtering: AUDIO, API, WS, STATE, GENERATION, UI, PERF
+- Styled Chrome console output with colors and icons
+- Runtime configuration via window.LOG_LEVEL and window.LOG_CATEGORIES
+- Environment variable support (VITE_LOG_LEVEL, VITE_LOG_CATEGORIES)
+- Production safety (disabled by default in production)
+- Helper functions: enableLogging(), disableLogging(), setLogLevel(), setLogCategories()
+
+### Sub-Agent Handoffs
+- **Coder Agent**: Implemented logger utility with all required features
+- **Code-Review Agent**: Approved with minor recommended improvements
+  - 0 Critical, 2 High (suggestions), 5 Medium, 5 Low issues found
+  - High items were enhancement suggestions (TypeScript declarations, config caching)
+
+### Files Created
+- frontend/src/utils/logger.js - Logger utility
+
+### Files Modified  
+- app_spec.md - Added Debug Logging System section
+- features.json - Added 26 logging features (F061-F086), marked F061 complete
+
+### Logger Usage Examples
+```javascript
+import logger from './utils/logger'
+
+// Basic usage
+logger.debug('AUDIO', 'Starting audio capture', { sampleRate: 44100 })
+logger.info('API', 'Request completed', { endpoint: '/api/generate' })
+logger.warn('WS', 'Connection unstable', { attempts: 3 })
+logger.error('STATE', 'Failed to update', { error: err })
+
+// Runtime configuration
+window.enableLogging()  // Enable debug level for all categories
+window.LOG_LEVEL = 'warn'  // Only warn and error
+window.LOG_CATEGORIES = ['API', 'WS']  // Only specific categories
+```
+
+### Features Status
+- **Total Features**: 86 (60 original + 26 logging)
+- **Completed**: 61/86 features (71%)
+- **Pending Logging Features**: 25 (F062-F086)
+
+### Context for Next Agent
+- F061 (core logger) is complete and working
+- Next priorities by dependency:
+  - F062: Logger supports category filtering (depends on F061) ✓
+  - F063: Logger supports level filtering (depends on F061) ✓
+  - F064: Logs have styled console output (depends on F061) ✓
+  - F065: Logs include timestamps (depends on F061) ✓
+  - F066: Logs support context data objects (depends on F061) ✓
+- Backend logger (F076) can be implemented in parallel
+
+### Git Commits
+- 858d854: feat(logging): implement F061 logger utility with log levels
