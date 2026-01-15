@@ -1,0 +1,426 @@
+{
+  "project_name": "ShowMe",
+  "created_at": "2026-01-14T00:00:00Z",
+  "description": "Voice-first educational app that transforms spoken questions into AI-generated visual slideshows",
+  "complexity_tier": "complex",
+  "target_feature_count": 400,
+  "features": [
+    {
+      "id": "F001",
+      "category": "A-security",
+      "name": "API key not exposed in frontend",
+      "description": "Verify GEMINI_API_KEY is only used server-side and never sent to browser",
+      "priority": 1,
+      "dependencies": [],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Load frontend application in browser", "status": "pending"},
+        {"id": "T002", "description": "Open browser DevTools Network tab", "status": "pending"},
+        {"id": "T003", "description": "Trigger a generation request", "status": "pending"},
+        {"id": "T004", "description": "Inspect all outgoing requests - no API key in headers or body", "status": "pending"},
+        {"id": "T005", "description": "Search page source for 'GEMINI' - no matches", "status": "pending"},
+        {"id": "T006", "description": "Check localStorage/sessionStorage - no API keys stored", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F002",
+      "category": "A-security",
+      "name": "Environment variables not in client bundle",
+      "description": "Verify sensitive env vars are not bundled into frontend JavaScript",
+      "priority": 1,
+      "dependencies": [],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Build frontend for production", "status": "pending"},
+        {"id": "T002", "description": "Search dist/*.js files for GEMINI_API_KEY - no matches", "status": "pending"},
+        {"id": "T003", "description": "Verify only VITE_* prefixed vars are accessible", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F003",
+      "category": "A-security",
+      "name": "API rate limiting",
+      "description": "Backend implements rate limiting to prevent abuse",
+      "priority": 2,
+      "dependencies": ["F010"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Send 100 requests in 10 seconds to /api/generate", "status": "pending"},
+        {"id": "T002", "description": "Verify rate limit response (429) after threshold", "status": "pending"},
+        {"id": "T003", "description": "Wait for rate limit window to reset", "status": "pending"},
+        {"id": "T004", "description": "Verify requests succeed again after reset", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F004",
+      "category": "A-security",
+      "name": "Input sanitization for query",
+      "description": "User queries are sanitized before processing",
+      "priority": 1,
+      "dependencies": [],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Submit query with <script> tags", "status": "pending"},
+        {"id": "T002", "description": "Verify tags are escaped in response", "status": "pending"},
+        {"id": "T003", "description": "Submit query with SQL injection attempt", "status": "pending"},
+        {"id": "T004", "description": "Verify no SQL errors or unexpected behavior", "status": "pending"},
+        {"id": "T005", "description": "Submit query with path traversal (../)", "status": "pending"},
+        {"id": "T006", "description": "Verify path traversal is neutralized", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F005",
+      "category": "A-security",
+      "name": "CORS configuration",
+      "description": "Backend only accepts requests from allowed origins",
+      "priority": 1,
+      "dependencies": ["F010"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Send request from allowed origin - succeeds", "status": "pending"},
+        {"id": "T002", "description": "Send request from unknown origin - blocked", "status": "pending"},
+        {"id": "T003", "description": "Verify CORS headers in response", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F006",
+      "category": "A-security",
+      "name": "Content Security Policy headers",
+      "description": "Appropriate CSP headers prevent XSS attacks",
+      "priority": 2,
+      "dependencies": ["F010"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Check response headers for Content-Security-Policy", "status": "pending"},
+        {"id": "T002", "description": "Verify inline scripts blocked unless nonced", "status": "pending"},
+        {"id": "T003", "description": "Verify external scripts from unknown origins blocked", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F007",
+      "category": "A-security",
+      "name": "WebSocket connection validation",
+      "description": "WebSocket connections are validated before accepting",
+      "priority": 2,
+      "dependencies": ["F015"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Connect to /ws/generation from allowed origin", "status": "pending"},
+        {"id": "T002", "description": "Verify connection accepted", "status": "pending"},
+        {"id": "T003", "description": "Attempt connection from blocked origin", "status": "pending"},
+        {"id": "T004", "description": "Verify connection rejected", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F008",
+      "category": "A-security",
+      "name": "No sensitive data in URLs",
+      "description": "API keys and sensitive data not passed via query params",
+      "priority": 1,
+      "dependencies": [],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Monitor all HTTP requests during app usage", "status": "pending"},
+        {"id": "T002", "description": "Verify no sensitive data in URL query strings", "status": "pending"},
+        {"id": "T003", "description": "Verify POST body used for sensitive data", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F009",
+      "category": "B-navigation",
+      "name": "App loads without errors",
+      "description": "Initial app load completes without JavaScript errors",
+      "priority": 1,
+      "dependencies": [],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Open browser DevTools console", "status": "pending"},
+        {"id": "T002", "description": "Navigate to app URL (localhost:5173)", "status": "pending"},
+        {"id": "T003", "description": "Wait for app to fully load", "status": "pending"},
+        {"id": "T004", "description": "Verify no red errors in console", "status": "pending"},
+        {"id": "T005", "description": "Verify main UI elements visible", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F010",
+      "category": "F-integration",
+      "name": "Backend server starts",
+      "description": "Express backend starts and responds to health check",
+      "priority": 1,
+      "dependencies": [],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Run npm run dev in backend directory", "status": "pending"},
+        {"id": "T002", "description": "Wait for 'Server listening' message", "status": "pending"},
+        {"id": "T003", "description": "Send GET request to health endpoint", "status": "pending"},
+        {"id": "T004", "description": "Verify 200 response", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F011",
+      "category": "F-integration",
+      "name": "Frontend connects to backend",
+      "description": "Frontend successfully communicates with backend API",
+      "priority": 1,
+      "dependencies": ["F009", "F010"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Start both frontend and backend servers", "status": "pending"},
+        {"id": "T002", "description": "Open frontend in browser", "status": "pending"},
+        {"id": "T003", "description": "Trigger an API call (e.g., generation)", "status": "pending"},
+        {"id": "T004", "description": "Verify request reaches backend (server logs)", "status": "pending"},
+        {"id": "T005", "description": "Verify response received by frontend", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F012",
+      "category": "D-workflow",
+      "name": "Generate endpoint accepts query",
+      "description": "POST /api/generate accepts text query and returns slides",
+      "priority": 1,
+      "dependencies": ["F010"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Send POST to /api/generate with valid query", "status": "pending"},
+        {"id": "T002", "description": "Verify 200 response status", "status": "pending"},
+        {"id": "T003", "description": "Verify response contains slides array", "status": "pending"},
+        {"id": "T004", "description": "Verify each slide has id, imageUrl, audioUrl, subtitle", "status": "pending"},
+        {"id": "T005", "description": "Verify topic object returned with id, name", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F013",
+      "category": "D-workflow",
+      "name": "Classify endpoint categorizes queries",
+      "description": "POST /api/classify determines if query is follow_up or new_topic",
+      "priority": 1,
+      "dependencies": ["F010"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Send query related to active topic", "status": "pending"},
+        {"id": "T002", "description": "Verify classification is 'follow_up'", "status": "pending"},
+        {"id": "T003", "description": "Send query unrelated to active topic", "status": "pending"},
+        {"id": "T004", "description": "Verify classification is 'new_topic'", "status": "pending"},
+        {"id": "T005", "description": "Verify reasoning field is populated", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F014",
+      "category": "D-workflow",
+      "name": "Engagement endpoint returns fun fact",
+      "description": "POST /api/generate/engagement returns fun fact and suggestions",
+      "priority": 1,
+      "dependencies": ["F010"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Send POST with query about hearts", "status": "pending"},
+        {"id": "T002", "description": "Verify response contains funFact object", "status": "pending"},
+        {"id": "T003", "description": "Verify funFact has emoji and text", "status": "pending"},
+        {"id": "T004", "description": "Verify suggestedQuestions array has 3 items", "status": "pending"},
+        {"id": "T005", "description": "Verify response time < 3 seconds", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F015",
+      "category": "F-integration",
+      "name": "WebSocket connection established",
+      "description": "Client can connect to /ws/generation for progress updates",
+      "priority": 1,
+      "dependencies": ["F010"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Create WebSocket connection to /ws/generation", "status": "pending"},
+        {"id": "T002", "description": "Verify connection opens successfully", "status": "pending"},
+        {"id": "T003", "description": "Start a generation request", "status": "pending"},
+        {"id": "T004", "description": "Verify progress messages received via WebSocket", "status": "pending"},
+        {"id": "T005", "description": "Verify connection closes cleanly", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F016",
+      "category": "C-data",
+      "name": "Generated slides contain real images",
+      "description": "Slides contain actual generated images, not placeholders",
+      "priority": 1,
+      "dependencies": ["F012"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Generate slides for 'How does photosynthesis work?'", "status": "pending"},
+        {"id": "T002", "description": "Verify imageUrl is valid base64 or URL", "status": "pending"},
+        {"id": "T003", "description": "Decode and display image - verify it's a real diagram", "status": "pending"},
+        {"id": "T004", "description": "Verify image content relates to photosynthesis", "status": "pending"},
+        {"id": "T005", "description": "Generate for different query - verify different image", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F017",
+      "category": "C-data",
+      "name": "Generated audio is real TTS",
+      "description": "Audio URLs contain actual speech, not silence or placeholder",
+      "priority": 1,
+      "dependencies": ["F012"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Generate slides for a topic", "status": "pending"},
+        {"id": "T002", "description": "Extract audioUrl from first slide", "status": "pending"},
+        {"id": "T003", "description": "Decode and play audio", "status": "pending"},
+        {"id": "T004", "description": "Verify audio is spoken narration (not silence)", "status": "pending"},
+        {"id": "T005", "description": "Verify audio content matches subtitle text", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F018",
+      "category": "C-data",
+      "name": "Subtitles match narration content",
+      "description": "Subtitle text accurately represents what is spoken in audio",
+      "priority": 1,
+      "dependencies": ["F017"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Generate slides and extract subtitle and audio", "status": "pending"},
+        {"id": "T002", "description": "Play audio while reading subtitle", "status": "pending"},
+        {"id": "T003", "description": "Verify spoken words match subtitle text", "status": "pending"},
+        {"id": "T004", "description": "Check all slides for subtitle-audio consistency", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F019",
+      "category": "C-data",
+      "name": "Slide duration reflects actual audio length",
+      "description": "Duration field matches actual audio playback time",
+      "priority": 1,
+      "dependencies": ["F017"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Generate slides and get duration field", "status": "pending"},
+        {"id": "T002", "description": "Play audio and measure actual duration", "status": "pending"},
+        {"id": "T003", "description": "Verify duration matches within 0.5 seconds", "status": "pending"},
+        {"id": "T004", "description": "Check multiple slides for duration accuracy", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F020",
+      "category": "D-workflow",
+      "name": "Cold start shows example questions",
+      "description": "First app load displays three clickable example questions",
+      "priority": 1,
+      "dependencies": ["F009"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Open app in fresh browser/incognito", "status": "pending"},
+        {"id": "T002", "description": "Verify three example question cards visible", "status": "pending"},
+        {"id": "T003", "description": "Verify 'How do black holes work?' is shown", "status": "pending"},
+        {"id": "T004", "description": "Verify 'Why do we dream?' is shown", "status": "pending"},
+        {"id": "T005", "description": "Verify 'How does WiFi work?' is shown", "status": "pending"},
+        {"id": "T006", "description": "Verify each card is clickable (cursor pointer)", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F021",
+      "category": "D-workflow",
+      "name": "Clicking example triggers generation",
+      "description": "Clicking an example question starts slideshow generation",
+      "priority": 1,
+      "dependencies": ["F020", "F012"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Open app showing example questions", "status": "pending"},
+        {"id": "T002", "description": "Click 'How do black holes work?'", "status": "pending"},
+        {"id": "T003", "description": "Verify UI transitions to generating state", "status": "pending"},
+        {"id": "T004", "description": "Verify generation request sent to backend", "status": "pending"},
+        {"id": "T005", "description": "Wait for generation to complete", "status": "pending"},
+        {"id": "T006", "description": "Verify slideshow displays", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F022",
+      "category": "D-workflow",
+      "name": "Example questions disappear after first query",
+      "description": "Example questions hidden after any question is asked",
+      "priority": 1,
+      "dependencies": ["F021"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Open app showing example questions", "status": "pending"},
+        {"id": "T002", "description": "Ask a question (text or voice)", "status": "pending"},
+        {"id": "T003", "description": "Wait for generation to complete", "status": "pending"},
+        {"id": "T004", "description": "Return to listening state", "status": "pending"},
+        {"id": "T005", "description": "Verify example questions no longer visible", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F023",
+      "category": "D-workflow",
+      "name": "Text input fallback available",
+      "description": "Text input field visible for typing questions when mic fails",
+      "priority": 1,
+      "dependencies": ["F009"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Open app in listening state", "status": "pending"},
+        {"id": "T002", "description": "Locate text input field below waveform", "status": "pending"},
+        {"id": "T003", "description": "Verify placeholder text 'Or type your question...'", "status": "pending"},
+        {"id": "T004", "description": "Click to focus the input field", "status": "pending"},
+        {"id": "T005", "description": "Verify cursor appears and can type", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F024",
+      "category": "D-workflow",
+      "name": "Text input submits on Enter",
+      "description": "Pressing Enter in text input triggers generation",
+      "priority": 1,
+      "dependencies": ["F023", "F012"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Focus text input field", "status": "pending"},
+        {"id": "T002", "description": "Type 'How does gravity work?'", "status": "pending"},
+        {"id": "T003", "description": "Press Enter key", "status": "pending"},
+        {"id": "T004", "description": "Verify generation starts", "status": "pending"},
+        {"id": "T005", "description": "Verify text input clears", "status": "pending"},
+        {"id": "T006", "description": "Wait for slideshow to appear", "status": "pending"}
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F025",
+      "category": "D-workflow",
+      "name": "Empty text input blocked",
+      "description": "Cannot submit empty or whitespace-only query",
+      "priority": 1,
+      "dependencies": ["F023"],
+      "status": "pending",
+      "test_cases": [
+        {"id": "T001", "description": "Focus text input, leave empty", "status": "pending"},
+        {"id": "T002", "description": "Press Enter - nothing happens", "status": "pending"},
+        {"id": "T003", "description": "Type only spaces", "status": "pending"},
+        {"id": "T004", "description": "Press Enter - nothing happens", "status": "pending"},
+        {"id": "T005", "description": "Verify no API request sent", "status": "pending"}
+      ],
+      "files_modified": []
+    }
+  ]
+}
