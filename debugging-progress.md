@@ -82,10 +82,20 @@ import express from 'express'
 
 ### Accessing Logs
 
-**Backend logs (recommended):**
+**Backend logs (automatic file logging):**
+The backend automatically writes logs to `/tmp/showme-server.log`. Claude can read this file directly after you run tests.
+
 ```bash
-cd backend && npm run dev 2>&1 | tee /tmp/backend.log
-# Claude can then read /tmp/backend.log
+# Logs are written automatically - just restart the server:
+cd backend && npm run dev
+
+# Claude can then read:
+cat /tmp/showme-server.log
+```
+
+**Custom log file location:**
+```bash
+LOG_FILE=/path/to/custom.log npm run dev
 ```
 
 **Frontend logs:**

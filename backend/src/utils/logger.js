@@ -7,6 +7,7 @@
  * - Category-based filtering (API, WS, GEMINI, STATE, GENERATION)
  * - Environment variable configuration: LOG_LEVEL, LOG_CATEGORIES
  * - Performance timing with time/timeEnd methods
+ * - Automatic file logging to /tmp/showme-server.log
  *
  * Usage:
  *   const logger = require('./utils/logger.js')
@@ -23,7 +24,75 @@
  * Environment Variables:
  *   LOG_LEVEL=debug|info|warn|error|none
  *   LOG_CATEGORIES=API,WS,GEMINI (or * for all)
+ *   LOG_FILE=/path/to/file.log (default: /tmp/showme-server.log)
  */
+
+import fs from 'fs'
+import path from 'path'
+
+// Log file configuration
+const LOG_FILE_PATH = process.env.LOG_FILE || '/tmp/showme-server.log'
+let logFileStream = null
+
+/**
+ * Initialize the log file stream
+ * Creates or appends to the log file
+ */
+function initLogFile() {
+  if (logFileStream) return logFileStream
+
+  try {
+    // Ensure directory exists
+    const dir = path.dirname(LOG_FILE_PATH)
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true })
+    }
+
+    // Create write stream in append mode
+    logFileStream = fs.createWriteStream(LOG_FILE_PATH, { flags: 'a' })
+
+    // Write session header
+    const sessionHeader = `\n${'='.repeat(60)}\n[SESSION START] ${new Date().toISOString()}\n${'='.repeat(60)}\n`
+    logFileStream.write(sessionHeader)
+
+    console.log(`[Logger] Writing logs to: ${LOG_FILE_PATH}`)
+    return logFileStream
+  } catch (error) {
+    console.error(`[Logger] Failed to create log file: ${error.message}`)
+    return null
+  }
+}
+
+/**
+ * Write a plain text log entry to the file (no ANSI colors)
+ * @param {string} level - Log level
+ * @param {string} category - Log category
+ * @param {string} message - Log message
+ * @param {any} context - Optional context object
+ */
+function writeToFile(level, category, message, context) {
+  const stream = initLogFile()
+  if (!stream) return
+
+  const timestamp = new Date().toISOString()
+  const levelUpper = level.toUpperCase().padEnd(5)
+  const categoryUpper = category.toUpperCase()
+
+  let line = `[${timestamp}] ${levelUpper} [${categoryUpper}] ${message}\n`
+
+  if (context !== undefined && context !== null) {
+    try {
+      const contextStr = context instanceof Error
+        ? context.stack || context.message
+        : JSON.stringify(context, null, 2)
+      line += `  └─ ${contextStr.replace(/\n/g, '\n     ')}\n`
+    } catch {
+      line += `  └─ ${String(context)}\n`
+    }
+  }
+
+  stream.write(line)
+}
 
 // ANSI escape codes for terminal styling
 const ANSI = {
@@ -243,6 +312,9 @@ function createLogFunction(level) {
       // Log without context
       consoleMethod(`${levelStr} ${categoryStr} ${message}`)
     }
+
+    // Also write to log file (plain text, no ANSI colors)
+    writeToFile(level, category, message, context)
   }
 }
 
@@ -299,6 +371,9 @@ function timeEnd(category, label) {
   const categoryStr = `${categoryColor}${ANSI.bold}[${category.toUpperCase()}]${ANSI.reset}`
 
   console.info(`${perfStr} ${categoryStr} ${label}: ${formattedDuration}`)
+
+  // Also write to log file
+  writeToFile('perf', category, `${label}: ${formattedDuration}`)
 }
 
 /**
