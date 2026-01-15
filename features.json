@@ -2323,37 +2323,37 @@
       "dependencies": [
         "F061"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Set window.LOG_CATEGORIES = ['API']",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Call logger.info('API', 'api message')",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Call logger.info('WS', 'ws message')",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Verify only API message appears in console",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Set window.LOG_CATEGORIES = ['*']",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T006",
           "description": "Verify all categories now appear",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -2367,42 +2367,42 @@
       "dependencies": [
         "F061"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Set window.LOG_LEVEL = 'warn'",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Call logger.debug and logger.info",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify debug and info do NOT appear",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Call logger.warn and logger.error",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify warn and error DO appear",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T006",
           "description": "Set window.LOG_LEVEL = 'debug'",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T007",
           "description": "Verify all levels now appear",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -2416,52 +2416,52 @@
       "dependencies": [
         "F061"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Open Chrome DevTools Console",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Trigger debug log",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify gray color styling",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Trigger info log",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify blue color styling",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T006",
           "description": "Trigger warn log",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T007",
           "description": "Verify orange/yellow color styling",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T008",
           "description": "Trigger error log",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T009",
           "description": "Verify red color styling",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -2475,27 +2475,27 @@
       "dependencies": [
         "F061"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Trigger a log message",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Verify timestamp appears in format [HH:MM:SS.mmm]",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Trigger another log 1 second later",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Verify timestamps differ by ~1 second",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -2509,32 +2509,32 @@
       "dependencies": [
         "F061"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Call logger.info('API', 'message', { url: '/api/test', status: 200 })",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Verify context object is displayed",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify object is expandable in DevTools",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Call logger without context object",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify log works without context",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
