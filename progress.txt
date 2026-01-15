@@ -1,0 +1,95 @@
+=== TDD Progress Report ===
+Project: ShowMe
+Last Updated: 2026-01-14
+
+## Session 1: Initialization
+
+### Completed
+- Created features.json with 25 initial features
+- Set up init.sh environment setup script
+- Created project structure (frontend/backend)
+- Initialized git repository
+- Scaffolded failing test files
+- Created this progress report
+
+### Features Created
+- Total: 25 features (foundation set)
+- Categories covered: A (Security), B (Navigation), C (Data), D (Workflow), F (Integration)
+- Target: 400+ features for complex app
+
+### Files Created
+
+#### Project Structure
+- /frontend/package.json - React + Vite + Tailwind config
+- /frontend/vite.config.js - Vite configuration with proxy
+- /frontend/tailwind.config.js - Tailwind with custom theme
+- /frontend/index.html - HTML entry point
+- /frontend/src/main.jsx - React entry point
+- /frontend/src/App.jsx - Main app component (3 states scaffold)
+- /frontend/src/styles/index.css - Global styles and animations
+- /backend/package.json - Express + WebSocket config
+- /backend/src/index.js - Express server with WebSocket
+- /backend/src/routes/generate.js - Generation API endpoints
+- /backend/src/routes/classify.js - Query classification endpoint
+
+#### Test Files
+- /tests/conftest.py - Pytest configuration and fixtures
+- /tests/test_security.py - Security tests (Category A)
+- /tests/test_workflow.py - Workflow tests (Category D)
+- /tests/test_data.py - Real data verification tests (Category C)
+- /tests/test_ui.py - UI/UX tests (Categories N, O, P)
+
+#### Configuration
+- /init.sh - Environment setup script (executable)
+- /features.json - Feature definitions with test cases
+- /progress.txt - This file
+
+### Context for Next Agent
+
+#### Technology Stack
+- Frontend: React 18 + Vite + Tailwind CSS (port 5173)
+- Backend: Node.js + Express + WebSocket (port 3001)
+- AI Services: Gemini 3 Pro (STT, script), Nano Banana Pro (images), Gemini TTS
+
+#### Key API Endpoints
+- POST /api/generate - Generate slideshow from query
+- POST /api/generate/follow-up - Generate follow-up slides
+- POST /api/generate/engagement - Get fun fact + suggestions
+- POST /api/classify - Classify query as follow_up or new_topic
+- WS /ws/generation - Real-time progress updates
+
+#### Priority Tasks for Next Session
+1. Expand features.json to 400+ features covering all 20 categories (A-T)
+2. Implement F010 (Backend server starts) - foundation for all API tests
+3. Implement F009 (App loads without errors) - foundation for UI tests
+4. Add features for remaining categories: E, G, H, I, J, K, L, M, N, O, P, Q, R, S, T
+
+#### App States to Implement
+1. LISTENING - Waveform, live transcription, example questions (cold start)
+2. GENERATING - Loader, progress, fun fact card, suggestion cards
+3. SLIDESHOW - Image, subtitles, progress dots, controls, navigation
+
+#### Session State Model
+- Max 3 topics retained (LRU eviction on 4th)
+- Topics contain segments (slides grouped by question)
+- Question queue for suggested follow-ups
+- isColdStart flag controls example question visibility
+
+### Run Commands
+```bash
+# Setup
+./init.sh
+
+# Or manually:
+cd frontend && npm install && npm run dev &
+cd backend && npm install && npm run dev &
+
+# Access
+# Frontend: http://localhost:5173
+# Backend: http://localhost:3001
+```
+
+### Git Status
+- Repository initialized
+- Initial commit: 4744315
+- All files committed, clean working tree
