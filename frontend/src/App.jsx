@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 
 // App states
 const UI_STATE = {
@@ -25,6 +25,99 @@ function App() {
   const [engagement, setEngagement] = useState(null)
   const [questionQueue, setQuestionQueue] = useState([])
   const [topics, setTopics] = useState([])
+
+  // Default slide duration in milliseconds (used when slide.duration is not available)
+  const DEFAULT_SLIDE_DURATION = 5000
+
+  // Navigation helper functions with bounds checking
+  const goToNextSlide = useCallback(() => {
+    setCurrentIndex((prev) => Math.min(slides.length - 1, prev + 1))
+  }, [slides.length])
+
+  const goToPrevSlide = useCallback(() => {
+    setCurrentIndex((prev) => Math.max(0, prev - 1))
+  }, [])
+
+  const togglePlayPause = useCallback(() => {
+    setIsPlaying((prev) => !prev)
+  }, [])
+
+  // Auto-advance slideshow when playing
+  // Uses slide.duration if available, otherwise falls back to DEFAULT_SLIDE_DURATION
+  useEffect(() => {
+    // Only run auto-advance when in slideshow state, playing, and slides exist
+    if (uiState !== UI_STATE.SLIDESHOW || !isPlaying || slides.length === 0) {
+      return
+    }
+
+    // Get duration for current slide (in milliseconds)
+    const currentSlide = slides[currentIndex]
+    const duration = currentSlide?.duration || DEFAULT_SLIDE_DURATION
+
+    const intervalId = setInterval(() => {
+      setCurrentIndex((prev) => {
+        const nextIndex = prev + 1
+        // If we reach the end, stop playing
+        if (nextIndex >= slides.length) {
+          setIsPlaying(false)
+          return prev
+        }
+        return nextIndex
+      })
+    }, duration)
+
+    // Cleanup interval on unmount or when dependencies change
+    return () => clearInterval(intervalId)
+  }, [uiState, isPlaying, currentIndex, slides])
+
+  // Keyboard navigation for slideshow
+  // Arrow keys navigate between slides, Space bar toggles play/pause
+  useEffect(() => {
+    // Only enable keyboard navigation during slideshow
+    if (uiState !== UI_STATE.SLIDESHOW) {
+      return
+    }
+
+    const handleKeyDown = (event) => {
+      // Ignore keyboard events when user is typing in an input
+      if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+        return
+      }
+
+      switch (event.key) {
+        case 'ArrowRight':
+          event.preventDefault()
+          goToNextSlide()
+          break
+        case 'ArrowLeft':
+          event.preventDefault()
+          goToPrevSlide()
+          break
+        case ' ':
+          // Space bar toggles play/pause
+          event.preventDefault()
+          togglePlayPause()
+          break
+        default:
+          break
+      }
+    }
+
+    // Add event listener
+    window.addEventListener('keydown', handleKeyDown)
+
+    // Cleanup on unmount or state change
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [uiState, goToNextSlide, goToPrevSlide, togglePlayPause])
+
+  // Start auto-play when entering slideshow state
+  useEffect(() => {
+    if (uiState === UI_STATE.SLIDESHOW && slides.length > 0) {
+      setIsPlaying(true)
+    }
+  }, [uiState, slides.length])
 
   const handleQuestion = async (query) => {
     if (!query.trim()) return
@@ -226,38 +319,54 @@ function App() {
               {slides[currentIndex]?.subtitle}
             </p>
 
-            {/* Progress dots */}
-            <div className="flex items-center gap-2">
+            {/* Progress dots - clickable navigation indicators */}
+            <div className="flex items-center gap-2" role="tablist" aria-label="Slide navigation">
               {slides.map((_, i) => (
                 <button
                   key={i}
                   onClick={() => setCurrentIndex(i)}
-                  className={`w-2 h-2 rounded-full transition-colors ${
-                    i === currentIndex ? 'bg-primary' : 'bg-gray-300'
+                  role="tab"
+                  aria-selected={i === currentIndex}
+                  aria-label={`Go to slide ${i + 1} of ${slides.length}`}
+                  className={`w-3 h-3 rounded-full transition-colors cursor-pointer hover:scale-125 ${
+                    i === currentIndex ? 'bg-primary' : 'bg-gray-300 hover:bg-gray-400'
                   }`}
                 />
               ))}
             </div>
 
-            {/* Controls */}
+            {/* Controls - arrow buttons and play/pause */}
             <div className="flex items-center gap-4">
               <button
-                onClick={() => setCurrentIndex(Math.max(0, currentIndex - 1))}
-                className="p-2 text-gray-500 hover:text-primary"
+                onClick={goToPrevSlide}
+                disabled={currentIndex === 0}
+                aria-label="Previous slide"
+                className={`p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${
+                  currentIndex === 0
+                    ? 'text-gray-300 cursor-not-allowed'
+                    : 'text-gray-500 hover:text-primary hover:bg-gray-100'
+                }`}
               >
-                ◀
+                <span aria-hidden="true">&#9664;</span>
               </button>
               <button
-                onClick={() => setIsPlaying(!isPlaying)}
-                className="p-3 bg-primary text-white rounded-full"
+                onClick={togglePlayPause}
+                aria-label={isPlaying ? 'Pause slideshow' : 'Play slideshow'}
+                className="p-3 min-w-[44px] min-h-[44px] bg-primary text-white rounded-full hover:bg-primary/90 transition-colors"
               >
-                {isPlaying ? '❚❚' : '▶'}
+                <span aria-hidden="true">{isPlaying ? '\u275A\u275A' : '\u25B6'}</span>
               </button>
               <button
-                onClick={() => setCurrentIndex(Math.min(slides.length - 1, currentIndex + 1))}
-                className="p-2 text-gray-500 hover:text-primary"
+                onClick={goToNextSlide}
+                disabled={currentIndex === slides.length - 1}
+                aria-label="Next slide"
+                className={`p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${
+                  currentIndex === slides.length - 1
+                    ? 'text-gray-300 cursor-not-allowed'
+                    : 'text-gray-500 hover:text-primary hover:bg-gray-100'
+                }`}
               >
-                ▶
+                <span aria-hidden="true">&#9654;</span>
               </button>
             </div>
           </div>
