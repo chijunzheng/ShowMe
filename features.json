@@ -429,7 +429,7 @@
       "description": "App requests microphone permission on first use",
       "priority": 1,
       "dependencies": ["F009"],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Open app in fresh browser", "status": "pending"},
         {"id": "T002", "description": "Click mic button", "status": "pending"},
@@ -446,7 +446,7 @@
       "description": "Microphone captures user speech and sends to STT",
       "priority": 1,
       "dependencies": ["F026"],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Enable microphone", "status": "pending"},
         {"id": "T002", "description": "Speak a question clearly", "status": "pending"},
@@ -462,7 +462,7 @@
       "description": "Real-time transcription shows while user speaks",
       "priority": 1,
       "dependencies": ["F027"],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Start speaking into microphone", "status": "pending"},
         {"id": "T002", "description": "Verify transcription text appears below waveform", "status": "pending"},
@@ -478,7 +478,7 @@
       "description": "Visual waveform responds to audio input amplitude",
       "priority": 2,
       "dependencies": ["F027"],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Activate microphone", "status": "pending"},
         {"id": "T002", "description": "Speak loudly", "status": "pending"},
@@ -495,7 +495,7 @@
       "description": "Generation starts automatically after user stops speaking",
       "priority": 1,
       "dependencies": ["F028"],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Speak a complete question", "status": "pending"},
         {"id": "T002", "description": "Stop speaking and wait 1-2 seconds", "status": "pending"},
@@ -648,7 +648,7 @@
       "description": "Related question adds slides to current topic",
       "priority": 1,
       "dependencies": ["F013", "F031"],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Generate slides for 'How does the heart work?'", "status": "pending"},
         {"id": "T002", "description": "Ask follow-up 'What about the valves?'", "status": "pending"},
@@ -665,7 +665,7 @@
       "description": "Unrelated question creates topic divider slide",
       "priority": 1,
       "dependencies": ["F013", "F031"],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Generate slides for 'How does photosynthesis work?'", "status": "pending"},
         {"id": "T002", "description": "Ask unrelated 'How do airplanes fly?'", "status": "pending"},
@@ -682,7 +682,7 @@
       "description": "Only 3 topics kept in session at once",
       "priority": 1,
       "dependencies": ["F040"],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Create topic 1 (e.g., hearts)", "status": "pending"},
         {"id": "T002", "description": "Create topic 2 (e.g., airplanes)", "status": "pending"},
@@ -699,7 +699,7 @@
       "description": "Adding 4th topic removes first topic (LRU)",
       "priority": 1,
       "dependencies": ["F041"],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Have 3 topics (hearts, airplanes, weather)", "status": "pending"},
         {"id": "T002", "description": "Ask new topic 'How do computers work?'", "status": "pending"},
@@ -716,7 +716,7 @@
       "description": "Header shows emoji icon, topic name, and divider",
       "priority": 1,
       "dependencies": ["F040"],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Navigate to a topic header card", "status": "pending"},
         {"id": "T002", "description": "Verify emoji/icon displays large and centered", "status": "pending"},
@@ -733,7 +733,7 @@
       "description": "Can swipe through all slides from all topics",
       "priority": 1,
       "dependencies": ["F041", "F034"],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Have 2 topics with slides", "status": "pending"},
         {"id": "T002", "description": "Navigate to last slide of topic 1", "status": "pending"},
@@ -751,7 +751,7 @@
       "description": "Fun fact card appears while slides are generating",
       "priority": 1,
       "dependencies": ["F014", "F011"],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Ask a question to trigger generation", "status": "pending"},
         {"id": "T002", "description": "Verify generating state shows", "status": "pending"},
@@ -768,7 +768,7 @@
       "description": "Three follow-up suggestions shown while generating",
       "priority": 1,
       "dependencies": ["F014", "F011"],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Ask a question to trigger generation", "status": "pending"},
         {"id": "T002", "description": "Verify 3 suggestion cards appear", "status": "pending"},
@@ -785,7 +785,7 @@
       "description": "Tapping suggestion adds it to question queue",
       "priority": 1,
       "dependencies": ["F046"],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "View suggestions during generation", "status": "pending"},
         {"id": "T002", "description": "Click first suggestion card", "status": "pending"},
@@ -802,7 +802,7 @@
       "description": "Queued questions play automatically after slideshow",
       "priority": 1,
       "dependencies": ["F047", "F031"],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Queue a suggestion during generation", "status": "pending"},
         {"id": "T002", "description": "Wait for slideshow to complete all slides", "status": "pending"},
