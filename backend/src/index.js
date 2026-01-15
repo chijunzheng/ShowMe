@@ -6,6 +6,12 @@ import { WebSocketServer } from 'ws'
 import { createServer } from 'http'
 import dotenv from 'dotenv'
 
+// Import logger utility (F076)
+import logger from './utils/logger.js'
+
+// Import request logging middleware (F077)
+import requestLogger from './middleware/requestLogger.js'
+
 // Import WebSocket progress utilities for client management
 import {
   registerClient,
@@ -76,6 +82,9 @@ app.use(cors({
 // Parse JSON bodies with size limit (security measure)
 app.use(express.json({ limit: '10kb' }))
 
+// F077: Request logging middleware - logs all requests with timing
+app.use(requestLogger)
+
 // F003: Rate limiting - 100 requests per 15 minutes for /api/* endpoints
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -131,7 +140,7 @@ app.use((err, req, res, next) => {
   }
 
   // Generic error handler
-  console.error('Server error:', err)
+  logger.error('API', 'Server error', { error: err.message, stack: err.stack })
   res.status(500).json({
     error: 'Internal server error',
   })
@@ -152,14 +161,14 @@ const wss = new WebSocketServer({
     if (!origin || ALLOWED_ORIGINS.includes(origin)) {
       callback(true)
     } else {
-      console.warn(`WebSocket connection rejected from origin: ${origin}`)
+      logger.warn('WS', 'WebSocket connection rejected', { origin })
       callback(false, 403, 'Forbidden')
     }
   },
 })
 
 wss.on('connection', (ws, req) => {
-  console.log('WebSocket client connected from:', req.headers.origin || 'unknown')
+  logger.info('WS', 'WebSocket client connected', { origin: req.headers.origin || 'unknown' })
 
   // Send a welcome message to confirm connection
   ws.send(JSON.stringify({
@@ -171,7 +180,7 @@ wss.on('connection', (ws, req) => {
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message)
-      console.log('Received:', data)
+      logger.debug('WS', 'Received message', { type: data.type })
 
       // Handle client registration - clients send their ID to register
       // This allows the generate endpoint to send progress to specific clients
@@ -186,18 +195,18 @@ wss.on('connection', (ws, req) => {
         }))
       }
     } catch (err) {
-      console.error('Invalid message:', err)
+      logger.warn('WS', 'Invalid message received', { error: err.message })
     }
   })
 
   ws.on('close', () => {
     // Unregister client when they disconnect
     unregisterClientByWs(ws)
-    console.log('WebSocket client disconnected')
+    logger.info('WS', 'WebSocket client disconnected')
   })
 
   ws.on('error', (error) => {
-    console.error('WebSocket error:', error)
+    logger.error('WS', 'WebSocket error', { error: error.message })
     unregisterClientByWs(ws)
   })
 })
@@ -207,7 +216,7 @@ export { wss }
 
 // Start server
 server.listen(PORT, () => {
-  console.log(`ShowMe backend listening on port ${PORT}`)
-  console.log(`Health check: http://localhost:${PORT}/health`)
-  console.log(`WebSocket: ws://localhost:${PORT}/ws/generation`)
+  logger.info('API', `ShowMe backend listening on port ${PORT}`)
+  logger.info('API', `Health check: http://localhost:${PORT}/health`)
+  logger.info('WS', `WebSocket: ws://localhost:${PORT}/ws/generation`)
 })

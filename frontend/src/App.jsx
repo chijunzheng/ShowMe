@@ -4,6 +4,7 @@ import SuggestionCard from './components/SuggestionCard'
 import Toast from './components/Toast'
 import TopicHeader from './components/TopicHeader'
 import { useWebSocket, PROGRESS_TYPES } from './hooks/useWebSocket'
+import logger from './utils/logger'
 
 // App states
 const UI_STATE = {
@@ -99,6 +100,7 @@ function App() {
   /**
    * F015: Handle WebSocket progress messages
    * Updates the generation progress state based on incoming messages
+   * F072: Logs each generation stage with timing
    */
   const handleWebSocketProgress = useCallback((message) => {
     // Ignore non-progress messages (connected, registered, etc.)
@@ -116,6 +118,20 @@ function App() {
       [PROGRESS_TYPES.ERROR]: 'Error occurred',
     }
 
+    // F072: Log generation pipeline stages
+    const stageMessage = message.data?.stage || progressMessages[message.type] || message.type
+    if (message.type === PROGRESS_TYPES.ERROR) {
+      logger.error('GENERATION', `Pipeline error: ${stageMessage}`, {
+        stage: message.type,
+        data: message.data,
+      })
+    } else {
+      logger.info('GENERATION', `Stage: ${stageMessage}`, {
+        stage: message.type,
+        slidesReady: message.data?.slidesCount || 0,
+      })
+    }
+
     setGenerationProgress({
       stage: message.type,
       message: message.data?.stage || progressMessages[message.type] || '',
@@ -125,11 +141,13 @@ function App() {
 
   /**
    * F015: Handle WebSocket errors
+   * F069: Logs WebSocket errors with context
    */
   const handleWebSocketError = useCallback((error) => {
-    console.warn('WebSocket error (non-critical):', error)
-    // WebSocket errors are non-critical - generation will still work via HTTP
-    // We just won't get real-time progress updates
+    // F069: Log WebSocket errors (non-critical - generation still works via HTTP)
+    logger.warn('WS', 'Connection error (non-critical, HTTP fallback available)', {
+      error: error?.message || 'Unknown error',
+    })
   }, [])
 
   // F015: Initialize WebSocket connection for progress updates
@@ -212,6 +230,23 @@ function App() {
 
   // Default slide duration in milliseconds (used when slide.duration is not available)
   const DEFAULT_SLIDE_DURATION = 5000
+
+  // Ref to track previous UI state for logging transitions
+  const prevUiStateRef = useRef(uiState)
+
+  /**
+   * F070: Log UI state transitions
+   * Tracks changes between LISTENING, GENERATING, SLIDESHOW, ERROR states
+   */
+  useEffect(() => {
+    if (prevUiStateRef.current !== uiState) {
+      logger.info('UI', `State transition: ${prevUiStateRef.current} -> ${uiState}`, {
+        from: prevUiStateRef.current,
+        to: uiState,
+      })
+      prevUiStateRef.current = uiState
+    }
+  }, [uiState])
 
   // Navigation helper functions with bounds checking (F044)
   const goToNextSlide = useCallback(() => {
@@ -409,11 +444,20 @@ function App() {
       const audio = new Audio(currentSlide.audioUrl)
       slideAudioRef.current = audio
 
+      // F071: Log audio playback start
+      logger.debug('AUDIO', 'Starting slide narration playback', {
+        slideId: currentSlide.id,
+        slideIndex: currentIndex,
+      })
+
       // Start from the beginning
       audio.currentTime = 0
       audio.play().catch((error) => {
-        // Autoplay may be blocked by browser policy - log but don't crash
-        console.warn('Audio playback failed:', error.message)
+        // F071: Log autoplay blocked error
+        logger.warn('AUDIO', 'Slide audio playback failed (autoplay may be blocked)', {
+          error: error.message,
+          slideId: currentSlide.id,
+        })
       })
     }
 
@@ -456,6 +500,7 @@ function App() {
    * Analyzes audio frequency data to calculate overall audio level.
    * Uses the AnalyserNode to get real-time frequency data and computes
    * an average that drives the waveform visualization.
+   * F071: Logs silence detection events
    */
   const analyzeAudio = useCallback(() => {
     if (!analyserRef.current || !isListening) return
@@ -489,6 +534,11 @@ function App() {
       const silenceDuration = Date.now() - lastSpeechTimeRef.current
 
       if (silenceDuration >= AUDIO_CONFIG.SILENCE_DURATION && !silenceTimerRef.current) {
+        // F071: Log silence detection triggering generation
+        logger.debug('AUDIO', 'Silence detected, triggering generation', {
+          silenceDurationMs: silenceDuration,
+          threshold: AUDIO_CONFIG.SILENCE_DURATION,
+        })
         // Silence threshold exceeded - trigger generation
         setLiveTranscription('Processing...')
         silenceTimerRef.current = setTimeout(() => {
@@ -522,8 +572,12 @@ function App() {
   /**
    * Stops voice recording and cleans up audio resources.
    * Called when user manually stops or when silence is detected.
+   * F071: Logs recording stop event
    */
   const stopListening = useCallback(() => {
+    // F071: Log recording stop
+    logger.info('AUDIO', 'Recording stopped')
+
     setIsListening(false)
     setAudioLevel(0)
 
@@ -619,8 +673,11 @@ function App() {
   /**
    * Starts voice capture by requesting microphone permission and
    * initializing Web Audio API components for analysis and recording.
+   * F071: Logs recording start and permission events
    */
   const startListening = useCallback(async () => {
+    logger.debug('AUDIO', 'Requesting microphone permission')
+
     try {
       // Request microphone permission with audio-only constraint
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -634,6 +691,13 @@ function App() {
       // Permission granted - update state
       setPermissionState(PERMISSION_STATE.GRANTED)
       streamRef.current = stream
+
+      // F071: Log recording start with audio configuration
+      logger.info('AUDIO', 'Recording started', {
+        echoCancellation: true,
+        noiseSuppression: true,
+        sampleRate: stream.getAudioTracks()[0]?.getSettings()?.sampleRate || 'unknown',
+      })
 
       // Create audio context for real-time analysis
       const audioContext = new (window.AudioContext || window.webkitAudioContext)()
@@ -683,9 +747,14 @@ function App() {
       // Handle permission denial or other errors
       if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
         setPermissionState(PERMISSION_STATE.DENIED)
-        console.warn('Microphone permission denied')
+        // F071: Log permission denied
+        logger.warn('AUDIO', 'Microphone permission denied by user')
       } else {
-        console.error('Error accessing microphone:', error)
+        // F071: Log other audio errors
+        logger.error('AUDIO', 'Failed to access microphone', {
+          errorName: error.name,
+          errorMessage: error.message,
+        })
       }
     }
   }, [])
@@ -707,6 +776,7 @@ function App() {
 
   /**
    * Classify a query to determine if it's a follow-up or new topic
+   * F068: Logs API request and response
    * @param {string} query - The user's question
    * @param {AbortSignal} signal - AbortController signal for cancellation (F053)
    * @returns {Promise<{classification: string, shouldEvictOldest: boolean, evictTopicId: string|null}>}
@@ -714,12 +784,21 @@ function App() {
   const classifyQuery = async (query, signal) => {
     // If no active topic, it's always a new topic
     if (!activeTopic) {
+      logger.debug('API', 'Skipping classify (no active topic)')
       return {
         classification: 'new_topic',
         shouldEvictOldest: false,
         evictTopicId: null,
       }
     }
+
+    // F068: Start timing for classify API
+    logger.time('API', 'classify-request')
+    logger.info('API', 'POST /api/classify', {
+      endpoint: '/api/classify',
+      method: 'POST',
+      activeTopicId: activeTopic.id,
+    })
 
     try {
       const response = await fetch('/api/classify', {
@@ -739,17 +818,35 @@ function App() {
         signal,
       })
 
+      // F068: Log response status and timing
+      logger.timeEnd('API', 'classify-request')
+
       if (!response.ok) {
+        logger.error('API', 'Classify request failed', {
+          endpoint: '/api/classify',
+          status: response.status,
+        })
         throw new Error(`Classify API failed: ${response.status}`)
       }
 
-      return await response.json()
+      const result = await response.json()
+      logger.info('API', 'Classify response received', {
+        classification: result.classification,
+        status: response.status,
+      })
+
+      return result
     } catch (error) {
       // Re-throw abort errors to be handled upstream
       if (error.name === 'AbortError') {
+        logger.debug('API', 'Classify request aborted by user')
         throw error
       }
-      console.error('Classification failed:', error)
+      // F068: Log classification error
+      logger.error('API', 'Classification request failed', {
+        endpoint: '/api/classify',
+        error: error.message,
+      })
       // Default to new topic on error
       return {
         classification: 'new_topic',
@@ -795,7 +892,17 @@ function App() {
       setIsStillWorking(true)
     }, GENERATION_TIMEOUT.STILL_WORKING_MS)
 
+    // F072: Start timing for full generation pipeline
+    logger.time('GENERATION', 'full-pipeline')
+
     try {
+      // F068: Log engagement API request
+      logger.time('API', 'engagement-request')
+      logger.info('API', 'POST /api/generate/engagement', {
+        endpoint: '/api/generate/engagement',
+        method: 'POST',
+      })
+
       // Start engagement call immediately for fast feedback
       const engagementPromise = fetch('/api/generate/engagement', {
         method: 'POST',
@@ -804,6 +911,11 @@ function App() {
         signal,
       })
         .then((res) => {
+          // F068: Log engagement response status
+          logger.timeEnd('API', 'engagement-request')
+          logger.info('API', 'Engagement response received', {
+            status: res.status,
+          })
           if (!res.ok) throw new Error(`Engagement API failed: ${res.status}`)
           return res.json()
         })
@@ -817,7 +929,10 @@ function App() {
           // Engagement failure is non-critical, log but continue
           // Ignore abort errors
           if (err.name !== 'AbortError') {
-            console.warn('Engagement fetch failed:', err.message)
+            // F068: Log engagement API error
+            logger.warn('API', 'Engagement request failed (non-critical)', {
+              error: err.message,
+            })
           }
         })
 
@@ -831,6 +946,14 @@ function App() {
       if (isFollowUp && activeTopic) {
         // F039: Follow-up query appends slides to current topic
         // F015: Include clientId for WebSocket progress updates
+        // F068: Log follow-up API request
+        logger.time('API', 'follow-up-request')
+        logger.info('API', 'POST /api/generate/follow-up', {
+          endpoint: '/api/generate/follow-up',
+          method: 'POST',
+          topicId: activeTopic.id,
+        })
+
         const response = await fetch('/api/generate/follow-up', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -843,7 +966,16 @@ function App() {
           signal,
         })
 
+        // F068: Log follow-up response status
+        logger.timeEnd('API', 'follow-up-request')
+        logger.info('API', 'Follow-up response received', {
+          status: response.status,
+        })
+
         if (!response.ok) {
+          logger.error('API', 'Follow-up request failed', {
+            status: response.status,
+          })
           throw new Error(`Follow-up API failed: ${response.status}`)
         }
 
@@ -851,6 +983,13 @@ function App() {
       } else {
         // F040, F041, F042: New topic - generate with header card
         // F015: Include clientId for WebSocket progress updates
+        // F068: Log generate API request
+        logger.time('API', 'generate-request')
+        logger.info('API', 'POST /api/generate', {
+          endpoint: '/api/generate',
+          method: 'POST',
+        })
+
         const response = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -863,7 +1002,16 @@ function App() {
           signal,
         })
 
+        // F068: Log generate response status
+        logger.timeEnd('API', 'generate-request')
+        logger.info('API', 'Generate response received', {
+          status: response.status,
+        })
+
         if (!response.ok) {
+          logger.error('API', 'Generate request failed', {
+            status: response.status,
+          })
           throw new Error(`Generate API failed: ${response.status}`)
         }
 
@@ -885,6 +1033,14 @@ function App() {
       if (isFollowUp && activeTopic && generateData.slides?.length > 0) {
         // F039: Append new slides to current topic, navigate to first new slide
         const previousSlideCount = activeTopic.slides?.length || 0
+
+        // F073: Log follow-up slide append
+        logger.info('STATE', 'Appending slides to existing topic', {
+          topicId: activeTopic.id,
+          topicName: activeTopic.name,
+          newSlidesCount: generateData.slides.length,
+          previousSlidesCount: previousSlideCount,
+        })
 
         setTopics((prev) => {
           const updated = [...prev]
@@ -911,6 +1067,8 @@ function App() {
           newSlideIndex += 1 + (topic.slides?.length || 0)
         }
         setCurrentIndex(newSlideIndex)
+        // F072: End timing for full generation pipeline
+        logger.timeEnd('GENERATION', 'full-pipeline')
         setUiState(UI_STATE.SLIDESHOW)
 
       } else if (newTopicData && generateData.slides?.length > 0) {
@@ -924,6 +1082,14 @@ function App() {
           createdAt: Date.now(),
         }
 
+        // F073: Log new topic creation
+        logger.info('STATE', 'Creating new topic', {
+          topicId: newTopic.id,
+          topicName: newTopic.name,
+          topicIcon: newTopic.icon,
+          slidesCount: generateData.slides.length,
+        })
+
         let newSlideIndex = 0
 
         setTopics((prev) => {
@@ -931,6 +1097,14 @@ function App() {
 
           // F042: If we have 3 topics, evict the oldest (LRU)
           if (updated.length >= MAX_TOPICS) {
+            // F073: Log topic eviction
+            const evictedTopic = updated[0]
+            logger.info('STATE', 'Evicting oldest topic (LRU)', {
+              evictedTopicId: evictedTopic.id,
+              evictedTopicName: evictedTopic.name,
+              currentTopicCount: updated.length,
+              maxTopics: MAX_TOPICS,
+            })
             // Remove the oldest topic (first in array)
             updated = updated.slice(1)
           }
@@ -948,11 +1122,13 @@ function App() {
 
         // Navigate to the header slide of the new topic
         setCurrentIndex(newSlideIndex)
+        // F072: End timing for full generation pipeline
+        logger.timeEnd('GENERATION', 'full-pipeline')
         setUiState(UI_STATE.SLIDESHOW)
 
       } else {
         // No slides returned - stay in generating state with a message
-        console.warn('No slides returned from API')
+        logger.warn('GENERATION', 'No slides returned from API')
         setUiState(UI_STATE.LISTENING)
       }
     } catch (error) {
@@ -965,13 +1141,18 @@ function App() {
 
       // Handle abort/cancellation (F053)
       if (error.name === 'AbortError') {
-        // User cancelled - return to listening state silently
+        // F068: Log user cancellation
+        logger.debug('API', 'Request cancelled by user')
         setUiState(UI_STATE.LISTENING)
         return
       }
 
       // Handle network errors (F052)
-      console.error('API request failed:', error)
+      // F068: Log generation error with full context
+      logger.error('API', 'Generation request failed', {
+        error: error.message,
+        errorName: error.name,
+      })
       setLastFailedQuery(query)
       setErrorMessage('Something went wrong. Please check your connection and try again.')
       setUiState(UI_STATE.ERROR)

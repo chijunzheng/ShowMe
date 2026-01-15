@@ -2590,37 +2590,37 @@
         "F061",
         "F011"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Enable logging with window.LOG_LEVEL = 'debug'",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Trigger a generation request",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify log shows POST /api/generate",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Verify log shows request timing",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify log shows response status",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T006",
           "description": "Verify category is 'API'",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -2635,37 +2635,37 @@
         "F061",
         "F015"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Enable logging",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Refresh app to trigger WS connection",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify 'WS connected' log appears",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Trigger generation to receive WS messages",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify progress messages are logged",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T006",
           "description": "Verify category is 'WS'",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -2680,42 +2680,42 @@
         "F061",
         "F009"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Enable logging",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "App starts in LISTENING state",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Ask a question",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Verify log shows 'State: LISTENING -> GENERATING'",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Wait for generation complete",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T006",
           "description": "Verify log shows 'State: GENERATING -> SLIDESHOW'",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T007",
           "description": "Verify category is 'STATE'",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -2730,37 +2730,37 @@
         "F061",
         "F027"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Enable logging",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Click mic button to start recording",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify 'Recording started' log appears",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Stop recording",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify 'Recording stopped' log appears",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T006",
           "description": "Verify category is 'AUDIO'",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -2775,37 +2775,37 @@
         "F061",
         "F012"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Enable logging",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Trigger generation",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify 'Generation started' log appears",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Verify stage progress logs appear (script, images, audio)",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify 'Generation complete' log with total time",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T006",
           "description": "Verify category is 'GENERATION'",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -2820,37 +2820,37 @@
         "F061",
         "F041"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Enable logging",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Ask a new topic question",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify 'Topic created' log with topic name",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Add 3 more topics to trigger eviction",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify 'Topic evicted' log for oldest topic",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T006",
           "description": "Verify category is 'STATE'",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -2864,42 +2864,42 @@
       "dependencies": [
         "F061"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Build frontend for production (npm run build)",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Serve production build",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Open DevTools console",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Use the app normally",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify no debug/info logs appear by default",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T006",
           "description": "Set window.LOG_LEVEL = 'debug'",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T007",
           "description": "Verify logs now appear after enabling",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -2914,32 +2914,32 @@
         "F061",
         "F068"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Enable all logging (debug level)",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Perform various app actions",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Search console for 'GEMINI' - no API keys",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Search console for 'key' - no sensitive data",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify request bodies are truncated/sanitized",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -2953,27 +2953,27 @@
       "dependencies": [
         "F010"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Import logger in backend route",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Call logger.info('API', 'test message')",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify log appears in server console",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Verify timestamp and category formatting",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -2988,32 +2988,32 @@
         "F076",
         "F010"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Start backend server",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Send GET request to health endpoint",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify request logged with method and path",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Send POST to /api/generate",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify response status and timing logged",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -3027,32 +3027,32 @@
       "dependencies": [
         "F061"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Enable logging",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Trigger generation (multi-step operation)",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify generation logs are in collapsible group",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Click to collapse group in DevTools",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify group collapses to single line",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -3066,27 +3066,27 @@
       "dependencies": [
         "F061"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Enable logging",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Trigger action that logs array (e.g., slides)",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify array displayed as table in DevTools",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Verify table has column headers",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -3100,42 +3100,42 @@
       "dependencies": [
         "F064"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Enable logging",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Trigger logs from API category",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify API logs have cyan color",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Trigger logs from WS category",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify WS logs have green color",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T006",
           "description": "Verify STATE logs have indigo color",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T007",
           "description": "Verify AUDIO logs have purple color",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -3149,32 +3149,32 @@
       "dependencies": [
         "F061"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Open DevTools console",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Type window.enableLogging() or window.LOG_LEVEL = 'debug'",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Perform app actions",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Verify debug logs now appear",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify no page reload required",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -3188,32 +3188,32 @@
       "dependencies": [
         "F061"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Enable logging",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Trigger an error condition",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify error log appears",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Verify stack trace is included",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify stack trace is expandable",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -3228,37 +3228,37 @@
         "F061",
         "F034"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Enable logging",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Navigate to slideshow state",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Click next slide button",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Verify 'Slide: 1 -> 2' log appears",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Click progress dot to jump",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T006",
           "description": "Verify slide jump is logged",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -3273,32 +3273,32 @@
         "F061",
         "F047"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Enable logging",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Click suggestion to queue question",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify 'Question queued' log with question text",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Queue processes automatically",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify 'Queue processing' log appears",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -3312,27 +3312,27 @@
       "dependencies": [
         "F074"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Disable logging (window.LOG_LEVEL = 'none')",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Measure time for 1000 logger.debug() calls",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify total time < 10ms (essentially no-op)",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Verify no console output when disabled",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []
@@ -3346,32 +3346,32 @@
       "dependencies": [
         "F061"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
           "description": "Set VITE_LOG_LEVEL=debug in .env",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T002",
           "description": "Restart dev server",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T003",
           "description": "Verify debug logs appear without manual enable",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T004",
           "description": "Set VITE_LOG_LEVEL=warn",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "id": "T005",
           "description": "Verify only warn/error logs appear",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "files_modified": []

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import logger from '../utils/logger'
 
 /**
  * Progress message types that match the backend PROGRESS_TYPES
@@ -132,13 +133,16 @@ export function useWebSocket({
       ws.onopen = () => {
         if (!mountedRef.current) return
 
-        console.log('WebSocket connected')
+        // F069: Log WebSocket connection established
+        logger.info('WS', 'Connection established', { url: WS_CONFIG.URL })
         setIsConnected(true)
         setReadyState(WS_STATE.OPEN)
         reconnectAttemptsRef.current = 0
 
         // Register this client with the server to receive targeted messages
         const clientId = getClientId()
+        // F069: Log client registration
+        logger.debug('WS', 'Registering client', { clientId })
         ws.send(JSON.stringify({
           type: 'register',
           clientId,
@@ -155,21 +159,37 @@ export function useWebSocket({
           // Handle registration acknowledgment
           if (message.type === PROGRESS_TYPES.REGISTERED) {
             setIsRegistered(true)
-            console.log('WebSocket client registered:', message.data?.clientId)
+            // F069: Log client registration confirmed
+            logger.info('WS', 'Client registered successfully', {
+              clientId: message.data?.clientId,
+            })
+          } else {
+            // F069: Log incoming progress message
+            logger.debug('WS', `Message received: ${message.type}`, {
+              type: message.type,
+              hasData: !!message.data,
+            })
           }
 
           // Call the progress callback for all messages
           // The consumer can filter by message.type if needed
           onProgressRef.current(message)
         } catch (parseError) {
-          console.error('Failed to parse WebSocket message:', parseError)
+          // F069: Log parse errors
+          logger.error('WS', 'Failed to parse message', {
+            error: parseError.message,
+          })
         }
       }
 
       ws.onclose = (event) => {
         if (!mountedRef.current) return
 
-        console.log('WebSocket closed:', event.code, event.reason)
+        // F069: Log WebSocket disconnect
+        logger.info('WS', 'Connection closed', {
+          code: event.code,
+          reason: event.reason || 'No reason provided',
+        })
         setIsConnected(false)
         setIsRegistered(false)
         setReadyState(WS_STATE.CLOSED)
@@ -180,7 +200,12 @@ export function useWebSocket({
 
         if (!isCleanClose && canReconnect && mountedRef.current) {
           reconnectAttemptsRef.current += 1
-          console.log(`Attempting reconnect ${reconnectAttemptsRef.current}/${WS_CONFIG.MAX_RECONNECT_ATTEMPTS}`)
+          // F069: Log reconnection attempt
+          logger.warn('WS', 'Attempting reconnect', {
+            attempt: reconnectAttemptsRef.current,
+            maxAttempts: WS_CONFIG.MAX_RECONNECT_ATTEMPTS,
+            delayMs: WS_CONFIG.RECONNECT_DELAY,
+          })
 
           reconnectTimeoutRef.current = setTimeout(() => {
             if (mountedRef.current) {
@@ -193,13 +218,20 @@ export function useWebSocket({
       ws.onerror = (error) => {
         if (!mountedRef.current) return
 
-        console.error('WebSocket error:', error)
+        // F069: Log WebSocket errors
+        logger.error('WS', 'Connection error', {
+          message: error?.message || 'Unknown error',
+        })
         onErrorRef.current(error)
       }
 
       setReadyState(WS_STATE.CONNECTING)
     } catch (error) {
-      console.error('Failed to create WebSocket:', error)
+      // F069: Log WebSocket creation failure
+      logger.error('WS', 'Failed to create connection', {
+        error: error.message,
+        url: WS_CONFIG.URL,
+      })
       onErrorRef.current(error)
     }
   }, [getClientId])
@@ -237,15 +269,19 @@ export function useWebSocket({
    */
   const sendMessage = useCallback((message) => {
     if (!wsRef.current || wsRef.current.readyState !== WS_STATE.OPEN) {
-      console.warn('Cannot send message: WebSocket not connected')
+      // F069: Log send failure due to disconnection
+      logger.warn('WS', 'Cannot send message: not connected')
       return false
     }
 
     try {
       wsRef.current.send(JSON.stringify(message))
+      // F069: Log outgoing message
+      logger.debug('WS', 'Message sent', { type: message.type })
       return true
     } catch (error) {
-      console.error('Failed to send WebSocket message:', error)
+      // F069: Log send failure
+      logger.error('WS', 'Failed to send message', { error: error.message })
       return false
     }
   }, [])
