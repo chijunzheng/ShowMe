@@ -980,7 +980,7 @@
         "F026",
         "F027a"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
@@ -1053,7 +1053,7 @@
       "dependencies": [
         "F027"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
@@ -1126,7 +1126,7 @@
       "dependencies": [
         "F028"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",

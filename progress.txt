@@ -489,3 +489,126 @@ const logger = require('./utils/logger')
 - All 86 features (60 original + 26 logging) are complete
 - Logging system fully operational
 - No pending features remaining
+
+---
+
+## Session 7: Speech-to-Text Backend Implementation (2026-01-15)
+
+### Bug Fixes
+1. **HTML Entity Encoding Bug** - Fixed in `sanitize.js`
+   - `sanitizeQuery()` was HTML-escaping user input before sending to Gemini
+   - Apostrophes became `&#x27;` corrupting AI queries
+   - Fix: Removed HTML escaping (React handles this at rendering layer)
+
+### Completed Features (1 new)
+
+#### F027a: Backend STT endpoint - IMPLEMENTED
+- Added `transcribeAudio` function to `backend/src/services/gemini.js`
+  - Uses Gemini's multimodal `generateContent` API with inline audio data
+  - Accepts Buffer or base64 string with MIME type
+  - Low temperature (0.1) for accurate transcription
+  - Returns `{ transcription: string|null, error: string|null }`
+
+- Created `backend/src/routes/transcribe.js`
+  - POST /api/transcribe endpoint
+  - Uses multer for file upload handling (memory storage)
+  - Supports: webm, wav, mp3, ogg, mp4, m4a
+  - 10MB file size limit
+  - Proper error handling: 400, 429, 500, 503
+
+- Registered route in `backend/src/index.js`
+
+### Sub-Agent Handoffs
+- **Coder Agent**: Implemented F027a (STT endpoint)
+- **Code-Review Agent**: Reviewed implementation
+  - 0 Critical, 1 High (duplicate error handling - defensive, not a bug)
+  - 5 Medium, 4 Low issues noted for future cleanup
+
+### Git Commits
+- 3da415e: feat(voice): implement F027a backend STT endpoint
+- 3d5383f: fix(sanitize): remove HTML escaping from sanitizeQuery
+
+### Files Created
+- `backend/src/routes/transcribe.js` - STT endpoint
+
+### Files Modified
+- `backend/src/services/gemini.js` - Added transcribeAudio function
+- `backend/src/index.js` - Route registration
+- `backend/src/utils/sanitize.js` - Fixed HTML encoding bug
+- `backend/src/routes/generate.js` - Removed unused import
+- `backend/package.json` - Added multer dependency
+- `features.json` - Added F027a, updated voice feature statuses
+
+### Features Status
+- **Total Features**: 87 (60 original + 26 logging + 1 new)
+- **Completed**: 62/87 features
+- **Pending Voice Features**: F027, F028, F030 (frontend integration)
+
+### Context for Next Agent
+- F027a (backend STT) is complete - POST /api/transcribe works
+- Next: F027 (frontend sends audio to STT API)
+- Then: F028 (display live transcription)
+- Then: F030 (voice triggers generation on silence)
+
+---
+
+## Session 8: Frontend Voice Integration (2026-01-15)
+
+### Completed Features (3 new)
+
+#### F027: Voice input captures speech - IMPLEMENTED
+- Modified `handleVoiceComplete()` in `frontend/src/App.jsx`
+- Creates audio blob from MediaRecorder chunks with proper MIME type
+- Sends FormData with 'audio' field to POST /api/transcribe
+- Validates audio size (min 5KB, max 10MB matching backend)
+
+#### F028: Live transcription displays - IMPLEMENTED
+- Shows "Transcribing..." status while waiting for STT response
+- Displays transcription result below waveform
+- User-friendly error messages for various failure scenarios:
+  - 503: Service unavailable
+  - 429: Rate limited
+  - 400: Invalid audio
+  - Network errors
+  - Empty transcription
+
+#### F030: Voice triggers generation on silence - IMPLEMENTED
+- After successful transcription, triggers `handleQuestion()` with actual text
+- Replaced placeholder query with real STT transcription
+- Silence detection (1.5s) already existed, now uses real transcription
+
+### Sub-Agent Handoffs
+- **Coder Agent**: Implemented F027, F028, F030 in handleVoiceComplete()
+- **Code-Review Agent**: Reviewed implementation
+  - 1 Critical (dependency array - addressed with comment)
+  - 2 High (fixed: max size validation, documented double-stop)
+  - 3 Medium (fixed: MIME type parsing)
+  - 2 Low (fixed: config constants, apostrophe consistency)
+
+### Files Modified
+- `frontend/src/App.jsx`:
+  - Added MIN_AUDIO_SIZE and MAX_AUDIO_SIZE to AUDIO_CONFIG
+  - Rewrote handleVoiceComplete() to call STT API and trigger generation
+- `features.json`: Updated F027, F028, F030 status to completed
+
+### Code Review Fixes Applied
+1. ✅ Added MAX_AUDIO_SIZE validation (10MB)
+2. ✅ Moved audio size constants to AUDIO_CONFIG
+3. ✅ Fixed MIME type extraction to handle codecs (audio/webm;codecs=opus)
+4. ✅ Fixed chunk copy ordering (copy AFTER stop() for final chunk)
+5. ✅ Added explanatory comments for double-stop pattern and dependency array
+6. ✅ Standardized apostrophe style in error messages
+
+### Git Commits
+- (pending): feat(voice): implement F027, F028, F030 frontend voice integration
+
+### Features Status
+- **Total Features**: 87
+- **Completed**: 65/87 features (75%)
+- **Voice Flow**: Complete (mic → STT → generation → slideshow)
+
+### Context for Next Agent
+- Voice integration is complete and tested
+- Full pipeline: mic capture → silence detection → STT API → transcription → generation
+- Error handling covers all common failure scenarios
+- Next priorities: Remaining pending features in features.json

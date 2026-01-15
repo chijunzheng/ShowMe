@@ -51,6 +51,10 @@ const AUDIO_CONFIG = {
   FFT_SIZE: 256,
   // Animation frame interval for waveform updates (ms)
   ANIMATION_INTERVAL: 50,
+  // Minimum audio size in bytes (~0.5s of audio)
+  MIN_AUDIO_SIZE: 5000,
+  // Maximum audio size in bytes (matches backend 10MB limit)
+  MAX_AUDIO_SIZE: 10 * 1024 * 1024,
 }
 
 /**
@@ -647,27 +651,136 @@ function App() {
 
   /**
    * Handles completion of voice recording.
-   * Stops recording, processes audio chunks, and triggers generation.
+   * Stops recording, sends audio to STT API, and triggers generation.
+   * F027: Sends audio to backend STT endpoint
+   * F028: Displays transcription status and result
+   * F030: Triggers generation with transcribed text
    */
-  const handleVoiceComplete = useCallback(() => {
-    // Stop the media recorder to trigger ondataavailable with final chunk
+  const handleVoiceComplete = useCallback(async () => {
+    // Capture MIME type before cleanup (refs will be cleared by stopListening)
+    const mimeType = mediaRecorderRef.current?.mimeType || 'audio/webm'
+
+    // Stop recording - this triggers ondataavailable for the final chunk
+    // The ondataavailable handler pushes to audioChunksRef.current synchronously
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop()
     }
 
+    // Copy chunks AFTER stop() so we get the final chunk from ondataavailable
+    const chunks = [...audioChunksRef.current]
+
+    // Clean up audio resources (this also tries to stop, but recorder is already stopped)
     stopListening()
 
-    // Process collected audio (in real implementation, send to STT API)
-    // For now, use placeholder text since real STT integration comes later
-    if (audioChunksRef.current.length > 0) {
-      // In production: send audioChunksRef.current to Gemini STT
-      // For now, trigger with placeholder to test the flow
-      const placeholderQuery = "How do computers work?"
-      handleQuestion(placeholderQuery)
+    // F027: Validate audio was captured
+    if (chunks.length === 0) {
+      logger.warn('AUDIO', 'No audio chunks captured, cannot transcribe')
+      setLiveTranscription('No audio captured. Please try again.')
+      return
     }
 
-    // Reset audio chunks for next recording
-    audioChunksRef.current = []
+    // Create audio blob from collected chunks
+    const audioBlob = new Blob(chunks, { type: mimeType })
+
+    // F027: Validate audio size (min ~0.5s, max 10MB matching backend)
+    if (audioBlob.size < AUDIO_CONFIG.MIN_AUDIO_SIZE) {
+      logger.debug('AUDIO', 'Audio too short, skipping transcription', {
+        size: audioBlob.size,
+        minSize: AUDIO_CONFIG.MIN_AUDIO_SIZE,
+      })
+      setLiveTranscription('Recording too short. Please speak longer.')
+      return
+    }
+
+    if (audioBlob.size > AUDIO_CONFIG.MAX_AUDIO_SIZE) {
+      logger.warn('AUDIO', 'Audio too large, skipping transcription', {
+        size: audioBlob.size,
+        maxSize: AUDIO_CONFIG.MAX_AUDIO_SIZE,
+      })
+      setLiveTranscription('Recording too long. Please try a shorter question.')
+      return
+    }
+
+    logger.info('AUDIO', 'Sending audio to STT API', {
+      size: `${(audioBlob.size / 1024).toFixed(2)}KB`,
+      mimeType,
+      chunks: chunks.length,
+    })
+
+    // F028: Show transcribing status
+    setLiveTranscription('Transcribing...')
+
+    try {
+      // Create FormData with the audio blob (field name 'audio' as expected by backend)
+      // Extract clean extension from MIME type (handles 'audio/webm;codecs=opus')
+      const extension = mimeType.split('/')[1]?.split(';')[0] || 'webm'
+      const formData = new FormData()
+      formData.append('audio', audioBlob, `recording.${extension}`)
+
+      // F027: POST to transcription endpoint
+      logger.time('API', 'transcribe-request')
+      const response = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      })
+
+      logger.timeEnd('API', 'transcribe-request')
+
+      // Handle non-OK responses
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        logger.error('API', 'Transcription request failed', {
+          status: response.status,
+          error: errorData.error,
+        })
+
+        // F028: Show user-friendly error message
+        if (response.status === 503) {
+          setLiveTranscription('Transcription service unavailable. Please try again.')
+        } else if (response.status === 429) {
+          setLiveTranscription('Too many requests. Please wait a moment.')
+        } else if (response.status === 400) {
+          setLiveTranscription(errorData.error || 'Invalid audio. Please try again.')
+        } else {
+          setLiveTranscription('Transcription failed. Please try again.')
+        }
+        return
+      }
+
+      // Parse successful response
+      const data = await response.json()
+
+      logger.info('AUDIO', 'Transcription received', {
+        transcriptionLength: data.transcription?.length || 0,
+      })
+
+      // F028: Check for empty transcription
+      if (!data.transcription || data.transcription.trim() === '') {
+        logger.warn('AUDIO', 'Empty transcription received')
+        setLiveTranscription('Could not understand the audio. Please try again.')
+        return
+      }
+
+      const transcription = data.transcription.trim()
+
+      // F028: Display the transcription result
+      setLiveTranscription(transcription)
+
+      logger.info('AUDIO', 'Triggering generation with transcription', {
+        query: transcription,
+      })
+
+      // F030: Trigger generation with the actual transcribed text
+      // Note: handleQuestion is intentionally not in deps to avoid re-renders;
+      // it uses current state at call time which is the desired behavior
+      handleQuestion(transcription)
+    } catch (error) {
+      // Handle network errors
+      logger.error('API', 'Transcription network error', {
+        error: error.message,
+      })
+      setLiveTranscription('Connection error. Please check your network.')
+    }
   }, [stopListening])
 
   /**
