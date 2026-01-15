@@ -1,5 +1,5 @@
 import express from 'express'
-import { sanitizeQuery, escapeHtml } from '../utils/sanitize.js'
+import { sanitizeQuery } from '../utils/sanitize.js'
 import { sendProgress, PROGRESS_TYPES } from '../utils/wsProgress.js'
 import {
   isGeminiAvailable,

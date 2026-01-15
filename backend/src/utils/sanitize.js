@@ -72,10 +72,10 @@ export function sanitizeQuery(query) {
     }
   }
 
-  // Escape HTML to prevent XSS
-  const sanitized = escapeHtml(trimmed)
-
-  return { sanitized, error: null }
+  // Note: We do NOT HTML-escape here. HTML escaping should happen at the
+  // rendering layer (React auto-escapes JSX content). Escaping here corrupts
+  // the text sent to AI APIs (e.g., apostrophes become &#x27;).
+  return { sanitized: trimmed, error: null }
 }
 
 /**
