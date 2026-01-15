@@ -3,6 +3,7 @@ import FunFactCard from './components/FunFactCard'
 import SuggestionCard from './components/SuggestionCard'
 import Toast from './components/Toast'
 import TopicHeader from './components/TopicHeader'
+import { useWebSocket, PROGRESS_TYPES } from './hooks/useWebSocket'
 
 // App states
 const UI_STATE = {
@@ -87,6 +88,59 @@ function App() {
   const [isStillWorking, setIsStillWorking] = useState(false)
   const abortControllerRef = useRef(null)
   const stillWorkingTimerRef = useRef(null)
+
+  // F015: Generation progress state from WebSocket
+  const [generationProgress, setGenerationProgress] = useState({
+    stage: null,  // Current stage name from PROGRESS_TYPES
+    message: '',  // Human-readable progress message
+    slidesReady: 0,  // Number of slides ready
+  })
+
+  /**
+   * F015: Handle WebSocket progress messages
+   * Updates the generation progress state based on incoming messages
+   */
+  const handleWebSocketProgress = useCallback((message) => {
+    // Ignore non-progress messages (connected, registered, etc.)
+    if (message.type === 'connected' || message.type === 'registered') {
+      return
+    }
+
+    // Map progress types to user-friendly messages
+    const progressMessages = {
+      [PROGRESS_TYPES.START]: 'Starting generation...',
+      [PROGRESS_TYPES.SCRIPT_READY]: 'Script ready, creating visuals...',
+      [PROGRESS_TYPES.IMAGES_GENERATING]: 'Generating diagrams...',
+      [PROGRESS_TYPES.AUDIO_GENERATING]: 'Creating narration...',
+      [PROGRESS_TYPES.COMPLETE]: 'Complete!',
+      [PROGRESS_TYPES.ERROR]: 'Error occurred',
+    }
+
+    setGenerationProgress({
+      stage: message.type,
+      message: message.data?.stage || progressMessages[message.type] || '',
+      slidesReady: message.data?.slidesCount || 0,
+    })
+  }, [])
+
+  /**
+   * F015: Handle WebSocket errors
+   */
+  const handleWebSocketError = useCallback((error) => {
+    console.warn('WebSocket error (non-critical):', error)
+    // WebSocket errors are non-critical - generation will still work via HTTP
+    // We just won't get real-time progress updates
+  }, [])
+
+  // F015: Initialize WebSocket connection for progress updates
+  const {
+    isConnected: wsConnected,
+    clientId: wsClientId,
+  } = useWebSocket({
+    onProgress: handleWebSocketProgress,
+    onError: handleWebSocketError,
+    autoConnect: true,
+  })
 
   /**
    * Topics state structure (F041):
@@ -708,6 +762,7 @@ function App() {
   /**
    * Handle a user question (from voice or text input)
    * Classifies the query, handles follow-up vs new topic, manages LRU eviction
+   * F015: Sends clientId to API for WebSocket progress updates
    * F039: Follow-up appends slides
    * F040: New topic creates header card
    * F041: Max 3 topics retained
@@ -726,6 +781,8 @@ function App() {
     setTextInput('')
     setErrorMessage('')
     setIsStillWorking(false)
+    // F015: Reset generation progress for new query
+    setGenerationProgress({ stage: null, message: '', slidesReady: 0 })
     // Reset the slideshow finished flag when starting new generation
     hasFinishedSlideshowRef.current = false
 
@@ -773,6 +830,7 @@ function App() {
 
       if (isFollowUp && activeTopic) {
         // F039: Follow-up query appends slides to current topic
+        // F015: Include clientId for WebSocket progress updates
         const response = await fetch('/api/generate/follow-up', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -780,6 +838,7 @@ function App() {
             query: query.trim(),
             topicId: activeTopic.id,
             conversationHistory: [],
+            clientId: wsClientId,
           }),
           signal,
         })
@@ -791,6 +850,7 @@ function App() {
         generateData = await response.json()
       } else {
         // F040, F041, F042: New topic - generate with header card
+        // F015: Include clientId for WebSocket progress updates
         const response = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -798,6 +858,7 @@ function App() {
             query: query.trim(),
             topicId: null,
             conversationHistory: [],
+            clientId: wsClientId,
           }),
           signal,
         })
@@ -1028,11 +1089,16 @@ function App() {
             {/* Loader */}
             <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin" />
 
-            {/* Status message - shows "Still working..." after 15 seconds (F053) */}
+            {/* F015: Status message - shows WebSocket progress or fallback messages */}
             <p className="text-lg">
-              {isStillWorking ? 'Still working...' : 'Creating your explanation...'}
+              {isStillWorking
+                ? 'Still working...'
+                : generationProgress.message || 'Creating your explanation...'}
             </p>
-            <p className="text-sm text-gray-500">[0/4 slides ready]</p>
+            {/* F015: Show slides count from WebSocket progress */}
+            <p className="text-sm text-gray-500">
+              [{generationProgress.slidesReady}/4 slides ready]
+            </p>
 
             {/* Cancel button - shown when taking too long (F053) - F057: 44px touch target */}
             {isStillWorking && (

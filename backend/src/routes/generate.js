@@ -1,8 +1,17 @@
 import express from 'express'
 import { sanitizeQuery, escapeHtml } from '../utils/sanitize.js'
-// import { generateSlides, generateEngagement } from '../services/gemini.js'
+import { sendProgress, PROGRESS_TYPES } from '../utils/wsProgress.js'
+import {
+  isGeminiAvailable,
+  generateScript,
+  generateSlideContent,
+  generateEngagement as geminiGenerateEngagement
+} from '../services/gemini.js'
 
 const router = express.Router()
+
+// Log Gemini availability on startup
+console.log(`[Generate] Gemini API available: ${isGeminiAvailable()}`)
 
 /**
  * Generate a unique ID with prefix and timestamp
@@ -72,15 +81,24 @@ function extractTopicFromQuery(query) {
 }
 
 /**
+ * Get a mock placeholder image URL for fallback
+ * @param {number} index - Slide index for color variation
+ * @returns {string} Placeholder image URL
+ */
+function getMockImageUrl(index) {
+  const colors = ['6366F1', '818CF8', 'A5B4FC', 'C7D2FE']
+  return `https://placehold.co/800x450/${colors[index % colors.length]}/white?text=Slide+${index + 1}`
+}
+
+/**
  * Generate mock slide content based on the query
- * In production, this would use Gemini for actual content generation
+ * Used as fallback when Gemini API is not available
  * @param {string} query - User's question
  * @param {string} topicId - Topic ID for the slides
  * @param {string} segmentId - Segment ID for the slides
  * @returns {Array} Array of slide objects
  */
 function generateMockSlides(query, topicId, segmentId) {
-  const colors = ['6366F1', '818CF8', 'A5B4FC', 'C7D2FE']
   const slideCount = 3 + Math.floor(Math.random() * 2) // 3-4 slides
 
   const introSubtitle = `Let's explore the fascinating topic of "${query.replace(/[?]/g, '')}".`
@@ -96,8 +114,8 @@ function generateMockSlides(query, topicId, segmentId) {
   for (let i = 0; i < slideCount; i++) {
     slides.push({
       id: generateId('slide'),
-      imageUrl: `https://placehold.co/800x450/${colors[i % colors.length]}/white?text=Slide+${i + 1}`,
-      audioUrl: null, // Would be populated by TTS service in production
+      imageUrl: getMockImageUrl(i),
+      audioUrl: null, // Would be populated by TTS service with real AI
       subtitle: subtitles[i] || subtitles[subtitles.length - 1],
       duration: 4000 + Math.floor(Math.random() * 3000), // 4-7 seconds per slide
       topicId,
@@ -112,10 +130,15 @@ function generateMockSlides(query, topicId, segmentId) {
  * POST /api/generate
  * Generate slideshow from text query
  *
+ * F015: Sends WebSocket progress updates during generation if clientId provided
+ * F016: Real AI-generated educational diagrams (with mock fallback)
+ * F017: Real TTS audio narration (with mock fallback)
+ *
  * Request body:
  * - query (required): The user's question
  * - topicId (optional): Existing topic ID for follow-ups
  * - conversationHistory (optional): Previous conversation context
+ * - clientId (optional): WebSocket client ID for progress updates
  *
  * Response:
  * - slides: Array of slide objects with id, imageUrl, audioUrl, subtitle, duration
@@ -124,14 +147,26 @@ function generateMockSlides(query, topicId, segmentId) {
  */
 router.post('/', async (req, res) => {
   try {
-    const { query, topicId, conversationHistory = [] } = req.body
+    const { query, topicId, conversationHistory = [], clientId } = req.body
 
     // F004: Sanitize and validate query input
     const { sanitized: sanitizedQuery, error: queryError } = sanitizeQuery(query)
     if (queryError) {
+      // Send error via WebSocket if client is connected
+      if (clientId) {
+        sendProgress(clientId, PROGRESS_TYPES.ERROR, { error: queryError })
+      }
       return res.status(400).json({
         error: queryError,
         field: 'query'
+      })
+    }
+
+    // F015: Send 'start' progress to WebSocket client
+    if (clientId) {
+      sendProgress(clientId, PROGRESS_TYPES.START, {
+        query: sanitizedQuery,
+        stage: 'Initializing generation...'
       })
     }
 
@@ -142,9 +177,111 @@ router.post('/', async (req, res) => {
     // Extract topic metadata from query (using sanitized input)
     const topicMetadata = extractTopicFromQuery(sanitizedQuery)
 
-    // Generate slides (mock implementation)
-    // In production: parallel calls to Gemini for script, diagrams, and TTS
-    const slides = generateMockSlides(sanitizedQuery, generatedTopicId, segmentId)
+    // Check if Gemini is available for real AI generation
+    const useRealAI = isGeminiAvailable()
+
+    let slides
+
+    if (useRealAI) {
+      // F016 & F017: Use real Gemini AI for generation
+      console.log(`[Generate] Using Gemini AI for query: "${sanitizedQuery.substring(0, 50)}..."`)
+
+      // F015: Send 'script_ready' progress - generating script
+      if (clientId) {
+        sendProgress(clientId, PROGRESS_TYPES.SCRIPT_READY, {
+          topic: topicMetadata.name,
+          stage: 'Generating educational script...'
+        })
+      }
+
+      // Step 1: Generate the script with slide content
+      const scriptResult = await generateScript(sanitizedQuery, {
+        conversationHistory,
+        isFollowUp: false
+      })
+
+      if (scriptResult.error || !scriptResult.slides) {
+        console.warn(`[Generate] Script generation failed: ${scriptResult.error}, falling back to mock`)
+        // Fall back to mock if script generation fails
+        slides = generateMockSlides(sanitizedQuery, generatedTopicId, segmentId)
+      } else {
+        // F015: Send 'images_generating' progress
+        if (clientId) {
+          sendProgress(clientId, PROGRESS_TYPES.IMAGES_GENERATING, {
+            stage: 'Generating diagrams and visuals...',
+            slidesCount: scriptResult.slides.length
+          })
+        }
+
+        // Step 2: Generate images and audio for each slide in parallel
+        const slidePromises = scriptResult.slides.map(async (slideScript, index) => {
+          const content = await generateSlideContent(slideScript, {
+            topic: topicMetadata.name
+          })
+
+          // Log any errors but continue with partial content
+          if (content.errors.length > 0) {
+            console.warn(`[Generate] Slide ${index + 1} errors:`, content.errors)
+          }
+
+          return {
+            id: generateId('slide'),
+            imageUrl: content.imageUrl || getMockImageUrl(index),
+            audioUrl: content.audioUrl || null,
+            subtitle: slideScript.subtitle,
+            duration: content.duration || 5000,
+            topicId: generatedTopicId,
+            segmentId,
+          }
+        })
+
+        // F015: Send 'audio_generating' progress
+        if (clientId) {
+          sendProgress(clientId, PROGRESS_TYPES.AUDIO_GENERATING, {
+            stage: 'Creating narration audio...',
+            slidesCount: scriptResult.slides.length
+          })
+        }
+
+        slides = await Promise.all(slidePromises)
+      }
+    } else {
+      // No API key - use mock data
+      console.log('[Generate] No Gemini API key, using mock slides')
+
+      // F015: Send 'script_ready' progress - script/topic extraction complete
+      if (clientId) {
+        sendProgress(clientId, PROGRESS_TYPES.SCRIPT_READY, {
+          topic: topicMetadata.name,
+          stage: 'Script generated, creating visuals...'
+        })
+      }
+
+      // F015: Send 'images_generating' progress
+      if (clientId) {
+        sendProgress(clientId, PROGRESS_TYPES.IMAGES_GENERATING, {
+          stage: 'Generating diagrams...'
+        })
+      }
+
+      slides = generateMockSlides(sanitizedQuery, generatedTopicId, segmentId)
+
+      // F015: Send 'audio_generating' progress
+      if (clientId) {
+        sendProgress(clientId, PROGRESS_TYPES.AUDIO_GENERATING, {
+          stage: 'Creating narration...',
+          slidesCount: slides.length
+        })
+      }
+    }
+
+    // F015: Send 'complete' progress
+    if (clientId) {
+      sendProgress(clientId, PROGRESS_TYPES.COMPLETE, {
+        slidesCount: slides.length,
+        topicName: topicMetadata.name
+      })
+    }
 
     res.json({
       slides,
@@ -157,6 +294,13 @@ router.post('/', async (req, res) => {
     })
   } catch (error) {
     console.error('Generation error:', error)
+    // F015: Send error via WebSocket if client is connected
+    const { clientId } = req.body || {}
+    if (clientId) {
+      sendProgress(clientId, PROGRESS_TYPES.ERROR, {
+        error: 'Failed to generate slideshow'
+      })
+    }
     res.status(500).json({ error: 'Failed to generate slideshow' })
   }
 })
@@ -165,10 +309,15 @@ router.post('/', async (req, res) => {
  * POST /api/generate/follow-up
  * Generate appended slides with context from previous conversation
  *
+ * F015: Sends WebSocket progress updates during generation if clientId provided
+ * F016: Real AI-generated educational diagrams (with mock fallback)
+ * F017: Real TTS audio narration (with mock fallback)
+ *
  * Request body:
  * - query (required): The follow-up question
  * - topicId (required): Existing topic ID to append to
  * - conversationHistory (optional): Previous conversation context
+ * - clientId (optional): WebSocket client ID for progress updates
  *
  * Response:
  * - slides: Array of new slide objects
@@ -176,11 +325,14 @@ router.post('/', async (req, res) => {
  */
 router.post('/follow-up', async (req, res) => {
   try {
-    const { query, topicId, conversationHistory = [] } = req.body
+    const { query, topicId, conversationHistory = [], clientId } = req.body
 
     // F004: Sanitize and validate query input
     const { sanitized: sanitizedQuery, error: queryError } = sanitizeQuery(query)
     if (queryError) {
+      if (clientId) {
+        sendProgress(clientId, PROGRESS_TYPES.ERROR, { error: queryError })
+      }
       return res.status(400).json({
         error: queryError,
         field: 'query'
@@ -189,16 +341,106 @@ router.post('/follow-up', async (req, res) => {
 
     // Validate topicId is provided and non-empty
     if (!topicId || typeof topicId !== 'string' || !topicId.trim()) {
+      if (clientId) {
+        sendProgress(clientId, PROGRESS_TYPES.ERROR, { error: 'topicId is required for follow-up questions' })
+      }
       return res.status(400).json({
         error: 'topicId is required for follow-up questions',
         field: 'topicId'
       })
     }
 
-    const segmentId = generateId('seg')
+    // F015: Send 'start' progress for follow-up generation
+    if (clientId) {
+      sendProgress(clientId, PROGRESS_TYPES.START, {
+        query: sanitizedQuery,
+        isFollowUp: true,
+        stage: 'Processing follow-up question...'
+      })
+    }
 
-    // Generate follow-up slides (uses existing topic context)
-    const slides = generateMockSlides(sanitizedQuery, topicId.trim(), segmentId)
+    const segmentId = generateId('seg')
+    const sanitizedTopicId = topicId.trim()
+
+    // Check if Gemini is available for real AI generation
+    const useRealAI = isGeminiAvailable()
+
+    let slides
+
+    if (useRealAI) {
+      // F016 & F017: Use real Gemini AI for follow-up generation
+      console.log(`[Generate] Using Gemini AI for follow-up: "${sanitizedQuery.substring(0, 50)}..."`)
+
+      // Generate script with conversation context for better follow-up
+      const scriptResult = await generateScript(sanitizedQuery, {
+        conversationHistory,
+        isFollowUp: true
+      })
+
+      if (scriptResult.error || !scriptResult.slides) {
+        console.warn(`[Generate] Follow-up script generation failed: ${scriptResult.error}, falling back to mock`)
+        slides = generateMockSlides(sanitizedQuery, sanitizedTopicId, segmentId)
+      } else {
+        // F015: Send 'images_generating' progress
+        if (clientId) {
+          sendProgress(clientId, PROGRESS_TYPES.IMAGES_GENERATING, {
+            stage: 'Generating follow-up diagrams...',
+            slidesCount: scriptResult.slides.length
+          })
+        }
+
+        // Generate images and audio for each slide in parallel
+        const slidePromises = scriptResult.slides.map(async (slideScript, index) => {
+          const content = await generateSlideContent(slideScript, {
+            topic: conversationHistory[0]?.topic || ''
+          })
+
+          if (content.errors.length > 0) {
+            console.warn(`[Generate] Follow-up slide ${index + 1} errors:`, content.errors)
+          }
+
+          return {
+            id: generateId('slide'),
+            imageUrl: content.imageUrl || getMockImageUrl(index),
+            audioUrl: content.audioUrl || null,
+            subtitle: slideScript.subtitle,
+            duration: content.duration || 5000,
+            topicId: sanitizedTopicId,
+            segmentId,
+          }
+        })
+
+        // F015: Send 'audio_generating' progress
+        if (clientId) {
+          sendProgress(clientId, PROGRESS_TYPES.AUDIO_GENERATING, {
+            stage: 'Creating narration audio...',
+            slidesCount: scriptResult.slides.length
+          })
+        }
+
+        slides = await Promise.all(slidePromises)
+      }
+    } else {
+      // No API key - use mock data
+      console.log('[Generate] No Gemini API key, using mock follow-up slides')
+
+      // F015: Send 'images_generating' progress
+      if (clientId) {
+        sendProgress(clientId, PROGRESS_TYPES.IMAGES_GENERATING, {
+          stage: 'Generating follow-up diagrams...'
+        })
+      }
+
+      slides = generateMockSlides(sanitizedQuery, sanitizedTopicId, segmentId)
+    }
+
+    // F015: Send 'complete' progress
+    if (clientId) {
+      sendProgress(clientId, PROGRESS_TYPES.COMPLETE, {
+        slidesCount: slides.length,
+        isFollowUp: true
+      })
+    }
 
     res.json({
       slides,
@@ -206,6 +448,12 @@ router.post('/follow-up', async (req, res) => {
     })
   } catch (error) {
     console.error('Follow-up generation error:', error)
+    const { clientId } = req.body || {}
+    if (clientId) {
+      sendProgress(clientId, PROGRESS_TYPES.ERROR, {
+        error: 'Failed to generate follow-up slides'
+      })
+    }
     res.status(500).json({ error: 'Failed to generate follow-up slides' })
   }
 })
@@ -361,6 +609,9 @@ function getEngagementForQuery(query) {
  * Generate fun fact + suggested questions (fast, ~1-2s)
  * This endpoint is designed to return quickly to show content during generation
  *
+ * When Gemini is available, uses AI for more relevant content.
+ * Falls back to curated content when API is not available.
+ *
  * Request body:
  * - query (required): The user's question
  *
@@ -381,7 +632,24 @@ router.post('/engagement', async (req, res) => {
       })
     }
 
-    // Get topic-relevant engagement content (using sanitized input)
+    // Try AI-generated engagement content if available
+    if (isGeminiAvailable()) {
+      try {
+        const aiEngagement = await geminiGenerateEngagement(sanitizedQuery)
+        if (!aiEngagement.error && aiEngagement.funFact && aiEngagement.suggestedQuestions) {
+          return res.json({
+            funFact: aiEngagement.funFact,
+            suggestedQuestions: aiEngagement.suggestedQuestions.slice(0, 3),
+          })
+        }
+        // Fall through to mock if AI fails
+        console.warn('[Generate] AI engagement failed, using mock:', aiEngagement.error)
+      } catch (aiError) {
+        console.warn('[Generate] AI engagement error, using mock:', aiError.message)
+      }
+    }
+
+    // Fallback: Get topic-relevant engagement content (using sanitized input)
     const content = getEngagementForQuery(sanitizedQuery)
 
     // Select a random fun fact from the topic

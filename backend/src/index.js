@@ -6,6 +6,12 @@ import { WebSocketServer } from 'ws'
 import { createServer } from 'http'
 import dotenv from 'dotenv'
 
+// Import WebSocket progress utilities for client management
+import {
+  registerClient,
+  unregisterClientByWs,
+} from './utils/wsProgress.js'
+
 // Load environment variables
 dotenv.config()
 
@@ -155,17 +161,44 @@ const wss = new WebSocketServer({
 wss.on('connection', (ws, req) => {
   console.log('WebSocket client connected from:', req.headers.origin || 'unknown')
 
+  // Send a welcome message to confirm connection
+  ws.send(JSON.stringify({
+    type: 'connected',
+    data: { message: 'WebSocket connection established' },
+    timestamp: Date.now(),
+  }))
+
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message)
       console.log('Received:', data)
+
+      // Handle client registration - clients send their ID to register
+      // This allows the generate endpoint to send progress to specific clients
+      if (data.type === 'register' && data.clientId) {
+        registerClient(data.clientId, ws)
+
+        // Acknowledge registration
+        ws.send(JSON.stringify({
+          type: 'registered',
+          data: { clientId: data.clientId },
+          timestamp: Date.now(),
+        }))
+      }
     } catch (err) {
       console.error('Invalid message:', err)
     }
   })
 
   ws.on('close', () => {
+    // Unregister client when they disconnect
+    unregisterClientByWs(ws)
     console.log('WebSocket client disconnected')
+  })
+
+  ws.on('error', (error) => {
+    console.error('WebSocket error:', error)
+    unregisterClientByWs(ws)
   })
 })
 

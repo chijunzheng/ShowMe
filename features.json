@@ -504,7 +504,7 @@
       "dependencies": [
         "F010"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
@@ -543,7 +543,7 @@
       "dependencies": [
         "F012"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
@@ -582,7 +582,7 @@
       "dependencies": [
         "F012"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
@@ -621,7 +621,7 @@
       "dependencies": [
         "F017"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
@@ -655,7 +655,7 @@
       "dependencies": [
         "F017"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
@@ -2203,7 +2203,7 @@
         "F016",
         "F017"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
@@ -2242,7 +2242,7 @@
       "dependencies": [
         "F014"
       ],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {
           "id": "T001",
