@@ -977,9 +977,10 @@
       "description": "Microphone captures user speech and sends to STT",
       "priority": 1,
       "dependencies": [
-        "F026"
+        "F026",
+        "F027a"
       ],
-      "status": "completed",
+      "status": "pending",
       "test_cases": [
         {
           "id": "T001",
@@ -1005,6 +1006,45 @@
       "files_modified": []
     },
     {
+      "id": "F027a",
+      "category": "G-voice",
+      "name": "Backend STT endpoint",
+      "description": "POST /api/transcribe accepts audio blob and returns transcription via Gemini STT",
+      "priority": 1,
+      "dependencies": [
+        "F010"
+      ],
+      "status": "completed",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Send POST to /api/transcribe with audio/webm blob",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify 200 response status",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify response contains transcription text field",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify transcription matches spoken words",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Send empty audio - verify 400 error",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
       "id": "F028",
       "category": "G-voice",
       "name": "Live transcription displays",
@@ -1013,7 +1053,7 @@
       "dependencies": [
         "F027"
       ],
-      "status": "completed",
+      "status": "pending",
       "test_cases": [
         {
           "id": "T001",
@@ -1086,7 +1126,7 @@
       "dependencies": [
         "F028"
       ],
-      "status": "completed",
+      "status": "pending",
       "test_cases": [
         {
           "id": "T001",

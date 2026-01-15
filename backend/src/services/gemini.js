@@ -2,11 +2,13 @@
  * Gemini AI Service Module
  * F016: Real AI-generated educational diagrams
  * F017: Real TTS audio narration
+ * F027a: Speech-to-text transcription
  *
  * Provides functions to generate educational content using Google's Gemini API:
  * - generateScript: Creates slide scripts with educational content
  * - generateEducationalImage: Creates diagrams/visuals for slides
  * - generateTTS: Converts text to speech audio
+ * - transcribeAudio: Converts speech audio to text
  */
 
 import { GoogleGenAI } from '@google/genai'
@@ -415,6 +417,82 @@ Output Format (JSON):
   }
 }
 
+/**
+ * Transcribe audio to text using Gemini's multimodal capabilities
+ * F027a: Backend STT endpoint
+ *
+ * @param {Buffer|string} audioData - Audio data as Buffer or base64 string
+ * @param {string} mimeType - MIME type of the audio (e.g., 'audio/webm', 'audio/wav')
+ * @returns {Promise<{transcription: string|null, error: string|null}>}
+ */
+export async function transcribeAudio(audioData, mimeType) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { transcription: null, error: 'API_NOT_AVAILABLE' }
+  }
+
+  // Validate inputs
+  if (!audioData) {
+    return { transcription: null, error: 'EMPTY_AUDIO' }
+  }
+
+  if (!mimeType) {
+    return { transcription: null, error: 'MISSING_MIME_TYPE' }
+  }
+
+  // Convert Buffer to base64 if needed
+  const base64Data = Buffer.isBuffer(audioData)
+    ? audioData.toString('base64')
+    : audioData
+
+  // Validate we have actual content
+  if (!base64Data || base64Data.length === 0) {
+    return { transcription: null, error: 'EMPTY_AUDIO' }
+  }
+
+  try {
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: base64Data,
+              },
+            },
+            {
+              text: 'Transcribe the speech in this audio. Return ONLY the transcribed text, nothing else. If the audio is silent or contains no speech, return an empty string.',
+            },
+          ],
+        },
+      ],
+      config: {
+        temperature: 0.1, // Low temperature for accurate transcription
+        maxOutputTokens: 1024,
+      },
+    })
+
+    const transcription = response.text?.trim() || ''
+
+    return { transcription, error: null }
+  } catch (error) {
+    console.error('[Gemini] Transcription error:', error.message)
+
+    // Handle specific error types
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { transcription: null, error: 'RATE_LIMITED' }
+    }
+    if (error.message?.includes('Invalid') || error.message?.includes('invalid')) {
+      return { transcription: null, error: 'INVALID_AUDIO' }
+    }
+
+    return { transcription: null, error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
 export default {
   isGeminiAvailable,
   generateScript,
@@ -422,4 +500,5 @@ export default {
   generateTTS,
   generateSlideContent,
   generateEngagement,
+  transcribeAudio,
 }
