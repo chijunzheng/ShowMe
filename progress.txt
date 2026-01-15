@@ -93,3 +93,46 @@ cd backend && npm install && npm run dev &
 - Repository initialized
 - Initial commit: 4744315
 - All files committed, clean working tree
+
+---
+
+## Session 2: Foundation Features (2026-01-15)
+
+### Completed Features
+- **F010: Backend server starts** - VERIFIED
+  - Dependencies installed, server runs on port 3001
+  - Health endpoint returns 200 with JSON status
+  - API routes return placeholder responses
+
+- **F009: App loads without errors** - VERIFIED
+  - Dev server runs on port 5173/5174
+  - Tailwind CSS processes correctly
+  - Production build succeeds, all UI components render
+
+- **F011: Frontend connects to backend** - IMPLEMENTED
+  - handleQuestion() makes parallel API calls
+  - /api/generate/engagement returns fun fact + suggestions
+  - /api/generate returns placeholder slides
+  - UI transitions through LISTENING → GENERATING → SLIDESHOW
+  - Error handling with graceful fallback
+
+- **F001: API key not exposed in frontend** - VERIFIED SECURE
+  - No API keys in frontend code or production bundle
+  - GEMINI_API_KEY only used server-side
+  - Created .gitignore and .env.example files
+
+### Files Modified
+- frontend/src/App.jsx - Implemented API integration
+- backend/src/routes/generate.js - Added placeholder slides for testing
+- .gitignore - Created for security best practices
+- backend/.env.example - Documents required env vars
+- frontend/.env.example - Documents frontend env vars
+
+### Features Status
+- Completed: 4/25 features (F001, F009, F010, F011)
+- Next priority: F002, F004, F008 (security), F012-F014 (API endpoints)
+
+### Context for Next Agent
+- Frontend-backend integration working with placeholder data
+- Real AI integration (Gemini) not yet implemented
+- API stubs return hardcoded responses for testing

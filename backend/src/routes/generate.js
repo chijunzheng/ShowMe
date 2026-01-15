@@ -21,15 +21,46 @@ router.post('/', async (req, res) => {
     // 3. Generate TTS audio (parallel)
     // 4. Assemble response
 
-    // Placeholder response
+    const segmentId = `seg_${Date.now()}`
+    const generatedTopicId = topicId || `topic_${Date.now()}`
+
+    // Placeholder response with sample slides for testing frontend integration
     res.json({
-      slides: [],
+      slides: [
+        {
+          id: `slide_${Date.now()}_1`,
+          imageUrl: 'https://placehold.co/800x450/6366F1/white?text=Slide+1',
+          audioUrl: null,
+          subtitle: `This is an explanation about: "${query}"`,
+          duration: 5000,
+          topicId: generatedTopicId,
+          segmentId,
+        },
+        {
+          id: `slide_${Date.now()}_2`,
+          imageUrl: 'https://placehold.co/800x450/818CF8/white?text=Slide+2',
+          audioUrl: null,
+          subtitle: 'Here we dive deeper into the concept and explore the key ideas.',
+          duration: 5000,
+          topicId: generatedTopicId,
+          segmentId,
+        },
+        {
+          id: `slide_${Date.now()}_3`,
+          imageUrl: 'https://placehold.co/800x450/A5B4FC/white?text=Slide+3',
+          audioUrl: null,
+          subtitle: 'Finally, we summarize what we learned and highlight the main takeaways.',
+          duration: 5000,
+          topicId: generatedTopicId,
+          segmentId,
+        },
+      ],
       topic: {
-        id: topicId || `topic_${Date.now()}`,
+        id: generatedTopicId,
         name: 'Placeholder Topic',
         icon: '📚',
       },
-      segmentId: `seg_${Date.now()}`,
+      segmentId,
     })
   } catch (error) {
     console.error('Generation error:', error)

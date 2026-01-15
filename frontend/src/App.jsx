@@ -29,16 +29,88 @@ function App() {
   const handleQuestion = async (query) => {
     if (!query.trim()) return
 
+    // Reset engagement from previous queries and transition to generating state
+    setEngagement(null)
     setIsColdStart(false)
     setUiState(UI_STATE.GENERATING)
     setLiveTranscription('')
     setTextInput('')
 
-    // TODO: Implement actual API calls
-    // 1. Call /api/generate/engagement (parallel)
-    // 2. Call /api/classify if not cold start
-    // 3. Call /api/generate or /api/generate/follow-up
-    // 4. Handle WebSocket progress updates
+    try {
+      // Start both API calls in parallel for optimal performance
+      // Engagement call is fast (~1-2s) and provides content to display during generation
+      const engagementPromise = fetch('/api/generate/engagement', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: query.trim() }),
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error(`Engagement API failed: ${res.status}`)
+          return res.json()
+        })
+        .then((data) => {
+          // Update engagement state immediately when it arrives
+          // This displays fun fact and suggestions while slides are still generating
+          setEngagement(data)
+          if (data.suggestedQuestions) {
+            setQuestionQueue(data.suggestedQuestions)
+          }
+        })
+        .catch((err) => {
+          // Engagement failure is non-critical, log but continue
+          console.warn('Engagement fetch failed:', err.message)
+        })
+
+      // Main generation call - this takes longer (~10-20s)
+      const generateResponse = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: query.trim(),
+          topicId: null, // New topic for now
+          conversationHistory: [],
+        }),
+      })
+
+      if (!generateResponse.ok) {
+        throw new Error(`Generate API failed: ${generateResponse.status}`)
+      }
+
+      const generateData = await generateResponse.json()
+
+      // Wait for engagement to complete before transitioning (if still pending)
+      await engagementPromise
+
+      // Update topics list with the new topic
+      if (generateData.topic) {
+        setTopics((prev) => {
+          // Add new topic, evicting oldest if we have 3 already
+          const newTopics = [...prev, generateData.topic]
+          if (newTopics.length > 3) {
+            return newTopics.slice(-3)
+          }
+          return newTopics
+        })
+      }
+
+      // Store slides and transition to slideshow view
+      if (generateData.slides && generateData.slides.length > 0) {
+        setSlides(generateData.slides)
+        setCurrentIndex(0)
+        setUiState(UI_STATE.SLIDESHOW)
+      } else {
+        // No slides returned - stay in generating state with a message
+        // In production, the backend would always return slides
+        console.warn('No slides returned from API')
+        // Fall back to listening state since there's nothing to show
+        setUiState(UI_STATE.LISTENING)
+      }
+    } catch (error) {
+      console.error('API request failed:', error)
+      // Return to listening state on error so user can try again
+      setUiState(UI_STATE.LISTENING)
+      // In production, show an error toast/notification to the user
+    }
   }
 
   const handleTextSubmit = (e) => {

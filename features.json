@@ -12,7 +12,7 @@
       "description": "Verify GEMINI_API_KEY is only used server-side and never sent to browser",
       "priority": 1,
       "dependencies": [],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Load frontend application in browser", "status": "pending"},
         {"id": "T002", "description": "Open browser DevTools Network tab", "status": "pending"},
@@ -140,7 +140,7 @@
       "description": "Initial app load completes without JavaScript errors",
       "priority": 1,
       "dependencies": [],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Open browser DevTools console", "status": "pending"},
         {"id": "T002", "description": "Navigate to app URL (localhost:5173)", "status": "pending"},
@@ -157,7 +157,7 @@
       "description": "Express backend starts and responds to health check",
       "priority": 1,
       "dependencies": [],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Run npm run dev in backend directory", "status": "pending"},
         {"id": "T002", "description": "Wait for 'Server listening' message", "status": "pending"},
@@ -173,7 +173,7 @@
       "description": "Frontend successfully communicates with backend API",
       "priority": 1,
       "dependencies": ["F009", "F010"],
-      "status": "pending",
+      "status": "completed",
       "test_cases": [
         {"id": "T001", "description": "Start both frontend and backend servers", "status": "pending"},
         {"id": "T002", "description": "Open frontend in browser", "status": "pending"},

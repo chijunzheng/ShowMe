@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Environment files (may contain secrets)
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+build/
+
+# IDE
+.idea/
+*.swp
+*.swo
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/
+
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
