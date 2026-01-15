@@ -1068,6 +1068,143 @@ Latency: ~1s
 
 ---
 
+## **Debug Logging System**
+
+A comprehensive logging system for debugging in Chrome DevTools console.
+
+### **Logger Utility**
+
+Both frontend and backend have matching logger utilities with consistent API:
+
+```javascript
+// Frontend: frontend/src/utils/logger.js
+// Backend: backend/src/utils/logger.js
+
+import logger from './utils/logger'
+
+logger.debug('AUDIO', 'Starting recording', { sampleRate: 44100 })
+logger.info('API', 'Request sent', { endpoint: '/api/generate' })
+logger.warn('WS', 'Connection unstable', { attempts: 3 })
+logger.error('STATE', 'Invalid state transition', { from, to })
+```
+
+### **Log Levels**
+
+| Level | Color | Icon | Use Case |
+| ----- | ----- | ----- | ----- |
+| debug | Gray (#9CA3AF) | 🔍 | Verbose debugging, data dumps |
+| info | Blue (#3B82F6) | ℹ️ | Normal operations, API calls |
+| warn | Orange (#F59E0B) | ⚠️ | Recoverable issues, retries |
+| error | Red (#EF4444) | ❌ | Failures, exceptions |
+
+### **Categories**
+
+| Category | Color | Purpose |
+| ----- | ----- | ----- |
+| AUDIO | Purple (#8B5CF6) | Recording, playback, audio analysis |
+| API | Cyan (#06B6D4) | HTTP requests, responses |
+| WS | Green (#10B981) | WebSocket connection, messages |
+| STATE | Indigo (#6366F1) | UI state changes, topic management |
+| GENERATION | Pink (#EC4899) | Slideshow generation pipeline |
+| UI | Amber (#F59E0B) | User interactions, navigation |
+| PERF | Emerald (#059669) | Performance timing |
+
+### **Console Output Format**
+
+```
+[10:23:45.123] 🔍 DEBUG [AUDIO] Starting audio capture
+└─ { sampleRate: 44100, channels: 1 }
+
+[10:23:46.456] ℹ️ INFO [API] POST /api/generate
+└─ { query: "How do black holes work?", timing: "2.3s" }
+
+[10:23:47.789] ⚠️ WARN [WS] Reconnection attempt
+└─ { attempt: 2, maxAttempts: 5 }
+
+[10:23:48.012] ❌ ERROR [STATE] Generation failed
+└─ { error: "Network timeout", stack: "..." }
+```
+
+### **Runtime Configuration**
+
+Enable/disable logging dynamically in Chrome DevTools console:
+
+```javascript
+// Enable all debug logs
+window.LOG_LEVEL = 'debug'
+
+// Only warnings and errors
+window.LOG_LEVEL = 'warn'
+
+// Disable all logging
+window.LOG_LEVEL = 'none'
+
+// Filter by specific categories
+window.LOG_CATEGORIES = ['API', 'WS']
+
+// Show all categories
+window.LOG_CATEGORIES = ['*']
+
+// Helper function
+window.enableLogging()  // Sets debug level, all categories
+```
+
+### **Environment Variables**
+
+```bash
+# Frontend (.env)
+VITE_LOG_LEVEL=debug        # Default log level
+VITE_LOG_CATEGORIES=*       # Default categories
+
+# Backend (.env)
+LOG_LEVEL=info              # Server log level
+LOG_CATEGORIES=*            # Server categories
+```
+
+### **Performance Timing**
+
+```javascript
+// Measure operation duration
+logger.time('API', 'generate-request')
+const response = await fetch('/api/generate', ...)
+logger.timeEnd('API', 'generate-request')
+// Output: [10:23:45.123] ℹ️ INFO [API] generate-request: 2345ms
+```
+
+### **What Gets Logged**
+
+| Event | Category | Level | Data |
+| ----- | ----- | ----- | ----- |
+| State transition | STATE | info | { from, to } |
+| API request | API | debug | { method, url, body } |
+| API response | API | info | { status, timing } |
+| WS connect/disconnect | WS | info | { clientId } |
+| WS message | WS | debug | { type, data } |
+| Recording start/stop | AUDIO | info | { } |
+| Audio analysis | AUDIO | debug | { level, isSilent } |
+| Slide navigation | UI | debug | { from, to } |
+| Topic created | STATE | info | { id, name } |
+| Topic evicted | STATE | info | { id, name } |
+| Queue change | STATE | info | { action, question } |
+| Generation stage | GENERATION | info | { stage, timing } |
+| Error occurred | * | error | { error, stack } |
+
+### **Security**
+
+- Logging is **disabled by default in production**
+- API keys and sensitive data are **never logged**
+- Request/response bodies are **truncated** (max 200 chars)
+- Stack traces only shown for error level
+
+### **DevTools Features**
+
+- **Collapsible groups** - Related logs grouped with `console.group()`
+- **Tables** - Array data displayed with `console.table()`
+- **Styled output** - CSS colors for visual scanning
+- **Expandable objects** - Context data is expandable
+
+---
+
 ## **Appendix**
 
 ### **Glossary**

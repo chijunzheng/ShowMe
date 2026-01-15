@@ -2271,6 +2271,1108 @@
         }
       ],
       "files_modified": []
+    },
+    {
+      "id": "F061",
+      "category": "T-logging",
+      "name": "Logger utility exists with log levels",
+      "description": "Frontend logger utility supports debug, info, warn, error levels",
+      "priority": 1,
+      "dependencies": [],
+      "status": "completed",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Import logger from frontend/src/utils/logger.js",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Call logger.debug('TEST', 'debug message')",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Call logger.info('TEST', 'info message')",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Call logger.warn('TEST', 'warn message')",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Call logger.error('TEST', 'error message')",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify all 4 log levels appear in Chrome console",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F062",
+      "category": "T-logging",
+      "name": "Logger supports category filtering",
+      "description": "Logs can be filtered by category (API, WS, STATE, AUDIO, etc.)",
+      "priority": 1,
+      "dependencies": [
+        "F061"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Set window.LOG_CATEGORIES = ['API']",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Call logger.info('API', 'api message')",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Call logger.info('WS', 'ws message')",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify only API message appears in console",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Set window.LOG_CATEGORIES = ['*']",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify all categories now appear",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F063",
+      "category": "T-logging",
+      "name": "Logger supports level filtering",
+      "description": "window.LOG_LEVEL controls minimum log level displayed",
+      "priority": 1,
+      "dependencies": [
+        "F061"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Set window.LOG_LEVEL = 'warn'",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Call logger.debug and logger.info",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify debug and info do NOT appear",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Call logger.warn and logger.error",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify warn and error DO appear",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Set window.LOG_LEVEL = 'debug'",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify all levels now appear",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F064",
+      "category": "T-logging",
+      "name": "Logs have styled console output",
+      "description": "Logs display with colors and formatting in Chrome DevTools",
+      "priority": 1,
+      "dependencies": [
+        "F061"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Open Chrome DevTools Console",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Trigger debug log",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify gray color styling",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Trigger info log",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify blue color styling",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Trigger warn log",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify orange/yellow color styling",
+          "status": "pending"
+        },
+        {
+          "id": "T008",
+          "description": "Trigger error log",
+          "status": "pending"
+        },
+        {
+          "id": "T009",
+          "description": "Verify red color styling",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F065",
+      "category": "T-logging",
+      "name": "Logs include timestamps",
+      "description": "Each log entry shows timestamp in HH:MM:SS.mmm format",
+      "priority": 1,
+      "dependencies": [
+        "F061"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Trigger a log message",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify timestamp appears in format [HH:MM:SS.mmm]",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Trigger another log 1 second later",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify timestamps differ by ~1 second",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F066",
+      "category": "T-logging",
+      "name": "Logs support context data objects",
+      "description": "Logger accepts optional context object displayed as collapsible",
+      "priority": 1,
+      "dependencies": [
+        "F061"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Call logger.info('API', 'message', { url: '/api/test', status: 200 })",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify context object is displayed",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify object is expandable in DevTools",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Call logger without context object",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify log works without context",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F067",
+      "category": "T-logging",
+      "name": "Logger has performance timing helpers",
+      "description": "logger.time() and logger.timeEnd() measure operation duration",
+      "priority": 2,
+      "dependencies": [
+        "F061"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Call logger.time('API', 'fetch-test')",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Wait 500ms",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Call logger.timeEnd('API', 'fetch-test')",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify duration ~500ms logged",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify timing label identifies the operation",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F068",
+      "category": "T-logging",
+      "name": "API requests are logged",
+      "description": "All fetch calls log request details and response status",
+      "priority": 1,
+      "dependencies": [
+        "F061",
+        "F011"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Enable logging with window.LOG_LEVEL = 'debug'",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Trigger a generation request",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify log shows POST /api/generate",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify log shows request timing",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify log shows response status",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify category is 'API'",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F069",
+      "category": "T-logging",
+      "name": "WebSocket events are logged",
+      "description": "WS connection, messages, and disconnects are logged",
+      "priority": 1,
+      "dependencies": [
+        "F061",
+        "F015"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Enable logging",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Refresh app to trigger WS connection",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify 'WS connected' log appears",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Trigger generation to receive WS messages",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify progress messages are logged",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify category is 'WS'",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F070",
+      "category": "T-logging",
+      "name": "UI state changes are logged",
+      "description": "Transitions between LISTENING, GENERATING, SLIDESHOW logged",
+      "priority": 1,
+      "dependencies": [
+        "F061",
+        "F009"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Enable logging",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "App starts in LISTENING state",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Ask a question",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify log shows 'State: LISTENING -> GENERATING'",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Wait for generation complete",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify log shows 'State: GENERATING -> SLIDESHOW'",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify category is 'STATE'",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F071",
+      "category": "T-logging",
+      "name": "Audio events are logged",
+      "description": "Recording start/stop and playback events are logged",
+      "priority": 2,
+      "dependencies": [
+        "F061",
+        "F027"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Enable logging",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Click mic button to start recording",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify 'Recording started' log appears",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Stop recording",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify 'Recording stopped' log appears",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify category is 'AUDIO'",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F072",
+      "category": "T-logging",
+      "name": "Generation pipeline stages are logged",
+      "description": "Each generation stage logs timing and status",
+      "priority": 1,
+      "dependencies": [
+        "F061",
+        "F012"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Enable logging",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Trigger generation",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify 'Generation started' log appears",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify stage progress logs appear (script, images, audio)",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify 'Generation complete' log with total time",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify category is 'GENERATION'",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F073",
+      "category": "T-logging",
+      "name": "Topic management is logged",
+      "description": "Topic creation, eviction, and switches are logged",
+      "priority": 2,
+      "dependencies": [
+        "F061",
+        "F041"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Enable logging",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Ask a new topic question",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify 'Topic created' log with topic name",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Add 3 more topics to trigger eviction",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify 'Topic evicted' log for oldest topic",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify category is 'STATE'",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F074",
+      "category": "T-logging",
+      "name": "Logging disabled by default in production",
+      "description": "No logs appear in production build unless explicitly enabled",
+      "priority": 1,
+      "dependencies": [
+        "F061"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Build frontend for production (npm run build)",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Serve production build",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Open DevTools console",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Use the app normally",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify no debug/info logs appear by default",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Set window.LOG_LEVEL = 'debug'",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify logs now appear after enabling",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F075",
+      "category": "A-security",
+      "name": "Logger does not expose sensitive data",
+      "description": "API keys and user credentials never appear in logs",
+      "priority": 1,
+      "dependencies": [
+        "F061",
+        "F068"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Enable all logging (debug level)",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Perform various app actions",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Search console for 'GEMINI' - no API keys",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Search console for 'key' - no sensitive data",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify request bodies are truncated/sanitized",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F076",
+      "category": "T-logging",
+      "name": "Backend logger utility exists",
+      "description": "Node.js backend has matching logger utility",
+      "priority": 1,
+      "dependencies": [
+        "F010"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Import logger in backend route",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Call logger.info('API', 'test message')",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify log appears in server console",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify timestamp and category formatting",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F077",
+      "category": "T-logging",
+      "name": "Backend request logging middleware",
+      "description": "All API requests are logged with method, path, timing",
+      "priority": 1,
+      "dependencies": [
+        "F076",
+        "F010"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Start backend server",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Send GET request to health endpoint",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify request logged with method and path",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Send POST to /api/generate",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify response status and timing logged",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F078",
+      "category": "T-logging",
+      "name": "Logger groups related logs",
+      "description": "console.group() used for related log sequences",
+      "priority": 2,
+      "dependencies": [
+        "F061"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Enable logging",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Trigger generation (multi-step operation)",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify generation logs are in collapsible group",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Click to collapse group in DevTools",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify group collapses to single line",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F079",
+      "category": "T-logging",
+      "name": "Logger uses console.table for arrays",
+      "description": "Array data displayed as formatted tables",
+      "priority": 2,
+      "dependencies": [
+        "F061"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Enable logging",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Trigger action that logs array (e.g., slides)",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify array displayed as table in DevTools",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify table has column headers",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F080",
+      "category": "T-logging",
+      "name": "Category colors are distinct",
+      "description": "Each category has unique color for easy scanning",
+      "priority": 2,
+      "dependencies": [
+        "F064"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Enable logging",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Trigger logs from API category",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify API logs have cyan color",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Trigger logs from WS category",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify WS logs have green color",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify STATE logs have indigo color",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify AUDIO logs have purple color",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F081",
+      "category": "T-logging",
+      "name": "Quick enable via console command",
+      "description": "Developer can enable logging with single console command",
+      "priority": 1,
+      "dependencies": [
+        "F061"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Open DevTools console",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Type window.enableLogging() or window.LOG_LEVEL = 'debug'",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Perform app actions",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify debug logs now appear",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify no page reload required",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F082",
+      "category": "T-logging",
+      "name": "Error logs include stack traces",
+      "description": "Error level logs include error stack when available",
+      "priority": 1,
+      "dependencies": [
+        "F061"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Enable logging",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Trigger an error condition",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify error log appears",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify stack trace is included",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify stack trace is expandable",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F083",
+      "category": "T-logging",
+      "name": "Slide navigation is logged",
+      "description": "Slide changes and navigation events are logged",
+      "priority": 2,
+      "dependencies": [
+        "F061",
+        "F034"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Enable logging",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Navigate to slideshow state",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Click next slide button",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify 'Slide: 1 -> 2' log appears",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Click progress dot to jump",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify slide jump is logged",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F084",
+      "category": "T-logging",
+      "name": "Question queue changes are logged",
+      "description": "Adding/removing questions from queue is logged",
+      "priority": 2,
+      "dependencies": [
+        "F061",
+        "F047"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Enable logging",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Click suggestion to queue question",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify 'Question queued' log with question text",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Queue processes automatically",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify 'Queue processing' log appears",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F085",
+      "category": "O-perf",
+      "name": "Logging has minimal performance impact",
+      "description": "Disabled logging adds <1ms overhead per operation",
+      "priority": 1,
+      "dependencies": [
+        "F074"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Disable logging (window.LOG_LEVEL = 'none')",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Measure time for 1000 logger.debug() calls",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify total time < 10ms (essentially no-op)",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify no console output when disabled",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F086",
+      "category": "T-logging",
+      "name": "Environment variable configures default level",
+      "description": "VITE_LOG_LEVEL sets initial log level",
+      "priority": 2,
+      "dependencies": [
+        "F061"
+      ],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Set VITE_LOG_LEVEL=debug in .env",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Restart dev server",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify debug logs appear without manual enable",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Set VITE_LOG_LEVEL=warn",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify only warn/error logs appear",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
     }
   ]
 }
