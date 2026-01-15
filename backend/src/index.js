@@ -1,10 +1,13 @@
+// Load environment variables FIRST - must be before any other imports
+// that might read process.env (like gemini.js via generate.js)
+import 'dotenv/config'
+
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
 import { WebSocketServer } from 'ws'
 import { createServer } from 'http'
-import dotenv from 'dotenv'
 
 // Import logger utility (F076)
 import logger from './utils/logger.js'
@@ -17,9 +20,6 @@ import {
   registerClient,
   unregisterClientByWs,
 } from './utils/wsProgress.js'
-
-// Load environment variables
-dotenv.config()
 
 const app = express()
 const PORT = process.env.PORT || 3001
