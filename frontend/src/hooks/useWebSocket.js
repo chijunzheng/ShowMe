@@ -289,14 +289,25 @@ export function useWebSocket({
   // Auto-connect on mount if enabled
   useEffect(() => {
     mountedRef.current = true
+    let connectTimeoutId = null
 
     if (autoConnect) {
-      connect()
+      // Defer connection to next tick to handle React StrictMode's double-mount behavior
+      // In StrictMode, React mounts → unmounts → re-mounts components in development
+      // Without this delay, the first connection gets created and immediately torn down
+      connectTimeoutId = setTimeout(() => {
+        if (mountedRef.current) {
+          connect()
+        }
+      }, 0)
     }
 
     // Cleanup on unmount - ensures clean disconnect
     return () => {
       mountedRef.current = false
+      if (connectTimeoutId) {
+        clearTimeout(connectTimeoutId)
+      }
       disconnect()
     }
   }, [autoConnect, connect, disconnect])
