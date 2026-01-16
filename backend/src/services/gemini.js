@@ -741,6 +741,98 @@ export async function transcribeAudio(audioData, mimeType) {
   }
 }
 
+/**
+ * Generate a verbal-only response for a slide question
+ * CORE023, CORE024: Answers questions about the current slide and suggests highlight position
+ *
+ * @param {string} query - The user's question about the current slide
+ * @param {Object} slideContext - Context about the current slide
+ * @param {string} slideContext.subtitle - The narration/subtitle text of the current slide
+ * @param {string} slideContext.topicName - The topic name for context
+ * @returns {Promise<{response: string, highlight: {x: number, y: number}|null, audioUrl: string|null, duration: number, error: string|null}>}
+ */
+export async function generateSlideResponse(query, slideContext = {}) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { response: null, highlight: null, audioUrl: null, duration: 0, error: 'API_NOT_AVAILABLE' }
+  }
+
+  const { subtitle = '', topicName = '' } = slideContext
+
+  // Build context for the LLM to understand what's being shown
+  const prompt = `You are an educational assistant helping explain a visual diagram about "${topicName}".
+
+The current slide shows this content: "${subtitle}"
+
+The user is asking about something visible on this educational diagram: "${query}"
+
+Your task:
+1. Provide a brief, helpful verbal explanation (2-3 sentences max) answering their question about the visible content
+2. Estimate where on the diagram they are likely asking about. Return coordinates as percentages (0-100) where:
+   - x=0 is left edge, x=100 is right edge
+   - y=0 is top edge, y=100 is bottom edge
+
+Common diagram regions:
+- Center: x=50, y=50
+- Top center: x=50, y=25
+- Bottom center: x=50, y=75
+- Left side: x=25, y=50
+- Right side: x=75, y=50
+
+Consider the typical layout of educational diagrams when estimating position. If the user mentions colors, arrows, labels, or specific parts, estimate where those elements would typically appear.
+
+Output Format (JSON):
+{
+  "response": "Your verbal explanation here",
+  "highlight": {
+    "x": 50,
+    "y": 50
+  }
+}
+
+If you cannot determine a specific location, set highlight to null.`
+
+  try {
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.5,
+        maxOutputTokens: 512,
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    const verbalResponse = parsed.response || "I'm not sure what you're asking about. Could you be more specific?"
+    const highlight = parsed.highlight && typeof parsed.highlight.x === 'number' && typeof parsed.highlight.y === 'number'
+      ? { x: Math.max(0, Math.min(100, parsed.highlight.x)), y: Math.max(0, Math.min(100, parsed.highlight.y)) }
+      : null
+
+    // Generate TTS audio for the response
+    const audioResult = await generateTTS(verbalResponse)
+
+    return {
+      response: verbalResponse,
+      highlight,
+      audioUrl: audioResult.audioUrl,
+      duration: audioResult.duration || 3000,
+      error: null
+    }
+  } catch (error) {
+    console.error('[Gemini] Slide response generation error:', error.message)
+    return {
+      response: null,
+      highlight: null,
+      audioUrl: null,
+      duration: 0,
+      error: error.message || 'UNKNOWN_ERROR'
+    }
+  }
+}
+
 export default {
   isGeminiAvailable,
   generateScript,
@@ -749,4 +841,5 @@ export default {
   generateSlideContent,
   generateEngagement,
   transcribeAudio,
+  generateSlideResponse,
 }

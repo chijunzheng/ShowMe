@@ -167,3 +167,37 @@ body {
 .animate-fade-in {
   animation: fade-in 0.2s ease-out forwards;
 }
+
+/* CORE024: Highlight overlay pulse animation for slide annotations */
+@keyframes highlight-pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.8;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.3);
+    opacity: 0.4;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.8;
+  }
+}
+
+.highlight-pulse {
+  animation: highlight-pulse 1.5s ease-in-out infinite;
+}
+
+/* CORE024: Highlight fade-out animation when response completes */
+@keyframes highlight-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.highlight-fade-out {
+  animation: highlight-fade-out 0.5s ease-out forwards;
+}

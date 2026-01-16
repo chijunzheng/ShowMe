@@ -5,7 +5,8 @@ import {
   isGeminiAvailable,
   generateScript,
   generateSlideContent,
-  generateEngagement as geminiGenerateEngagement
+  generateEngagement as geminiGenerateEngagement,
+  generateSlideResponse,
 } from '../services/gemini.js'
 
 const router = express.Router()
@@ -667,6 +668,86 @@ router.post('/engagement', async (req, res) => {
   } catch (error) {
     console.error('Engagement generation error:', error)
     res.status(500).json({ error: 'Failed to generate engagement content' })
+  }
+})
+
+/**
+ * POST /api/generate/respond
+ * CORE023, CORE024: Generate verbal-only response for slide questions
+ * Used when user asks about something on the current slide (e.g., "What's the red part?")
+ *
+ * Request body:
+ * - query (required): The user's question about the current slide
+ * - currentSlide (required): Current slide context
+ *   - subtitle: The slide's narration text
+ *   - topicName: The topic name for context
+ *
+ * Response:
+ * - response: Verbal explanation text
+ * - audioUrl: TTS audio data URL
+ * - highlight: { x, y } coordinates as percentages (0-100) for annotation highlight, or null
+ * - duration: Audio duration in milliseconds
+ */
+router.post('/respond', async (req, res) => {
+  try {
+    const { query, currentSlide } = req.body
+
+    // F004: Sanitize and validate query input
+    const { sanitized: sanitizedQuery, error: queryError } = sanitizeQuery(query)
+    if (queryError) {
+      return res.status(400).json({
+        error: queryError,
+        field: 'query'
+      })
+    }
+
+    // Validate currentSlide is provided
+    if (!currentSlide) {
+      return res.status(400).json({
+        error: 'currentSlide context is required',
+        field: 'currentSlide'
+      })
+    }
+
+    console.log(`[Generate/Respond] Processing slide question: "${sanitizedQuery.substring(0, 50)}..."`)
+
+    // Check if Gemini is available
+    if (!isGeminiAvailable()) {
+      // Fallback response when API is not available
+      return res.json({
+        response: "I can help explain what you see on the slide. Could you tell me more about what you'd like to know?",
+        audioUrl: null,
+        highlight: { x: 50, y: 50 },
+        duration: 3000,
+      })
+    }
+
+    // Generate the slide response with highlight coordinates
+    const result = await generateSlideResponse(sanitizedQuery, {
+      subtitle: currentSlide.subtitle || '',
+      topicName: currentSlide.topicName || '',
+    })
+
+    if (result.error) {
+      console.warn(`[Generate/Respond] Generation failed: ${result.error}`)
+      // Return a fallback response on error
+      return res.json({
+        response: "I'm not quite sure what you're asking about. Could you try pointing at it or describing it differently?",
+        audioUrl: null,
+        highlight: null,
+        duration: 3000,
+      })
+    }
+
+    res.json({
+      response: result.response,
+      audioUrl: result.audioUrl,
+      highlight: result.highlight,
+      duration: result.duration,
+    })
+  } catch (error) {
+    console.error('Respond generation error:', error)
+    res.status(500).json({ error: 'Failed to generate response' })
   }
 })
 

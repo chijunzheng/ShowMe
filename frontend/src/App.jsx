@@ -4,6 +4,7 @@ import SuggestionCard from './components/SuggestionCard'
 import Toast from './components/Toast'
 import TopicHeader from './components/TopicHeader'
 import TopicSidebar from './components/TopicSidebar'
+import HighlightOverlay from './components/HighlightOverlay'
 import { useWebSocket, PROGRESS_TYPES } from './hooks/useWebSocket'
 import logger from './utils/logger'
 
@@ -500,6 +501,13 @@ function App() {
   // Format: { topicId: string, slideIndex: number } or null when no interrupt occurred
   const [interruptResumePoint, setInterruptResumePoint] = useState(null)
 
+  // CORE024: Highlight position for annotation highlights on slide questions
+  // Format: { x: number, y: number } as percentages (0-100), or null when not showing
+  const [highlightPosition, setHighlightPosition] = useState(null)
+
+  // CORE023: Audio ref for slide question response playback
+  const slideResponseAudioRef = useRef(null)
+
   // Default slide duration in milliseconds (used when slide.duration is not available)
   const DEFAULT_SLIDE_DURATION = 5000
 
@@ -789,6 +797,7 @@ function App() {
   /**
    * F037: Restart audio when navigating to a new slide
    * Stops current audio and starts audio for the new slide from the beginning
+   * CORE023, CORE024: Also cleans up slide response audio and highlight
    */
   useEffect(() => {
     // Only manage audio in slideshow state with valid slides
@@ -798,6 +807,13 @@ function App() {
         slideAudioRef.current.pause()
         slideAudioRef.current = null
       }
+      // CORE023: Stop slide response audio when leaving slideshow
+      if (slideResponseAudioRef.current) {
+        slideResponseAudioRef.current.pause()
+        slideResponseAudioRef.current = null
+      }
+      // CORE024: Clear highlight when leaving slideshow
+      setHighlightPosition(null)
       return
     }
 
@@ -808,6 +824,13 @@ function App() {
       slideAudioRef.current.pause()
       slideAudioRef.current = null
     }
+
+    // CORE023, CORE024: Stop slide response audio and clear highlight when navigating
+    if (slideResponseAudioRef.current) {
+      slideResponseAudioRef.current.pause()
+      slideResponseAudioRef.current = null
+    }
+    setHighlightPosition(null)
 
     // Only play audio for content slides (not header slides) that have an audioUrl
     if (currentSlide?.type !== 'header' && currentSlide?.audioUrl && isPlaying) {
@@ -1610,7 +1633,8 @@ function App() {
   }, [handleMicPressEnd])
 
   /**
-   * Classify a query to determine if it's a follow-up or new topic
+   * Classify a query to determine if it's a follow-up, new topic, or slide question
+   * CORE023: Added slide_question classification support
    * F068: Logs API request and response
    * @param {string} query - The user's question
    * @param {AbortSignal} signal - AbortController signal for cancellation (F053)
@@ -1635,6 +1659,15 @@ function App() {
       activeTopicId: activeTopic.id,
     })
 
+    // CORE023: Get current slide context for slide_question detection
+    // Only include context if we're in slideshow state with a valid content slide
+    const currentSlide = uiState === UI_STATE.SLIDESHOW && allSlides[currentIndex] && allSlides[currentIndex].type !== 'header'
+      ? {
+          subtitle: allSlides[currentIndex].subtitle || '',
+          topicName: activeTopic.name,
+        }
+      : null
+
     try {
       const response = await fetch('/api/classify', {
         method: 'POST',
@@ -1649,6 +1682,8 @@ function App() {
           conversationHistory: [], // Could be enhanced with actual history
           topicCount: topics.length,
           oldestTopicId: topics.length > 0 ? topics[0].id : null,
+          // CORE023: Include current slide context for slide_question detection
+          currentSlide,
         }),
         signal,
       })
@@ -1771,8 +1806,132 @@ function App() {
           }
         })
 
-      // Classify the query to determine if it's a follow-up or new topic
+      // Classify the query to determine if it's a follow-up, new topic, or slide question
       const classifyResult = await classifyQuery(query, signal)
+
+      // CORE023, CORE024: Handle slide_question classification
+      // This is a question about the current slide content - generate verbal response only
+      if (classifyResult.classification === 'slide_question') {
+        logger.info('API', 'Handling slide question (verbal response only)', {
+          classification: 'slide_question',
+        })
+
+        // Clear the "Still working..." timer early since this is fast
+        if (stillWorkingTimerRef.current) {
+          clearTimeout(stillWorkingTimerRef.current)
+          stillWorkingTimerRef.current = null
+        }
+        setIsStillWorking(false)
+
+        // Get current slide context for the response
+        const currentSlide = allSlides[currentIndex]
+        const slideContext = {
+          subtitle: currentSlide?.subtitle || '',
+          topicName: activeTopic?.name || '',
+        }
+
+        // Call the respond API for verbal-only response
+        logger.time('API', 'respond-request')
+        logger.info('API', 'POST /api/generate/respond', {
+          endpoint: '/api/generate/respond',
+          method: 'POST',
+        })
+
+        try {
+          const response = await fetch('/api/generate/respond', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              query: query.trim(),
+              currentSlide: slideContext,
+            }),
+            signal,
+          })
+
+          logger.timeEnd('API', 'respond-request')
+
+          if (!response.ok) {
+            logger.error('API', 'Respond request failed', {
+              status: response.status,
+            })
+            throw new Error(`Respond API failed: ${response.status}`)
+          }
+
+          const respondData = await response.json()
+          logger.info('API', 'Respond API returned', {
+            hasAudio: !!respondData.audioUrl,
+            hasHighlight: !!respondData.highlight,
+          })
+
+          // CORE024: Show highlight overlay if coordinates were returned
+          if (respondData.highlight) {
+            setHighlightPosition(respondData.highlight)
+            logger.debug('UI', 'Showing highlight overlay', respondData.highlight)
+          }
+
+          // CORE023: Play the verbal response audio
+          if (respondData.audioUrl) {
+            // Stop any existing slide response audio
+            if (slideResponseAudioRef.current) {
+              slideResponseAudioRef.current.pause()
+            }
+
+            const audio = new Audio(respondData.audioUrl)
+            slideResponseAudioRef.current = audio
+
+            // When audio ends, clear the highlight
+            audio.onended = () => {
+              logger.debug('UI', 'Slide response audio ended, clearing highlight')
+              setHighlightPosition(null)
+              slideResponseAudioRef.current = null
+            }
+
+            audio.onerror = () => {
+              logger.warn('AUDIO', 'Slide response audio playback error')
+              setHighlightPosition(null)
+              slideResponseAudioRef.current = null
+            }
+
+            // Start playback
+            audio.play().catch((err) => {
+              logger.warn('AUDIO', 'Slide response autoplay blocked', { error: err.message })
+              // Still clear highlight after expected duration if autoplay blocked
+              setTimeout(() => {
+                setHighlightPosition(null)
+              }, respondData.duration || 3000)
+            })
+          } else {
+            // No audio - clear highlight after a delay
+            if (respondData.highlight) {
+              setTimeout(() => {
+                setHighlightPosition(null)
+              }, respondData.duration || 3000)
+            }
+          }
+
+          // Stay in slideshow state - no new slides generated
+          logger.timeEnd('GENERATION', 'full-pipeline')
+          setUiState(UI_STATE.SLIDESHOW)
+          return // Early return - we're done handling slide_question
+
+        } catch (error) {
+          // Handle errors for slide question response
+          if (error.name === 'AbortError') {
+            logger.debug('API', 'Respond request aborted by user')
+            setUiState(UI_STATE.LISTENING)
+            return
+          }
+          logger.error('API', 'Slide question response failed', {
+            error: error.message,
+          })
+          // Fall back to showing error state
+          setLastFailedQuery(query)
+          setErrorMessage('Could not answer your question. Please try again.')
+          setUiState(UI_STATE.ERROR)
+          return
+        }
+      }
+
       const isFollowUp = classifyResult.classification === 'follow_up'
 
       let generateData
@@ -2284,11 +2443,18 @@ function App() {
               ) : (
                 // Regular content slide with image and subtitle
                 <>
-                  <div className="w-full aspect-video bg-surface rounded-xl shadow-lg overflow-hidden">
+                  {/* CORE024: Container with relative positioning for highlight overlay */}
+                  <div className="relative w-full aspect-video bg-surface rounded-xl shadow-lg overflow-hidden">
                     <img
                       src={allSlides[currentIndex]?.imageUrl}
                       alt="Slide diagram"
                       className="w-full h-full object-contain"
+                    />
+                    {/* CORE024: Highlight overlay for slide questions */}
+                    <HighlightOverlay
+                      x={highlightPosition?.x}
+                      y={highlightPosition?.y}
+                      visible={highlightPosition !== null}
                     />
                   </div>
 

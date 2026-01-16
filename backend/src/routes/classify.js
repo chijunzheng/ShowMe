@@ -47,15 +47,112 @@ function getKeywordsForTopic(topicName) {
 }
 
 /**
+ * Check if a query is asking about something on the current slide
+ * CORE023: Detect SLIDE_QUESTION type for verbal-only responses
+ * @param {string} query - The user's question
+ * @returns {boolean} True if asking about current slide content
+ */
+function isSlideQuestion(query) {
+  const normalizedQuery = query.toLowerCase()
+
+  // Phrases that indicate asking about something visible on screen
+  const slideQuestionPhrases = [
+    // Direct references to visual elements
+    "what's that",
+    "what is that",
+    "whats that",
+    "what's this",
+    "what is this",
+    "whats this",
+    "what's the",
+    "what is the",
+    "whats the",
+    // Color-based questions about diagram elements
+    "the red",
+    "the blue",
+    "the green",
+    "the yellow",
+    "the orange",
+    "the purple",
+    "the pink",
+    "the black",
+    "the white",
+    "the gray",
+    "the grey",
+    "the colored",
+    "that color",
+    "this color",
+    // Shape and visual element references
+    "the arrow",
+    "that arrow",
+    "this arrow",
+    "the line",
+    "that line",
+    "this line",
+    "the circle",
+    "the box",
+    "the label",
+    "that label",
+    "the part",
+    "that part",
+    "this part",
+    "the section",
+    "that section",
+    // Pointing references
+    "point to",
+    "pointing to",
+    "pointing at",
+    "show me",
+    "explain the",
+    "explain that",
+    "explain this",
+    // Questions about visible content
+    "what does that mean",
+    "what does this mean",
+    "what does it mean",
+    "why is there",
+    "why are there",
+    "what are those",
+    "what are these",
+    "what's happening",
+    "what is happening",
+    // Diagram-specific
+    "in the diagram",
+    "on the diagram",
+    "in the picture",
+    "on the picture",
+    "in the image",
+    "on the image",
+    "on the slide",
+    "in the slide",
+  ]
+
+  // Check for any slide question phrases
+  return slideQuestionPhrases.some(phrase =>
+    normalizedQuery.includes(phrase)
+  )
+}
+
+/**
  * Check if a query is related to the active topic using keyword matching
  * In production, this would use Gemini for semantic understanding
  * @param {string} query - The user's new question
  * @param {object} activeTopic - The current active topic with name and keywords
  * @param {Array} conversationHistory - Previous Q&A context
- * @returns {{isFollowUp: boolean, reasoning: string}}
+ * @param {object} currentSlide - The current slide context (for SLIDE_QUESTION detection)
+ * @returns {{classification: string, reasoning: string}}
  */
-function classifyQueryRelation(query, activeTopic, conversationHistory = []) {
+function classifyQueryRelation(query, activeTopic, conversationHistory = [], currentSlide = null) {
   const normalizedQuery = query.toLowerCase()
+
+  // CORE023: First check if this is a slide question
+  // Only classify as SLIDE_QUESTION if we have a current slide context
+  if (currentSlide && isSlideQuestion(query)) {
+    return {
+      classification: 'slide_question',
+      reasoning: `Query appears to be asking about something visible on the current slide.`
+    }
+  }
 
   // Get keywords related to the active topic
   const topicKeywordList = getKeywordsForTopic(activeTopic?.name)
@@ -129,7 +226,9 @@ function classifyQueryRelation(query, activeTopic, conversationHistory = []) {
 
 /**
  * POST /api/classify
- * Classify query as follow_up or new_topic based on context
+ * Classify query as follow_up, new_topic, or slide_question based on context
+ *
+ * CORE023: Added slide_question classification for questions about current slide
  *
  * Request body:
  * - query (required): The user's new question
@@ -138,9 +237,12 @@ function classifyQueryRelation(query, activeTopic, conversationHistory = []) {
  * - conversationHistory (optional): Previous Q&A context
  * - topicCount (optional): Number of topics currently in session
  * - oldestTopicId (optional): ID of oldest topic for eviction
+ * - currentSlide (optional): Current slide context for slide_question detection
+ *   - subtitle: The slide's narration text
+ *   - imageUrl: The slide's image URL (for context)
  *
  * Response:
- * - classification: 'follow_up' | 'new_topic'
+ * - classification: 'follow_up' | 'new_topic' | 'slide_question'
  * - reasoning: Human-readable explanation of the classification
  * - shouldEvictOldest: Whether the oldest topic should be evicted
  * - evictTopicId: ID of topic to evict (if shouldEvictOldest is true)
@@ -153,7 +255,8 @@ router.post('/', async (req, res) => {
       activeTopic,
       conversationHistory = [],
       topicCount = 0,
-      oldestTopicId = null
+      oldestTopicId = null,
+      currentSlide = null,
     } = req.body
 
     // F004: Sanitize and validate query input
@@ -176,11 +279,25 @@ router.post('/', async (req, res) => {
     }
 
     // Classify the query against the active topic (using sanitized input)
-    const { isFollowUp, reasoning } = classifyQueryRelation(
+    // CORE023: Pass currentSlide context for slide_question detection
+    const classifyResult = classifyQueryRelation(
       sanitizedQuery,
       activeTopic,
-      conversationHistory
+      conversationHistory,
+      currentSlide
     )
+
+    // CORE023: Handle slide_question classification
+    if (classifyResult.classification === 'slide_question') {
+      return res.json({
+        classification: 'slide_question',
+        reasoning: classifyResult.reasoning,
+        shouldEvictOldest: false,
+        evictTopicId: null,
+      })
+    }
+
+    const { isFollowUp, reasoning } = classifyResult
 
     // Determine if we need to evict the oldest topic
     // Only evict if: new topic, and we're at the max topic limit (3)
