@@ -59,6 +59,9 @@ const AUDIO_CONFIG = {
   MIN_AUDIO_SIZE: 5000,
   // Maximum audio size in bytes (matches backend 10MB limit)
   MAX_AUDIO_SIZE: 10 * 1024 * 1024,
+  // CORE019: Minimum hold duration for push-to-talk (ms)
+  // Prevents accidental taps from triggering recording
+  MIN_HOLD_DURATION: 300,
 }
 
 /**
@@ -235,6 +238,15 @@ function App() {
 
   // Track whether slideshow just finished (for auto-trigger of queued questions - F048)
   const hasFinishedSlideshowRef = useRef(false)
+
+  // CORE019: Push-to-talk refs
+  // Track when the mic button was pressed to calculate hold duration
+  const micPressStartTimeRef = useRef(null)
+  // Track if the recording was started (for edge cases like mouse leaving button)
+  const isRecordingStartedRef = useRef(false)
+  // Track if touch is active to prevent double event firing on mobile
+  // (touchstart/touchend AND mousedown/mouseup both fire for the same interaction)
+  const isTouchActiveRef = useRef(false)
 
   // Audio playback ref for slide narration (F037)
   const slideAudioRef = useRef(null)
@@ -963,19 +975,156 @@ function App() {
   }, [])
 
   /**
-   * Handles mic button click - toggles recording on/off.
-   * If not listening, requests permission and starts capture.
-   * If already listening, stops and processes the recording.
+   * CORE019: Handles mic button press down (mouse or touch)
+   * Starts recording immediately when user presses the button.
+   * Records the press start time for minimum hold duration check.
+   * Handles double event firing on mobile by tracking touch state.
    */
-  const handleMicClick = useCallback(() => {
-    if (isListening) {
-      // Stop current recording and trigger generation
-      handleVoiceComplete()
-    } else {
-      // Start new recording session
-      startListening()
+  const handleMicPressStart = useCallback((event) => {
+    // Handle double event firing on mobile: touchstart fires first, then mousedown
+    // Track touch state to skip the duplicate mouse event
+    if (event.type === 'touchstart') {
+      isTouchActiveRef.current = true
+    } else if (event.type === 'mousedown' && isTouchActiveRef.current) {
+      // Skip mouse event if touch is active (prevents double firing)
+      return
     }
-  }, [isListening, handleVoiceComplete, startListening])
+
+    // Prevent default to avoid any text selection or context menus
+    event.preventDefault()
+
+    // Record the press start time for duration check
+    micPressStartTimeRef.current = Date.now()
+    isRecordingStartedRef.current = false
+
+    // Start recording immediately
+    logger.debug('AUDIO', 'Push-to-talk: button pressed, starting recording')
+    startListening()
+
+    // Mark recording as started after a brief moment
+    // This allows startListening to initialize before we track it
+    setTimeout(() => {
+      if (micPressStartTimeRef.current !== null) {
+        isRecordingStartedRef.current = true
+      }
+    }, 50)
+  }, [startListening])
+
+  /**
+   * CORE019: Handles mic button release (mouse or touch)
+   * Checks if the hold duration meets minimum threshold, then processes recording.
+   * Quick taps (< 300ms) are ignored to prevent accidental activation.
+   * Handles double event firing on mobile by tracking touch state.
+   */
+  const handleMicPressEnd = useCallback((event) => {
+    // Handle double event firing on mobile: touchend fires first, then mouseup
+    // Track touch state to skip the duplicate mouse event
+    if (event.type === 'touchend') {
+      // Reset touch state after a short delay to allow for edge cases
+      setTimeout(() => { isTouchActiveRef.current = false }, 100)
+    } else if (event.type === 'mouseup' && isTouchActiveRef.current) {
+      // Skip mouse event if touch is active (prevents double firing)
+      return
+    }
+
+    // Prevent default behavior
+    event.preventDefault()
+
+    // Check if there was a valid press start
+    if (micPressStartTimeRef.current === null) {
+      return
+    }
+
+    const holdDuration = Date.now() - micPressStartTimeRef.current
+    micPressStartTimeRef.current = null
+
+    // Check minimum hold duration to prevent accidental taps
+    if (holdDuration < AUDIO_CONFIG.MIN_HOLD_DURATION) {
+      logger.debug('AUDIO', 'Push-to-talk: quick tap detected, canceling recording', {
+        holdDuration,
+        minRequired: AUDIO_CONFIG.MIN_HOLD_DURATION,
+      })
+      // Cancel the recording without processing
+      stopListening()
+      setLiveTranscription('')
+      isRecordingStartedRef.current = false
+      return
+    }
+
+    // Valid hold duration - stop recording and process
+    logger.debug('AUDIO', 'Push-to-talk: button released, processing recording', {
+      holdDuration,
+    })
+
+    // Process the recording
+    handleVoiceComplete()
+    isRecordingStartedRef.current = false
+  }, [handleVoiceComplete, stopListening])
+
+  /**
+   * CORE019: Handles mouse leaving the mic button while pressed
+   * This is an edge case where user drags mouse off the button.
+   * We still process the recording in this case.
+   */
+  const handleMicMouseLeave = useCallback(() => {
+    // Only handle if we're actively recording from a button press
+    if (micPressStartTimeRef.current !== null && isRecordingStartedRef.current) {
+      const holdDuration = Date.now() - micPressStartTimeRef.current
+      micPressStartTimeRef.current = null
+
+      // If held long enough, process the recording
+      if (holdDuration >= AUDIO_CONFIG.MIN_HOLD_DURATION) {
+        logger.debug('AUDIO', 'Push-to-talk: mouse left button, processing recording', {
+          holdDuration,
+        })
+        handleVoiceComplete()
+      } else {
+        // Cancel if not held long enough
+        logger.debug('AUDIO', 'Push-to-talk: mouse left button too early, canceling', {
+          holdDuration,
+        })
+        stopListening()
+        setLiveTranscription('')
+      }
+      isRecordingStartedRef.current = false
+    }
+  }, [handleVoiceComplete, stopListening])
+
+  /**
+   * CORE019: Handles touch cancel events (e.g., system interruption)
+   * Ensures recording is cleaned up properly if the touch is cancelled.
+   */
+  const handleMicTouchCancel = useCallback(() => {
+    if (micPressStartTimeRef.current !== null) {
+      logger.debug('AUDIO', 'Push-to-talk: touch cancelled, canceling recording')
+      micPressStartTimeRef.current = null
+      stopListening()
+      setLiveTranscription('')
+      isRecordingStartedRef.current = false
+    }
+  }, [stopListening])
+
+  /**
+   * CORE019: Handles keyboard key down for mic button accessibility
+   * Allows Enter and Space keys to activate push-to-talk for keyboard users.
+   */
+  const handleMicKeyDown = useCallback((event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      handleMicPressStart(event)
+    }
+  }, [handleMicPressStart])
+
+  /**
+   * CORE019: Handles keyboard key up for mic button accessibility
+   * Allows Enter and Space keys to release push-to-talk for keyboard users.
+   */
+  const handleMicKeyUp = useCallback((event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      handleMicPressEnd(event)
+    }
+  }, [handleMicPressEnd])
 
   /**
    * Classify a query to determine if it's a follow-up or new topic
@@ -1708,12 +1857,23 @@ function App() {
         )}
         </main>
 
-        {/* F038, F058: Mic button - fixed on mobile with safe area inset for notched devices */}
+        {/* F038, F058, CORE019: Mic button - push-to-talk with fixed position for mobile */}
+        {/* Hold to record, release to send. Quick taps (<300ms) are ignored. */}
         <button
-          onClick={handleMicClick}
+          // CORE019: Push-to-talk event handlers for mouse
+          onMouseDown={uiState !== UI_STATE.GENERATING && uiState !== UI_STATE.ERROR ? handleMicPressStart : undefined}
+          onMouseUp={uiState !== UI_STATE.GENERATING && uiState !== UI_STATE.ERROR ? handleMicPressEnd : undefined}
+          onMouseLeave={handleMicMouseLeave}
+          // CORE019: Push-to-talk event handlers for touch (mobile)
+          onTouchStart={uiState !== UI_STATE.GENERATING && uiState !== UI_STATE.ERROR ? handleMicPressStart : undefined}
+          onTouchEnd={uiState !== UI_STATE.GENERATING && uiState !== UI_STATE.ERROR ? handleMicPressEnd : undefined}
+          onTouchCancel={handleMicTouchCancel}
+          // CORE019: Keyboard accessibility - Enter/Space activate push-to-talk
+          onKeyDown={uiState !== UI_STATE.GENERATING && uiState !== UI_STATE.ERROR ? handleMicKeyDown : undefined}
+          onKeyUp={uiState !== UI_STATE.GENERATING && uiState !== UI_STATE.ERROR ? handleMicKeyUp : undefined}
           disabled={uiState === UI_STATE.GENERATING || uiState === UI_STATE.ERROR}
-          aria-label={isListening ? 'Stop recording' : 'Start recording'}
-          className={`fixed left-1/2 -translate-x-1/2 z-50 w-16 h-16 rounded-full shadow-lg flex items-center justify-center text-2xl transition-all ${
+          aria-label={isListening ? 'Recording - release to send' : 'Hold to record'}
+          className={`fixed left-1/2 -translate-x-1/2 z-50 w-16 h-16 rounded-full shadow-lg flex items-center justify-center text-2xl transition-all select-none ${
             uiState === UI_STATE.GENERATING || uiState === UI_STATE.ERROR
               ? 'bg-gray-300 cursor-not-allowed'
               : isListening
@@ -1723,6 +1883,10 @@ function App() {
           style={{
             // F058: Use safe area inset for notched devices, fallback to 24px
             bottom: 'max(24px, env(safe-area-inset-bottom, 24px))',
+            // Prevent touch callout on iOS
+            WebkitTouchCallout: 'none',
+            // Prevent text selection
+            userSelect: 'none',
           }}
         >
           {/* Show stop icon when listening, mic icon otherwise */}
