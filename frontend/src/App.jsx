@@ -62,6 +62,12 @@ const AUDIO_CONFIG = {
   // CORE019: Minimum hold duration for push-to-talk (ms)
   // Prevents accidental taps from triggering recording
   MIN_HOLD_DURATION: 300,
+  // CORE021: VAD configuration for interrupt detection
+  // Higher threshold to avoid triggering on slideshow audio feedback
+  VAD_THRESHOLD: 25,
+  // Number of consecutive voice frames required to trigger interrupt
+  // At ~16ms per frame (60fps), 10 frames = ~160ms of sustained voice
+  VAD_FRAME_COUNT: 10,
 }
 
 /**
@@ -248,11 +254,30 @@ function App() {
   // (touchstart/touchend AND mousedown/mouseup both fire for the same interaction)
   const isTouchActiveRef = useRef(false)
 
+  // CORE021: VAD (Voice Activity Detection) refs for interrupt during playback
+  // Stream and context used for VAD monitoring (separate from recording)
+  const vadStreamRef = useRef(null)
+  const vadContextRef = useRef(null)
+  const vadAnalyserRef = useRef(null)
+  const vadAnimationFrameRef = useRef(null)
+  // Track consecutive voice frames to avoid false positives
+  const vadVoiceFrameCountRef = useRef(0)
+  // Issue 2 fix: Pending flag to prevent race conditions during start/stop
+  const vadPendingRef = useRef(false)
+  // Issue 3 fix: Track source node for proper cleanup
+  const vadSourceRef = useRef(null)
+  // CORE021: State for VAD mode - can be disabled if user prefers push-to-talk only
+  const [isVadEnabled, setIsVadEnabled] = useState(true)
+
   // Audio playback ref for slide narration (F037)
   const slideAudioRef = useRef(null)
 
   // Audio playback ref for greeting audio (CORE010)
   const greetingAudioRef = useRef(null)
+
+  // CORE022: Interrupt resume point - stores position when user interrupts slideshow
+  // Format: { topicId: string, slideIndex: number } or null when no interrupt occurred
+  const [interruptResumePoint, setInterruptResumePoint] = useState(null)
 
   // Default slide duration in milliseconds (used when slide.duration is not available)
   const DEFAULT_SLIDE_DURATION = 5000
@@ -748,8 +773,199 @@ function App() {
       if (stillWorkingTimerRef.current) {
         clearTimeout(stillWorkingTimerRef.current)
       }
+      // CORE021: Cleanup VAD resources
+      if (vadAnimationFrameRef.current) {
+        cancelAnimationFrame(vadAnimationFrameRef.current)
+      }
+      // Issue 3 fix: Disconnect source node on unmount
+      if (vadSourceRef.current) {
+        vadSourceRef.current.disconnect()
+      }
+      if (vadStreamRef.current) {
+        vadStreamRef.current.getTracks().forEach((track) => track.stop())
+      }
+      if (vadContextRef.current && vadContextRef.current.state !== 'closed') {
+        vadContextRef.current.close()
+      }
     }
   }, [])
+
+  /**
+   * CORE021: Stop VAD monitoring
+   * Cleans up microphone resources used for voice activity detection
+   */
+  const stopVadMonitoring = useCallback(() => {
+    // Cancel the animation frame loop
+    if (vadAnimationFrameRef.current) {
+      cancelAnimationFrame(vadAnimationFrameRef.current)
+      vadAnimationFrameRef.current = null
+    }
+
+    // Issue 3 fix: Disconnect and cleanup source node to prevent memory leak
+    if (vadSourceRef.current) {
+      vadSourceRef.current.disconnect()
+      vadSourceRef.current = null
+    }
+
+    // Stop the media stream
+    if (vadStreamRef.current) {
+      vadStreamRef.current.getTracks().forEach((track) => track.stop())
+      vadStreamRef.current = null
+    }
+
+    // Close the audio context
+    if (vadContextRef.current && vadContextRef.current.state !== 'closed') {
+      vadContextRef.current.close()
+      vadContextRef.current = null
+    }
+
+    vadAnalyserRef.current = null
+    vadVoiceFrameCountRef.current = 0
+  }, [])
+
+  /**
+   * CORE021: Start VAD monitoring during slideshow playback
+   * Monitors microphone input for voice activity without recording.
+   * When sustained voice is detected, triggers interrupt flow.
+   */
+  const startVadMonitoring = useCallback(async () => {
+    // Issue 2 fix: Don't start if already monitoring, VAD disabled, or operation pending
+    if (vadStreamRef.current || !isVadEnabled || vadPendingRef.current) return
+
+    // Issue 2 fix: Set pending flag to prevent race conditions
+    vadPendingRef.current = true
+
+    try {
+      // Request microphone access for VAD monitoring
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      })
+
+      vadStreamRef.current = stream
+
+      // Issue 1 fix: Verify echo cancellation is active after getting stream
+      const audioTrack = stream.getAudioTracks()[0]
+      const settings = audioTrack.getSettings()
+      if (!settings.echoCancellation) {
+        logger.warn('AUDIO', 'Echo cancellation not available - VAD may have false positives')
+      }
+
+      logger.debug('AUDIO', 'VAD monitoring started for interrupt detection', {
+        echoCancellation: settings.echoCancellation,
+        noiseSuppression: settings.noiseSuppression,
+      })
+
+      // Create audio context for analysis
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)()
+      vadContextRef.current = audioContext
+
+      // Create analyser for frequency data
+      const analyser = audioContext.createAnalyser()
+      analyser.fftSize = AUDIO_CONFIG.FFT_SIZE
+      analyser.smoothingTimeConstant = 0.8
+      vadAnalyserRef.current = analyser
+
+      // Issue 3 fix: Track source node in ref for proper cleanup
+      vadSourceRef.current = audioContext.createMediaStreamSource(stream)
+      vadSourceRef.current.connect(analyser)
+
+      // Additional fix: Allocate dataArray once outside the loop to avoid GC pressure
+      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+
+      // Start the VAD monitoring loop
+      const monitorVad = () => {
+        if (!vadAnalyserRef.current) return
+
+        // Use pre-allocated dataArray instead of creating new one each frame
+        vadAnalyserRef.current.getByteFrequencyData(dataArray)
+
+        // Calculate average audio level
+        const sum = dataArray.reduce((acc, val) => acc + val, 0)
+        const average = sum / dataArray.length
+
+        // Check if voice is detected (above threshold)
+        if (average > AUDIO_CONFIG.VAD_THRESHOLD) {
+          vadVoiceFrameCountRef.current++
+
+          // If we've had enough consecutive voice frames, trigger interrupt
+          if (vadVoiceFrameCountRef.current >= AUDIO_CONFIG.VAD_FRAME_COUNT) {
+            logger.info('AUDIO', 'VAD interrupt: voice detected during playback', {
+              averageLevel: average.toFixed(2),
+              frameCount: vadVoiceFrameCountRef.current,
+            })
+
+            // Stop VAD monitoring before triggering interrupt
+            stopVadMonitoring()
+
+            // Pause slideshow audio
+            if (slideAudioRef.current) {
+              slideAudioRef.current.pause()
+            }
+            setIsPlaying(false)
+
+            // Store resume point for CORE022
+            const currentSlide = allSlides[currentIndex]
+            if (currentSlide) {
+              setInterruptResumePoint({
+                topicId: currentSlide.topicId || null,
+                slideIndex: currentIndex,
+              })
+            }
+
+            // Transition to listening state and start recording
+            setUiState(UI_STATE.LISTENING)
+            startListening()
+            return
+          }
+        } else {
+          // Reset frame count if silence detected
+          vadVoiceFrameCountRef.current = 0
+        }
+
+        // Continue monitoring
+        vadAnimationFrameRef.current = requestAnimationFrame(monitorVad)
+      }
+
+      // Start the monitoring loop
+      vadAnimationFrameRef.current = requestAnimationFrame(monitorVad)
+    } catch (error) {
+      // Silently fail VAD - user can still use push-to-talk
+      logger.debug('AUDIO', 'VAD monitoring failed to start (mic may be in use)', {
+        error: error.message,
+      })
+    } finally {
+      // Issue 2 fix: Always clear pending flag when done
+      vadPendingRef.current = false
+    }
+  }, [isVadEnabled, allSlides, currentIndex, stopVadMonitoring, startListening])
+
+  /**
+   * CORE021: Effect to manage VAD monitoring lifecycle
+   * Starts VAD when entering slideshow state with playback,
+   * stops when leaving slideshow or pausing.
+   */
+  useEffect(() => {
+    // Only monitor when in slideshow, playing, VAD enabled, and slides exist
+    if (
+      uiState === UI_STATE.SLIDESHOW &&
+      isPlaying &&
+      isVadEnabled &&
+      allSlides.length > 0
+    ) {
+      startVadMonitoring()
+    } else {
+      stopVadMonitoring()
+    }
+
+    // Cleanup on unmount or state change
+    return () => {
+      stopVadMonitoring()
+    }
+  }, [uiState, isPlaying, isVadEnabled, allSlides.length, startVadMonitoring, stopVadMonitoring])
 
   /**
    * Handles completion of voice recording.
@@ -975,10 +1191,11 @@ function App() {
   }, [])
 
   /**
-   * CORE019: Handles mic button press down (mouse or touch)
+   * CORE019, CORE020: Handles mic button press down (mouse or touch)
    * Starts recording immediately when user presses the button.
    * Records the press start time for minimum hold duration check.
    * Handles double event firing on mobile by tracking touch state.
+   * CORE020: If in slideshow mode, pauses audio and stores resume point.
    */
   const handleMicPressStart = useCallback((event) => {
     // Handle double event firing on mobile: touchstart fires first, then mousedown
@@ -992,6 +1209,33 @@ function App() {
 
     // Prevent default to avoid any text selection or context menus
     event.preventDefault()
+
+    // CORE020: If in slideshow mode, pause audio and store resume point
+    if (uiState === UI_STATE.SLIDESHOW) {
+      // Pause the current slide audio immediately
+      if (slideAudioRef.current) {
+        slideAudioRef.current.pause()
+        logger.debug('AUDIO', 'Interrupt: paused slideshow audio during mic press')
+      }
+
+      // Pause slideshow auto-advance
+      setIsPlaying(false)
+
+      // CORE022: Store the current position for resume functionality
+      // Find the topic ID for the current slide
+      const currentSlide = allSlides[currentIndex]
+      if (currentSlide) {
+        const resumePoint = {
+          topicId: currentSlide.topicId || null,
+          slideIndex: currentIndex,
+        }
+        setInterruptResumePoint(resumePoint)
+        logger.info('AUDIO', 'Interrupt: stored resume point', {
+          slideIndex: currentIndex,
+          topicId: resumePoint.topicId,
+        })
+      }
+    }
 
     // Record the press start time for duration check
     micPressStartTimeRef.current = Date.now()
@@ -1008,7 +1252,7 @@ function App() {
         isRecordingStartedRef.current = true
       }
     }, 50)
-  }, [startListening])
+  }, [startListening, uiState, allSlides, currentIndex])
 
   /**
    * CORE019: Handles mic button release (mouse or touch)
@@ -1546,6 +1790,42 @@ function App() {
     }
   }, [uiState, allSlides.length])
 
+  /**
+   * CORE022: Handle resuming from an interrupt point
+   * Returns to the slide position where the user interrupted the slideshow
+   */
+  const handleResumeFromInterrupt = useCallback(() => {
+    if (!interruptResumePoint) return
+
+    // Validate that the slide index is still valid (topics may have changed)
+    if (interruptResumePoint.slideIndex < allSlides.length) {
+      logger.info('AUDIO', 'Resuming from interrupt point', {
+        slideIndex: interruptResumePoint.slideIndex,
+        topicId: interruptResumePoint.topicId,
+      })
+      setCurrentIndex(interruptResumePoint.slideIndex)
+      setIsPlaying(true)
+    } else {
+      // Slide no longer exists (e.g., topic was evicted), just clear the resume point
+      logger.warn('AUDIO', 'Resume point no longer valid, clearing', {
+        attemptedIndex: interruptResumePoint.slideIndex,
+        currentSlideCount: allSlides.length,
+      })
+    }
+
+    // Clear the resume point after using it
+    setInterruptResumePoint(null)
+  }, [interruptResumePoint, allSlides.length])
+
+  /**
+   * CORE022: Dismiss the resume point without navigating
+   * User chooses to continue with current content instead of resuming
+   */
+  const handleDismissResumePoint = useCallback(() => {
+    logger.debug('AUDIO', 'User dismissed resume point')
+    setInterruptResumePoint(null)
+  }, [])
+
   return (
     // F055, F056, F058: Responsive container with sidebar layout on desktop
     <div className="min-h-screen flex">
@@ -1846,6 +2126,43 @@ function App() {
                 <span aria-hidden="true">&#9654;</span>
               </button>
             </div>
+
+            {/* CORE022: Resume button - shown when user interrupted a previous slideshow */}
+            {interruptResumePoint && interruptResumePoint.slideIndex !== currentIndex && (
+              <div className="flex items-center gap-2 mt-3 p-3 bg-surface rounded-lg border border-gray-200">
+                <button
+                  onClick={handleResumeFromInterrupt}
+                  aria-label="Resume previous slideshow"
+                  className="px-4 py-2 min-h-[44px] bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium flex items-center gap-2"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="w-4 h-4"
+                    aria-hidden="true"
+                  >
+                    <path fillRule="evenodd" d="M15.79 14.77a.75.75 0 01-1.06.02l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 111.04 1.08L11.832 10l3.938 3.71a.75.75 0 01.02 1.06zm-6 0a.75.75 0 01-1.06.02l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 111.04 1.08L5.832 10l3.938 3.71a.75.75 0 01.02 1.06z" clipRule="evenodd" />
+                  </svg>
+                  Resume previous
+                </button>
+                <button
+                  onClick={handleDismissResumePoint}
+                  aria-label="Dismiss resume option"
+                  className="p-2 min-w-[44px] min-h-[44px] text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="w-5 h-5"
+                    aria-hidden="true"
+                  >
+                    <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                  </svg>
+                </button>
+              </div>
+            )}
 
             {/* Queue indicator - shows number of questions waiting (F048) */}
             {questionQueue.length > 0 && (
