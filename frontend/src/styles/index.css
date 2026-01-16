@@ -55,11 +55,6 @@ body {
   100% { transform: scale(1.8); opacity: 0; }
 }
 
-.mic-pulse {
-  /* Required for absolute positioned pseudo-element */
-  position: relative;
-}
-
 .mic-pulse::before {
   content: '';
   position: absolute;

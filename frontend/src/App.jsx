@@ -69,12 +69,6 @@ const AUDIO_CONFIG = {
   // CORE019: Minimum hold duration for push-to-talk (ms)
   // Prevents accidental taps from triggering recording
   MIN_HOLD_DURATION: 300,
-  // CORE021: VAD configuration for interrupt detection
-  // Higher threshold to avoid triggering on slideshow audio feedback
-  VAD_THRESHOLD: 25,
-  // Number of consecutive voice frames required to trigger interrupt
-  // At ~16ms per frame (60fps), 10 frames = ~160ms of sustained voice
-  VAD_FRAME_COUNT: 10,
 }
 
 /**
@@ -463,6 +457,7 @@ function App() {
   const silenceTimerRef = useRef(null)
   const animationFrameRef = useRef(null)
   const lastSpeechTimeRef = useRef(null)
+  const isProcessingRecordingRef = useRef(false)
 
   // Track whether slideshow just finished (for auto-trigger of queued questions - F048)
   const hasFinishedSlideshowRef = useRef(false)
@@ -475,21 +470,6 @@ function App() {
   // Track if touch is active to prevent double event firing on mobile
   // (touchstart/touchend AND mousedown/mouseup both fire for the same interaction)
   const isTouchActiveRef = useRef(false)
-
-  // CORE021: VAD (Voice Activity Detection) refs for interrupt during playback
-  // Stream and context used for VAD monitoring (separate from recording)
-  const vadStreamRef = useRef(null)
-  const vadContextRef = useRef(null)
-  const vadAnalyserRef = useRef(null)
-  const vadAnimationFrameRef = useRef(null)
-  // Track consecutive voice frames to avoid false positives
-  const vadVoiceFrameCountRef = useRef(0)
-  // Issue 2 fix: Pending flag to prevent race conditions during start/stop
-  const vadPendingRef = useRef(false)
-  // Issue 3 fix: Track source node for proper cleanup
-  const vadSourceRef = useRef(null)
-  // CORE021: State for VAD mode - can be disabled if user prefers push-to-talk only
-  const [isVadEnabled, setIsVadEnabled] = useState(true)
 
   // Audio playback ref for slide narration (F037)
   const slideAudioRef = useRef(null)
@@ -1035,333 +1015,8 @@ function App() {
       if (stillWorkingTimerRef.current) {
         clearTimeout(stillWorkingTimerRef.current)
       }
-      // CORE021: Cleanup VAD resources
-      if (vadAnimationFrameRef.current) {
-        cancelAnimationFrame(vadAnimationFrameRef.current)
-      }
-      // Issue 3 fix: Disconnect source node on unmount
-      if (vadSourceRef.current) {
-        vadSourceRef.current.disconnect()
-      }
-      if (vadStreamRef.current) {
-        vadStreamRef.current.getTracks().forEach((track) => track.stop())
-      }
-      if (vadContextRef.current && vadContextRef.current.state !== 'closed') {
-        vadContextRef.current.close()
-      }
     }
   }, [])
-
-  /**
-   * CORE021: Stop VAD monitoring
-   * Cleans up microphone resources used for voice activity detection
-   */
-  const stopVadMonitoring = useCallback(() => {
-    // Cancel the animation frame loop
-    if (vadAnimationFrameRef.current) {
-      cancelAnimationFrame(vadAnimationFrameRef.current)
-      vadAnimationFrameRef.current = null
-    }
-
-    // Issue 3 fix: Disconnect and cleanup source node to prevent memory leak
-    if (vadSourceRef.current) {
-      vadSourceRef.current.disconnect()
-      vadSourceRef.current = null
-    }
-
-    // Stop the media stream
-    if (vadStreamRef.current) {
-      vadStreamRef.current.getTracks().forEach((track) => track.stop())
-      vadStreamRef.current = null
-    }
-
-    // Close the audio context
-    if (vadContextRef.current && vadContextRef.current.state !== 'closed') {
-      vadContextRef.current.close()
-      vadContextRef.current = null
-    }
-
-    vadAnalyserRef.current = null
-    vadVoiceFrameCountRef.current = 0
-  }, [])
-
-  /**
-   * CORE021: Start VAD monitoring during slideshow playback
-   * Monitors microphone input for voice activity without recording.
-   * When sustained voice is detected, triggers interrupt flow.
-   */
-  const startVadMonitoring = useCallback(async () => {
-    // Issue 2 fix: Don't start if already monitoring, VAD disabled, or operation pending
-    if (vadStreamRef.current || !isVadEnabled || vadPendingRef.current) return
-
-    // Issue 2 fix: Set pending flag to prevent race conditions
-    vadPendingRef.current = true
-
-    try {
-      // Request microphone access for VAD monitoring
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      })
-
-      vadStreamRef.current = stream
-
-      // Issue 1 fix: Verify echo cancellation is active after getting stream
-      const audioTrack = stream.getAudioTracks()[0]
-      const settings = audioTrack.getSettings()
-      if (!settings.echoCancellation) {
-        logger.warn('AUDIO', 'Echo cancellation not available - VAD may have false positives')
-      }
-
-      logger.debug('AUDIO', 'VAD monitoring started for interrupt detection', {
-        echoCancellation: settings.echoCancellation,
-        noiseSuppression: settings.noiseSuppression,
-      })
-
-      // Create audio context for analysis
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)()
-      vadContextRef.current = audioContext
-
-      // Create analyser for frequency data
-      const analyser = audioContext.createAnalyser()
-      analyser.fftSize = AUDIO_CONFIG.FFT_SIZE
-      analyser.smoothingTimeConstant = 0.8
-      vadAnalyserRef.current = analyser
-
-      // Issue 3 fix: Track source node in ref for proper cleanup
-      vadSourceRef.current = audioContext.createMediaStreamSource(stream)
-      vadSourceRef.current.connect(analyser)
-
-      // Additional fix: Allocate dataArray once outside the loop to avoid GC pressure
-      const dataArray = new Uint8Array(analyser.frequencyBinCount)
-
-      // Start the VAD monitoring loop
-      const monitorVad = () => {
-        if (!vadAnalyserRef.current) return
-
-        // Use pre-allocated dataArray instead of creating new one each frame
-        vadAnalyserRef.current.getByteFrequencyData(dataArray)
-
-        // Calculate average audio level
-        const sum = dataArray.reduce((acc, val) => acc + val, 0)
-        const average = sum / dataArray.length
-
-        // Check if voice is detected (above threshold)
-        if (average > AUDIO_CONFIG.VAD_THRESHOLD) {
-          vadVoiceFrameCountRef.current++
-
-          // If we've had enough consecutive voice frames, trigger interrupt
-          if (vadVoiceFrameCountRef.current >= AUDIO_CONFIG.VAD_FRAME_COUNT) {
-            logger.info('AUDIO', 'VAD interrupt: voice detected during playback', {
-              averageLevel: average.toFixed(2),
-              frameCount: vadVoiceFrameCountRef.current,
-            })
-
-            // Stop VAD monitoring before triggering interrupt
-            stopVadMonitoring()
-
-            // Pause slideshow audio
-            if (slideAudioRef.current) {
-              slideAudioRef.current.pause()
-            }
-            setIsPlaying(false)
-
-            // Store resume point for CORE022
-            const currentSlide = allSlides[currentIndex]
-            if (currentSlide) {
-              setInterruptResumePoint({
-                topicId: currentSlide.topicId || null,
-                slideIndex: currentIndex,
-              })
-            }
-
-            // Transition to listening state and start recording
-            setUiState(UI_STATE.LISTENING)
-            startListening()
-            return
-          }
-        } else {
-          // Reset frame count if silence detected
-          vadVoiceFrameCountRef.current = 0
-        }
-
-        // Continue monitoring
-        vadAnimationFrameRef.current = requestAnimationFrame(monitorVad)
-      }
-
-      // Start the monitoring loop
-      vadAnimationFrameRef.current = requestAnimationFrame(monitorVad)
-    } catch (error) {
-      // Silently fail VAD - user can still use push-to-talk
-      logger.debug('AUDIO', 'VAD monitoring failed to start (mic may be in use)', {
-        error: error.message,
-      })
-    } finally {
-      // Issue 2 fix: Always clear pending flag when done
-      vadPendingRef.current = false
-    }
-  }, [isVadEnabled, allSlides, currentIndex, stopVadMonitoring, startListening])
-
-  /**
-   * CORE021: Effect to manage VAD monitoring lifecycle
-   * Starts VAD when entering slideshow state with playback,
-   * stops when leaving slideshow or pausing.
-   */
-  useEffect(() => {
-    // Only monitor when in slideshow, playing, VAD enabled, and slides exist
-    if (
-      uiState === UI_STATE.SLIDESHOW &&
-      isPlaying &&
-      isVadEnabled &&
-      allSlides.length > 0
-    ) {
-      startVadMonitoring()
-    } else {
-      stopVadMonitoring()
-    }
-
-    // Cleanup on unmount or state change
-    return () => {
-      stopVadMonitoring()
-    }
-  }, [uiState, isPlaying, isVadEnabled, allSlides.length, startVadMonitoring, stopVadMonitoring])
-
-  /**
-   * Handles completion of voice recording.
-   * Stops recording, sends audio to STT API, and triggers generation.
-   * F027: Sends audio to backend STT endpoint
-   * F028: Displays transcription status and result
-   * F030: Triggers generation with transcribed text
-   */
-  const handleVoiceComplete = useCallback(async () => {
-    // Capture MIME type before cleanup (refs will be cleared by stopListening)
-    const mimeType = mediaRecorderRef.current?.mimeType || 'audio/webm'
-
-    // Stop recording - this triggers ondataavailable for the final chunk
-    // The ondataavailable handler pushes to audioChunksRef.current synchronously
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop()
-    }
-
-    // Copy chunks AFTER stop() so we get the final chunk from ondataavailable
-    const chunks = [...audioChunksRef.current]
-
-    // Clean up audio resources (this also tries to stop, but recorder is already stopped)
-    stopListening()
-
-    // F027: Validate audio was captured
-    if (chunks.length === 0) {
-      logger.warn('AUDIO', 'No audio chunks captured, cannot transcribe')
-      setLiveTranscription('No audio captured. Please try again.')
-      return
-    }
-
-    // Create audio blob from collected chunks
-    const audioBlob = new Blob(chunks, { type: mimeType })
-
-    // F027: Validate audio size (min ~0.5s, max 10MB matching backend)
-    if (audioBlob.size < AUDIO_CONFIG.MIN_AUDIO_SIZE) {
-      logger.debug('AUDIO', 'Audio too short, skipping transcription', {
-        size: audioBlob.size,
-        minSize: AUDIO_CONFIG.MIN_AUDIO_SIZE,
-      })
-      setLiveTranscription('Recording too short. Please speak longer.')
-      return
-    }
-
-    if (audioBlob.size > AUDIO_CONFIG.MAX_AUDIO_SIZE) {
-      logger.warn('AUDIO', 'Audio too large, skipping transcription', {
-        size: audioBlob.size,
-        maxSize: AUDIO_CONFIG.MAX_AUDIO_SIZE,
-      })
-      setLiveTranscription('Recording too long. Please try a shorter question.')
-      return
-    }
-
-    logger.info('AUDIO', 'Sending audio to STT API', {
-      size: `${(audioBlob.size / 1024).toFixed(2)}KB`,
-      mimeType,
-      chunks: chunks.length,
-    })
-
-    // F028: Show transcribing status
-    setLiveTranscription('Transcribing...')
-
-    try {
-      // Create FormData with the audio blob (field name 'audio' as expected by backend)
-      // Extract clean extension from MIME type (handles 'audio/webm;codecs=opus')
-      const extension = mimeType.split('/')[1]?.split(';')[0] || 'webm'
-      const formData = new FormData()
-      formData.append('audio', audioBlob, `recording.${extension}`)
-
-      // F027: POST to transcription endpoint
-      logger.time('API', 'transcribe-request')
-      const response = await fetch('/api/transcribe', {
-        method: 'POST',
-        body: formData,
-      })
-
-      logger.timeEnd('API', 'transcribe-request')
-
-      // Handle non-OK responses
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
-        logger.error('API', 'Transcription request failed', {
-          status: response.status,
-          error: errorData.error,
-        })
-
-        // F028: Show user-friendly error message
-        if (response.status === 503) {
-          setLiveTranscription('Transcription service unavailable. Please try again.')
-        } else if (response.status === 429) {
-          setLiveTranscription('Too many requests. Please wait a moment.')
-        } else if (response.status === 400) {
-          setLiveTranscription(errorData.error || 'Invalid audio. Please try again.')
-        } else {
-          setLiveTranscription('Transcription failed. Please try again.')
-        }
-        return
-      }
-
-      // Parse successful response
-      const data = await response.json()
-
-      logger.info('AUDIO', 'Transcription received', {
-        transcriptionLength: data.transcription?.length || 0,
-      })
-
-      // F028: Check for empty transcription
-      if (!data.transcription || data.transcription.trim() === '') {
-        logger.warn('AUDIO', 'Empty transcription received')
-        setLiveTranscription('Could not understand the audio. Please try again.')
-        return
-      }
-
-      const transcription = data.transcription.trim()
-
-      // F028: Display the transcription result
-      setLiveTranscription(transcription)
-
-      logger.info('AUDIO', 'Triggering generation with transcription', {
-        query: transcription,
-      })
-
-      // F030: Trigger generation with the actual transcribed text
-      // Note: handleQuestion is intentionally not in deps to avoid re-renders;
-      // it uses current state at call time which is the desired behavior
-      handleQuestion(transcription)
-    } catch (error) {
-      // Handle network errors
-      logger.error('API', 'Transcription network error', {
-        error: error.message,
-      })
-      setLiveTranscription('Connection error. Please check your network.')
-    }
-  }, [stopListening])
 
   /**
    * Starts voice capture by requesting microphone permission and
@@ -1434,6 +1089,7 @@ function App() {
       // Reset state for new recording session
       audioChunksRef.current = []
       lastSpeechTimeRef.current = null
+      isProcessingRecordingRef.current = false
       setIsListening(true)
       setLiveTranscription('Listening...')
     } catch (error) {
@@ -1451,6 +1107,147 @@ function App() {
       }
     }
   }, [])
+
+  /**
+   * Handles completion of voice recording.
+   * Stops recording, sends audio to STT API, and triggers generation.
+   * F027: Sends audio to backend STT endpoint
+   * F028: Displays transcription status and result
+   * F030: Triggers generation with transcribed text
+   */
+  const handleVoiceComplete = useCallback(async () => {
+    if (isProcessingRecordingRef.current) {
+      logger.debug('AUDIO', 'Recording already processing, skipping duplicate completion')
+      return
+    }
+    isProcessingRecordingRef.current = true
+    try {
+      // Capture MIME type before cleanup (refs will be cleared by stopListening)
+      const mimeType = mediaRecorderRef.current?.mimeType || 'audio/webm'
+
+      // Stop recording - this triggers ondataavailable for the final chunk
+      // The ondataavailable handler pushes to audioChunksRef.current synchronously
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop()
+      }
+
+      // Copy chunks AFTER stop() so we get the final chunk from ondataavailable
+      const chunks = [...audioChunksRef.current]
+
+      // Clean up audio resources (this also tries to stop, but recorder is already stopped)
+      stopListening()
+
+      // F027: Validate audio was captured
+      if (chunks.length === 0) {
+        logger.warn('AUDIO', 'No audio chunks captured, cannot transcribe')
+        setLiveTranscription('No audio captured. Please try again.')
+        return
+      }
+
+      // Create audio blob from collected chunks
+      const audioBlob = new Blob(chunks, { type: mimeType })
+
+      // F027: Validate audio size (min ~0.5s, max 10MB matching backend)
+      if (audioBlob.size < AUDIO_CONFIG.MIN_AUDIO_SIZE) {
+        logger.debug('AUDIO', 'Audio too short, skipping transcription', {
+          size: audioBlob.size,
+          minSize: AUDIO_CONFIG.MIN_AUDIO_SIZE,
+        })
+        setLiveTranscription('Recording too short. Please speak longer.')
+        return
+      }
+
+      if (audioBlob.size > AUDIO_CONFIG.MAX_AUDIO_SIZE) {
+        logger.warn('AUDIO', 'Audio too large, skipping transcription', {
+          size: audioBlob.size,
+          maxSize: AUDIO_CONFIG.MAX_AUDIO_SIZE,
+        })
+        setLiveTranscription('Recording too long. Please try a shorter question.')
+        return
+      }
+
+      logger.info('AUDIO', 'Sending audio to STT API', {
+        size: `${(audioBlob.size / 1024).toFixed(2)}KB`,
+        mimeType,
+        chunks: chunks.length,
+      })
+
+      // F028: Show transcribing status
+      setLiveTranscription('Transcribing...')
+
+      // Create FormData with the audio blob (field name 'audio' as expected by backend)
+      // Extract clean extension from MIME type (handles 'audio/webm;codecs=opus')
+      const extension = mimeType.split('/')[1]?.split(';')[0] || 'webm'
+      const formData = new FormData()
+      formData.append('audio', audioBlob, `recording.${extension}`)
+
+      // F027: POST to transcription endpoint
+      logger.time('API', 'transcribe-request')
+      const response = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      })
+
+      logger.timeEnd('API', 'transcribe-request')
+
+      // Handle non-OK responses
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        logger.error('API', 'Transcription request failed', {
+          status: response.status,
+          error: errorData.error,
+        })
+
+        // F028: Show user-friendly error message
+        if (response.status === 503) {
+          setLiveTranscription('Transcription service unavailable. Please try again.')
+        } else if (response.status === 429) {
+          setLiveTranscription('Too many requests. Please wait a moment.')
+        } else if (response.status === 400) {
+          setLiveTranscription(errorData.error || 'Invalid audio. Please try again.')
+        } else {
+          setLiveTranscription('Transcription failed. Please try again.')
+        }
+        return
+      }
+
+      // Parse successful response
+      const data = await response.json()
+
+      logger.info('AUDIO', 'Transcription received', {
+        transcriptionLength: data.transcription?.length || 0,
+      })
+
+      // F028: Check for empty transcription
+      if (!data.transcription || data.transcription.trim() === '') {
+        logger.warn('AUDIO', 'Empty transcription received')
+        setLiveTranscription('Could not understand the audio. Please try again.')
+        return
+      }
+
+      const transcription = data.transcription.trim()
+
+      // F028: Display the transcription result
+      setLiveTranscription(transcription)
+
+      logger.info('AUDIO', 'Triggering generation with transcription', {
+        query: transcription,
+      })
+
+      // F030: Trigger generation with the actual transcribed text
+      // Note: handleQuestion is intentionally not in deps to avoid re-renders;
+      // it uses current state at call time which is the desired behavior
+      handleQuestion(transcription)
+    } catch (error) {
+      // Handle network errors
+      logger.error('API', 'Transcription network error', {
+        error: error.message,
+      })
+      setLiveTranscription('Connection error. Please check your network.')
+    } finally {
+      isProcessingRecordingRef.current = false
+    }
+  }, [stopListening])
 
   /**
    * CORE019, CORE020: Handles mic button press down (mouse or touch)
@@ -2236,7 +2033,7 @@ function App() {
         onNewTopic={handleNewTopic}
       />
 
-      {/* Main content area - shifts right on desktop when sidebar is present */}
+      {/* Main content area - centered on wide screens when sidebar is present */}
       <div className={`
         flex-1 min-h-screen flex flex-col items-center justify-center
         px-4 py-4 pb-24 md:pb-4
@@ -2281,7 +2078,11 @@ function App() {
                     style={{
                       height: `${Math.max(baseHeight, Math.min(60, height))}px`,
                       // Only use CSS animation when not actively listening
-                      animation: isListening ? 'none' : `wave 0.5s ease-in-out infinite`,
+                      // Use longhand properties to avoid shorthand/longhand conflict warning
+                      animationName: isListening ? 'none' : 'wave',
+                      animationDuration: '0.5s',
+                      animationTimingFunction: 'ease-in-out',
+                      animationIterationCount: 'infinite',
                       animationDelay: isListening ? '0s' : `${i * 0.05}s`,
                     }}
                   />
@@ -2595,11 +2396,11 @@ function App() {
           onKeyUp={uiState !== UI_STATE.GENERATING && uiState !== UI_STATE.ERROR ? handleMicKeyUp : undefined}
           disabled={uiState === UI_STATE.GENERATING || uiState === UI_STATE.ERROR}
           aria-label={isListening ? 'Recording - release to send' : 'Hold to record'}
-          className={`fixed left-1/2 -translate-x-1/2 z-50 w-16 h-16 rounded-full shadow-lg flex items-center justify-center text-2xl transition-all select-none ${
+          className={`fixed left-1/2 z-50 w-16 h-16 rounded-full shadow-lg flex items-center justify-center text-2xl transition-all select-none ${
             uiState === UI_STATE.GENERATING || uiState === UI_STATE.ERROR
               ? 'bg-gray-300 cursor-not-allowed'
               : isListening
-                ? 'bg-red-500 hover:bg-red-600 scale-110 mic-pulse'
+                ? 'bg-red-500 hover:bg-red-600 mic-pulse'
                 : 'bg-primary hover:scale-105'
           } text-white`}
           style={{
@@ -2609,6 +2410,11 @@ function App() {
             WebkitTouchCallout: 'none',
             // Prevent text selection
             userSelect: 'none',
+            // Explicit transform to ensure centering works with scale
+            // Tailwind's -translate-x-1/2 and scale-110 don't compose properly
+            transform: isListening
+              ? 'translateX(-50%) scale(1.1)'
+              : 'translateX(-50%)',
           }}
         >
           {/* Show stop icon when listening, mic icon otherwise */}
@@ -2635,6 +2441,11 @@ function App() {
           onDismiss={hideToast}
         />
       </div>
+
+      {/* Spacer to balance sidebar and keep content centered on wide screens */}
+      {topics.length > 0 && (
+        <div className="hidden xl:block w-64 flex-shrink-0" aria-hidden="true" />
+      )}
     </div>
   )
 }

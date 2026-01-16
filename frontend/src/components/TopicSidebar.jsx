@@ -156,7 +156,7 @@ function TopicSidebar({
           w-64 bg-white border-r border-gray-200
           flex flex-col
           transition-transform duration-300 ease-in-out
-          md:translate-x-0 md:static md:z-auto
+          md:translate-x-0 md:static md:z-auto md:flex-shrink-0
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
         `}
         role="navigation"
