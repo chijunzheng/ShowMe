@@ -36,6 +36,12 @@ const MAX_TOPICS = 3
 // localStorage key for tracking if greeting has been played (CORE010)
 const GREETING_PLAYED_KEY = 'showme_greeting_played'
 
+// CORE027: localStorage key for persisting topics across page refresh
+const TOPICS_STORAGE_KEY = 'showme_topics'
+
+// CORE027: Storage version for schema migration
+const TOPICS_STORAGE_VERSION = 1
+
 // Example questions for cold start
 const EXAMPLE_QUESTIONS = [
   "How do black holes work?",
@@ -71,6 +77,215 @@ const AUDIO_CONFIG = {
 }
 
 /**
+ * CORE027: Load persisted topics from localStorage
+ * Handles corrupted data, schema validation, and migration.
+ * @returns {Object} { topics: Array, hadPersistedData: boolean }
+ */
+function loadPersistedTopics() {
+  try {
+    const stored = localStorage.getItem(TOPICS_STORAGE_KEY)
+    if (!stored) {
+      return { topics: [], hadPersistedData: false }
+    }
+
+    const parsed = JSON.parse(stored)
+
+    // Validate storage structure
+    if (!parsed || typeof parsed !== 'object') {
+      logger.warn('STORAGE', 'Invalid storage structure, resetting')
+      localStorage.removeItem(TOPICS_STORAGE_KEY)
+      return { topics: [], hadPersistedData: false }
+    }
+
+    // Check version for future schema migration
+    const version = parsed.version || 0
+    if (version > TOPICS_STORAGE_VERSION) {
+      logger.warn('STORAGE', 'Storage version newer than supported, resetting', {
+        storedVersion: version,
+        supportedVersion: TOPICS_STORAGE_VERSION,
+      })
+      localStorage.removeItem(TOPICS_STORAGE_KEY)
+      return { topics: [], hadPersistedData: false }
+    }
+
+    const topics = parsed.topics
+    if (!Array.isArray(topics)) {
+      logger.warn('STORAGE', 'Topics not an array, resetting')
+      localStorage.removeItem(TOPICS_STORAGE_KEY)
+      return { topics: [], hadPersistedData: false }
+    }
+
+    // Validate each topic has required fields
+    const validTopics = topics.filter((topic) => {
+      if (!topic || typeof topic !== 'object') return false
+      if (!topic.id || typeof topic.id !== 'string') return false
+      if (!topic.name || typeof topic.name !== 'string') return false
+      // Icon is optional but should be string if present
+      if (topic.icon && typeof topic.icon !== 'string') return false
+      // Slides should be an array if present
+      if (topic.slides && !Array.isArray(topic.slides)) return false
+      return true
+    })
+
+    // H1: Validate and filter individual slides within each topic
+    // Corrupted slides could cause runtime errors if not validated
+    validTopics.forEach((topic) => {
+      if (topic.slides && Array.isArray(topic.slides)) {
+        const originalCount = topic.slides.length
+        const validSlides = topic.slides.filter((slide) =>
+          slide &&
+          typeof slide === 'object' &&
+          slide.id &&
+          typeof slide.id === 'string' &&
+          slide.imageUrl &&
+          typeof slide.imageUrl === 'string'
+          // subtitle and duration are optional
+        )
+        topic.slides = validSlides
+        if (validSlides.length < originalCount) {
+          logger.warn('STORAGE', 'Filtered out invalid slides', {
+            topicId: topic.id,
+            originalCount,
+            validCount: validSlides.length,
+          })
+        }
+      }
+    })
+
+    // Reconstruct header slides for each valid topic
+    // (Header slides are ephemeral UI elements, regenerate them)
+    const restoredTopics = validTopics.map((topic) => ({
+      ...topic,
+      headerSlide: {
+        id: `header_${topic.id}`,
+        type: 'header',
+        topicId: topic.id,
+        topicName: topic.name,
+        topicIcon: topic.icon,
+      },
+    }))
+
+    if (restoredTopics.length > 0) {
+      logger.info('STORAGE', 'Restored topics from localStorage', {
+        count: restoredTopics.length,
+        topicNames: restoredTopics.map((t) => t.name),
+      })
+    }
+
+    return {
+      topics: restoredTopics,
+      hadPersistedData: restoredTopics.length > 0,
+    }
+  } catch (error) {
+    // JSON parse error or other issue - reset to clean state
+    logger.error('STORAGE', 'Failed to load persisted topics', {
+      error: error.message,
+    })
+    localStorage.removeItem(TOPICS_STORAGE_KEY)
+    return { topics: [], hadPersistedData: false }
+  }
+}
+
+/**
+ * CORE027: Save topics to localStorage
+ * Stores topics with essential data, excluding large audio data URLs.
+ * @param {Array} topics - Array of topic objects to persist
+ */
+function saveTopicsToStorage(topics) {
+  try {
+    if (!topics || topics.length === 0) {
+      localStorage.removeItem(TOPICS_STORAGE_KEY)
+      logger.debug('STORAGE', 'Cleared topics from localStorage (no topics)')
+      return
+    }
+
+    // Strip audioUrl from slides to reduce storage size
+    // Audio can be large (base64 data URLs) and can be regenerated
+    const topicsForStorage = topics.map((topic) => ({
+      id: topic.id,
+      name: topic.name,
+      icon: topic.icon,
+      createdAt: topic.createdAt,
+      // Persist slides without audioUrl to save space
+      slides: (topic.slides || []).map((slide) => ({
+        id: slide.id,
+        imageUrl: slide.imageUrl,
+        subtitle: slide.subtitle,
+        duration: slide.duration,
+        topicId: slide.topicId,
+        // Intentionally omitting audioUrl to reduce storage size
+      })),
+      // headerSlide is not persisted - it's reconstructed on load
+    }))
+
+    const storageData = {
+      version: TOPICS_STORAGE_VERSION,
+      topics: topicsForStorage,
+      savedAt: Date.now(),
+    }
+
+    const serialized = JSON.stringify(storageData)
+
+    // Check storage quota (rough estimate, localStorage is typically 5-10MB)
+    const sizeKB = serialized.length / 1024
+    if (sizeKB > 4096) {
+      // 4MB warning threshold
+      logger.warn('STORAGE', 'Topics storage approaching quota limit', {
+        sizeKB: sizeKB.toFixed(2),
+      })
+    }
+
+    localStorage.setItem(TOPICS_STORAGE_KEY, serialized)
+    logger.debug('STORAGE', 'Saved topics to localStorage', {
+      count: topics.length,
+      sizeKB: sizeKB.toFixed(2),
+    })
+  } catch (error) {
+    // Handle quota exceeded or other storage errors
+    if (error.name === 'QuotaExceededError') {
+      logger.error('STORAGE', 'localStorage quota exceeded')
+
+      // H2: Recovery strategy - try saving without imageUrl to reduce size
+      // Images are the largest data (base64 data URLs), removing them
+      // significantly reduces storage size while preserving topic structure
+      try {
+        const minimalData = {
+          version: TOPICS_STORAGE_VERSION,
+          topics: topics.map((topic) => ({
+            id: topic.id,
+            name: topic.name,
+            icon: topic.icon,
+            createdAt: topic.createdAt,
+            // Save slides without imageUrl to drastically reduce size
+            slides: (topic.slides || []).map((slide) => ({
+              id: slide.id,
+              // Skip imageUrl entirely to save space
+              subtitle: slide.subtitle,
+              duration: slide.duration,
+              topicId: slide.topicId,
+            })),
+          })),
+          savedAt: Date.now(),
+        }
+        localStorage.setItem(TOPICS_STORAGE_KEY, JSON.stringify(minimalData))
+        logger.warn('STORAGE', 'Saved topics without images due to quota limit', {
+          count: topics.length,
+        })
+      } catch (retryError) {
+        // Still failed even with minimal data - give up
+        logger.error('STORAGE', 'Unable to persist topics even with reduced data', {
+          error: retryError.message,
+        })
+      }
+    } else {
+      logger.error('STORAGE', 'Failed to save topics', {
+        error: error.message,
+      })
+    }
+  }
+}
+
+/**
  * Creates a header slide object for a topic (F040, F043)
  * Header slides display the topic icon and name as a divider
  * @param {Object} topic - Topic object with id, name, icon
@@ -89,8 +304,13 @@ function createHeaderSlide(topic) {
 }
 
 function App() {
+  // CORE027: Load persisted topics on initial mount
+  // This uses a lazy initializer to only run once on mount
+  const [initialData] = useState(() => loadPersistedTopics())
+
   const [uiState, setUiState] = useState(UI_STATE.LISTENING)
-  const [isColdStart, setIsColdStart] = useState(true)
+  // CORE027: isColdStart is false if we restored topics from localStorage
+  const [isColdStart, setIsColdStart] = useState(() => !initialData.hadPersistedData)
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [liveTranscription, setLiveTranscription] = useState('')
@@ -192,8 +412,9 @@ function App() {
    *
    * Topics are ordered by creation time (oldest first).
    * When a 4th topic is added, the oldest (first) is evicted (F042).
+   * CORE027: Initial state loaded from localStorage if available.
    */
-  const [topics, setTopics] = useState([])
+  const [topics, setTopics] = useState(() => initialData.topics)
 
   /**
    * Computed flat array of all slides from all topics for navigation (F044)
@@ -298,6 +519,24 @@ function App() {
       prevUiStateRef.current = uiState
     }
   }, [uiState])
+
+  /**
+   * CORE027: Persist topics to localStorage whenever they change
+   * This enables topics and slides to survive page refresh.
+   * Note: We use a ref to track if this is the initial render to avoid
+   * unnecessary saves on mount.
+   */
+  const isInitialMountRef = useRef(true)
+  useEffect(() => {
+    // Skip the initial mount since we just loaded from storage
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false
+      return
+    }
+
+    // Save topics to localStorage whenever they change
+    saveTopicsToStorage(topics)
+  }, [topics])
 
   /**
    * CORE010: AI greeting on cold start

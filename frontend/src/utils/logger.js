@@ -62,6 +62,7 @@ const CATEGORY_COLORS = {
   GENERATION: '#EC4899', // Pink
   UI: '#F59E0B',         // Amber
   PERF: '#059669',       // Emerald
+  STORAGE: '#14B8A6',    // Teal (CORE027)
 }
 
 // Default category color for unknown categories
