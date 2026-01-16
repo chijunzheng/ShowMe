@@ -897,7 +897,7 @@
       "name": "Topic persists across refresh",
       "description": "Topics and slides survive page refresh",
       "priority": 2,
-      "status": "pending",
+      "status": "complete",
       "test_cases": [
         {
           "id": "T001",
