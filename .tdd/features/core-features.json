@@ -751,7 +751,7 @@
       "name": "Narration with annotations - verbal response",
       "description": "SLIDE_QUESTION gets verbal response about visible content",
       "priority": 1,
-      "status": "pending",
+      "status": "complete",
       "test_cases": [
         {
           "id": "T001",
@@ -785,7 +785,7 @@
       "name": "Annotation highlight on diagram",
       "description": "When explaining diagram element, highlight appears",
       "priority": 2,
-      "status": "pending",
+      "status": "complete",
       "test_cases": [
         {
           "id": "T001",
@@ -814,7 +814,7 @@
       "name": "Voice query to slideshow E2E",
       "description": "Complete flow: speak → transcribe → generate → view slides",
       "priority": 1,
-      "status": "pending",
+      "status": "complete",
       "test_cases": [
         {
           "id": "T001",
