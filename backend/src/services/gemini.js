@@ -14,12 +14,261 @@
 import { GoogleGenAI } from '@google/genai'
 
 // Configuration constants
-const TEXT_MODEL = 'gemini-2.0-flash'
-const IMAGE_MODEL = 'gemini-2.0-flash-exp-image-generation'
+const TEXT_MODEL = 'gemini-3-pro-preview'
+const IMAGE_MODEL = 'gemini-3-pro-image-preview'
 const TTS_MODEL = 'gemini-2.5-flash-preview-tts'
 
 // Default TTS voice - Kore is a clear, engaging voice suitable for education
 const DEFAULT_VOICE = 'Kore'
+
+/**
+ * Extract JSON from text that may be wrapped in markdown code blocks
+ * Handles various formats returned by different Gemini models
+ * @param {string} text - Raw text response from Gemini
+ * @returns {string} Extracted JSON string ready for parsing
+ */
+function extractJSON(text) {
+  if (!text) return '{}'
+
+  // Debug: log first 50 chars and their char codes
+  const preview = text.substring(0, 50)
+  const charCodes = [...preview].map(c => c.charCodeAt(0))
+  console.log('[extractJSON] First 50 chars:', JSON.stringify(preview))
+  console.log('[extractJSON] Char codes:', charCodes.slice(0, 20))
+
+  // Method 1: Match ```json ... ``` anywhere (no $ anchor - allows trailing content)
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/)
+  if (codeBlockMatch && codeBlockMatch[1]) {
+    const extracted = codeBlockMatch[1].trim()
+    console.log('[extractJSON] Matched code block, extracted length:', extracted.length)
+    return extracted
+  }
+
+  // Method 1b: Handle truncated response - starts with ```json but no closing ```
+  if (text.startsWith('```')) {
+    // Skip opening fence and optional 'json' label
+    let startIdx = 3
+    if (text.slice(startIdx, startIdx + 4).toLowerCase() === 'json') {
+      startIdx += 4
+    }
+    // Skip whitespace
+    while (startIdx < text.length && /\s/.test(text[startIdx])) {
+      startIdx++
+    }
+    const remaining = text.slice(startIdx).trim()
+    console.log('[extractJSON] Truncated code block, extracting from position:', startIdx)
+
+    // Try to find JSON content
+    const firstBraceInRemaining = remaining.indexOf('{')
+    if (firstBraceInRemaining !== -1) {
+      const lastBraceInRemaining = remaining.lastIndexOf('}')
+      if (lastBraceInRemaining > firstBraceInRemaining) {
+        console.log('[extractJSON] Truncated: brace extraction from remaining')
+        return remaining.slice(firstBraceInRemaining, lastBraceInRemaining + 1)
+      } else {
+        // No closing brace found - extract partial JSON for repairJSON to complete
+        console.log('[extractJSON] Truncated: no closing brace, extracting partial JSON')
+        return remaining.slice(firstBraceInRemaining)
+      }
+    }
+  }
+
+  // Method 2: Find balanced braces for JSON object
+  const firstBrace = text.indexOf('{')
+  if (firstBrace !== -1) {
+    let depth = 0
+    let inString = false
+    let escapeNext = false
+
+    for (let i = firstBrace; i < text.length; i++) {
+      const char = text[i]
+
+      if (escapeNext) {
+        escapeNext = false
+        continue
+      }
+
+      if (char === '\\' && inString) {
+        escapeNext = true
+        continue
+      }
+
+      if (char === '"' && !escapeNext) {
+        inString = !inString
+        continue
+      }
+
+      if (!inString) {
+        if (char === '{') depth++
+        else if (char === '}') {
+          depth--
+          if (depth === 0) {
+            console.log('[extractJSON] Balanced brace extraction from', firstBrace, 'to', i)
+            return text.slice(firstBrace, i + 1)
+          }
+        }
+      }
+    }
+
+    // No balanced closing brace - extract partial JSON for repairJSON to complete
+    const lastBrace = text.lastIndexOf('}')
+    if (lastBrace > firstBrace) {
+      console.log('[extractJSON] Fallback brace extraction from', firstBrace, 'to', lastBrace)
+      return text.slice(firstBrace, lastBrace + 1)
+    } else {
+      console.log('[extractJSON] No closing brace, extracting partial JSON from', firstBrace)
+      return text.slice(firstBrace)
+    }
+  }
+
+  console.log('[extractJSON] No extraction matched, returning raw text')
+  return text.trim()
+}
+
+/**
+ * Complete truncated JSON by adding missing closing brackets and braces
+ * @param {string} jsonStr - Potentially truncated JSON string
+ * @returns {string} JSON string with proper closing structure
+ */
+function completeJSONStructure(jsonStr) {
+  let braceCount = 0
+  let bracketCount = 0
+  let inString = false
+  let escapeNext = false
+
+  for (let i = 0; i < jsonStr.length; i++) {
+    const char = jsonStr[i]
+
+    if (escapeNext) {
+      escapeNext = false
+      continue
+    }
+
+    if (char === '\\' && inString) {
+      escapeNext = true
+      continue
+    }
+
+    if (char === '"') {
+      inString = !inString
+      continue
+    }
+
+    if (!inString) {
+      if (char === '{') braceCount++
+      else if (char === '}') braceCount--
+      else if (char === '[') bracketCount++
+      else if (char === ']') bracketCount--
+    }
+  }
+
+  // Handle unclosed string
+  if (inString) {
+    jsonStr += '"'
+    console.log('[repairJSON] Added closing quote for unclosed string')
+  }
+
+  // Add missing closing brackets and braces
+  while (bracketCount > 0) {
+    jsonStr += ']'
+    bracketCount--
+    console.log('[repairJSON] Added closing bracket')
+  }
+  while (braceCount > 0) {
+    jsonStr += '}'
+    braceCount--
+    console.log('[repairJSON] Added closing brace')
+  }
+
+  return jsonStr
+}
+
+/**
+ * Attempt to repair common JSON issues from LLM output
+ * @param {string} jsonStr - JSON string that may have issues
+ * @returns {string} Repaired JSON string
+ */
+function repairJSON(jsonStr) {
+  let repaired = jsonStr
+
+  // Remove BOM and invisible characters at start
+  repaired = repaired.replace(/^\uFEFF/, '')
+
+  // Replace smart/curly quotes with straight quotes
+  repaired = repaired.replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"')
+  repaired = repaired.replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'")
+
+  // Remove trailing commas before ] or }
+  repaired = repaired.replace(/,(\s*[}\]])/g, '$1')
+
+  // Remove JavaScript-style comments
+  repaired = repaired.replace(/\/\/[^\n]*/g, '')
+  repaired = repaired.replace(/\/\*[\s\S]*?\*\//g, '')
+
+  // Convert literal escape sequences OUTSIDE of strings to actual whitespace
+  // This fixes cases where Gemini outputs literal \n between JSON tokens
+  // (which is invalid - escape sequences are only valid inside quoted strings)
+  let result = ''
+  let inString = false
+  let i = 0
+
+  while (i < repaired.length) {
+    const char = repaired[i]
+    const nextChar = repaired[i + 1]
+
+    // Handle escape sequences inside strings - preserve them as-is
+    if (inString && char === '\\') {
+      result += char
+      if (nextChar) {
+        result += nextChar
+        i += 2
+      } else {
+        i++
+      }
+      continue
+    }
+
+    // Track string boundaries
+    if (char === '"') {
+      inString = !inString
+      result += char
+      i++
+      continue
+    }
+
+    // Outside string: convert literal escape sequences to actual whitespace chars
+    if (!inString && char === '\\' && nextChar) {
+      if (nextChar === 'n') {
+        result += '\n'
+        i += 2
+        continue
+      }
+      if (nextChar === 't') {
+        result += '\t'
+        i += 2
+        continue
+      }
+      if (nextChar === 'r') {
+        result += '\r'
+        i += 2
+        continue
+      }
+      // Remove other invalid escapes outside strings
+      result += nextChar
+      i += 2
+      continue
+    }
+
+    result += char
+    i++
+  }
+  repaired = result
+
+  // Complete truncated JSON by adding missing brackets/braces
+  repaired = completeJSONStructure(repaired)
+
+  return repaired
+}
 
 // Initialize the Google GenAI client
 // Uses GEMINI_API_KEY from environment if not explicitly provided
@@ -80,7 +329,10 @@ export async function generateScript(query, options = {}) {
 Your task is to create a script for an educational slideshow that explains topics clearly.
 
 Guidelines:
-- Create 3-4 slides that progressively explain the concept
+- Create 3-6 slides based on topic complexity:
+  - Simple concepts (definitions, basic facts): 3 slides
+  - Moderate topics (processes, comparisons): 4 slides
+  - Complex topics (multi-step systems, deep explanations): 5-6 slides
 - Each slide should have a clear, concise explanation (2-3 sentences max)
 - Include an image prompt describing what educational diagram/visual should accompany each slide
 - Make content accessible for general audiences (ages 10+)
@@ -122,11 +374,8 @@ Important: Image prompts should describe detailed educational diagrams with labe
     const text = response.text || ''
 
     // Extract JSON from the response (handle markdown code blocks)
-    const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, text]
-    const jsonStr = jsonMatch[1] || text
-
-    // Try to parse the JSON
-    const parsed = JSON.parse(jsonStr.trim())
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
 
     if (!parsed.slides || !Array.isArray(parsed.slides)) {
       throw new Error('Invalid response format: missing slides array')
@@ -402,9 +651,8 @@ Output Format (JSON):
     })
 
     const text = response.text || ''
-    const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, text]
-    const jsonStr = jsonMatch[1] || text
-    const parsed = JSON.parse(jsonStr.trim())
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
 
     return {
       funFact: parsed.funFact || null,

@@ -153,3 +153,17 @@ body {
 .animate-fade-out-down {
   animation: fade-out-down 0.3s ease-in forwards;
 }
+
+/* CORE016, CORE017: Topic sidebar animations */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out forwards;
+}

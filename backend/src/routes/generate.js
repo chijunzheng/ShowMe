@@ -99,13 +99,14 @@ function getMockImageUrl(index) {
  * @returns {Array} Array of slide objects
  */
 function generateMockSlides(query, topicId, segmentId) {
-  const slideCount = 3 + Math.floor(Math.random() * 2) // 3-4 slides
+  const slideCount = 3 + Math.floor(Math.random() * 4) // 3-6 slides
 
   const introSubtitle = `Let's explore the fascinating topic of "${query.replace(/[?]/g, '')}".`
   const subtitles = [
     introSubtitle,
     'Understanding the fundamental concepts helps us grasp the bigger picture.',
     'There are several key components that work together in this process.',
+    'These elements interact in interesting ways that affect outcomes.',
     'The implications of this knowledge extend to many areas of our daily lives.',
     'To summarize, these core principles form the foundation of our understanding.',
   ]

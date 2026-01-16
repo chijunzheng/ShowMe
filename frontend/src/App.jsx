@@ -3,6 +3,7 @@ import FunFactCard from './components/FunFactCard'
 import SuggestionCard from './components/SuggestionCard'
 import Toast from './components/Toast'
 import TopicHeader from './components/TopicHeader'
+import TopicSidebar from './components/TopicSidebar'
 import { useWebSocket, PROGRESS_TYPES } from './hooks/useWebSocket'
 import logger from './utils/logger'
 
@@ -31,6 +32,9 @@ const PERMISSION_STATE = {
 
 // Maximum number of topics to retain in state (LRU eviction beyond this - F041, F042)
 const MAX_TOPICS = 3
+
+// localStorage key for tracking if greeting has been played (CORE010)
+const GREETING_PLAYED_KEY = 'showme_greeting_played'
 
 // Example questions for cold start
 const EXAMPLE_QUESTIONS = [
@@ -99,6 +103,7 @@ function App() {
     stage: null,  // Current stage name from PROGRESS_TYPES
     message: '',  // Human-readable progress message
     slidesReady: 0,  // Number of slides ready
+    totalSlides: 0,  // Total number of slides being generated
   })
 
   /**
@@ -136,11 +141,13 @@ function App() {
       })
     }
 
-    setGenerationProgress({
+    const totalSlides = message.data?.slidesCount || 0
+    setGenerationProgress(prev => ({
       stage: message.type,
       message: message.data?.stage || progressMessages[message.type] || '',
-      slidesReady: message.data?.slidesCount || 0,
-    })
+      slidesReady: message.type === PROGRESS_TYPES.COMPLETE ? totalSlides : prev.slidesReady,
+      totalSlides: totalSlides || prev.totalSlides,  // Keep previous if not provided
+    }))
   }, [])
 
   /**
@@ -232,6 +239,9 @@ function App() {
   // Audio playback ref for slide narration (F037)
   const slideAudioRef = useRef(null)
 
+  // Audio playback ref for greeting audio (CORE010)
+  const greetingAudioRef = useRef(null)
+
   // Default slide duration in milliseconds (used when slide.duration is not available)
   const DEFAULT_SLIDE_DURATION = 5000
 
@@ -251,6 +261,86 @@ function App() {
       prevUiStateRef.current = uiState
     }
   }, [uiState])
+
+  /**
+   * CORE010: AI greeting on cold start
+   * Plays a TTS greeting when the app opens for the first time (true cold start).
+   * Conditions:
+   * - isColdStart is true (no topics exist yet)
+   * - No greeting has been played before (localStorage flag not set)
+   * - App is in LISTENING state
+   */
+  useEffect(() => {
+    // Only play greeting on true cold start
+    // Check localStorage first to avoid unnecessary API calls
+    const hasPlayedGreeting = localStorage.getItem(GREETING_PLAYED_KEY) === 'true'
+
+    if (hasPlayedGreeting) {
+      // Greeting already played in a previous session, skip
+      return
+    }
+
+    if (!isColdStart || topics.length > 0 || uiState !== UI_STATE.LISTENING) {
+      // Not a true cold start, or already navigated away
+      return
+    }
+
+    // Fetch and play the greeting audio
+    const playGreeting = async () => {
+      try {
+        logger.info('AUDIO', 'Fetching cold start greeting')
+
+        const response = await fetch('/api/greeting', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        })
+
+        if (!response.ok) {
+          logger.warn('AUDIO', 'Greeting API request failed', { status: response.status })
+          return
+        }
+
+        const data = await response.json()
+
+        if (!data.available || !data.audioUrl) {
+          logger.info('AUDIO', 'Greeting audio not available (TTS may be disabled)')
+          // Still mark as played so we don't retry
+          localStorage.setItem(GREETING_PLAYED_KEY, 'true')
+          return
+        }
+
+        // Create and play the greeting audio
+        const audio = new Audio(data.audioUrl)
+        greetingAudioRef.current = audio
+
+        logger.info('AUDIO', 'Playing cold start greeting', { duration: data.duration })
+
+        audio.play().catch((error) => {
+          // Autoplay might be blocked
+          logger.warn('AUDIO', 'Greeting autoplay blocked', { error: error.message })
+        })
+
+        // Mark greeting as played regardless of playback success
+        // (we fetched it successfully, user heard it or autoplay was blocked)
+        localStorage.setItem(GREETING_PLAYED_KEY, 'true')
+
+      } catch (error) {
+        logger.error('AUDIO', 'Failed to fetch greeting', { error: error.message })
+      }
+    }
+
+    // Small delay to let the UI render first
+    const timer = setTimeout(playGreeting, 500)
+
+    return () => {
+      clearTimeout(timer)
+      // Stop greeting audio if component unmounts
+      if (greetingAudioRef.current) {
+        greetingAudioRef.current.pause()
+        greetingAudioRef.current = null
+      }
+    }
+  }, [isColdStart, topics.length, uiState])
 
   // Navigation helper functions with bounds checking (F044)
   const goToNextSlide = useCallback(() => {
@@ -992,7 +1082,7 @@ function App() {
     setErrorMessage('')
     setIsStillWorking(false)
     // F015: Reset generation progress for new query
-    setGenerationProgress({ stage: null, message: '', slidesReady: 0 })
+    setGenerationProgress({ stage: null, message: '', slidesReady: 0, totalSlides: 0 })
     // Reset the slideshow finished flag when starting new generation
     hasFinishedSlideshowRef.current = false
 
@@ -1281,11 +1371,52 @@ function App() {
     handleQuestion(question)
   }
 
+  /**
+   * Handle "New Topic" button click from sidebar (CORE017)
+   * Returns to listening state to start a fresh topic
+   */
+  const handleNewTopic = useCallback(() => {
+    // Transition to listening state to start fresh
+    setUiState(UI_STATE.LISTENING)
+    setLiveTranscription('')
+    setTextInput('')
+    setEngagement(null)
+    // Don't reset cold start flag - that's for first-time users only
+  }, [])
+
+  /**
+   * Handle topic navigation from sidebar (CORE017)
+   * Navigates to the specified slide index (typically a topic's header slide)
+   * @param {number} slideIndex - Index of the slide to navigate to
+   */
+  const handleNavigateToTopic = useCallback((slideIndex) => {
+    setCurrentIndex(slideIndex)
+    // If not already in slideshow, switch to slideshow state
+    if (uiState !== UI_STATE.SLIDESHOW && allSlides.length > 0) {
+      setUiState(UI_STATE.SLIDESHOW)
+    }
+  }, [uiState, allSlides.length])
+
   return (
-    // F055, F056, F058: Responsive container with bottom padding for fixed mic button
-    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-4 pb-24 md:pb-4">
-      {/* F055: max-width 800px centered on desktop, F056: full-width on mobile */}
-      <main className="w-full max-w-4xl mx-auto">
+    // F055, F056, F058: Responsive container with sidebar layout on desktop
+    <div className="min-h-screen flex">
+      {/* CORE016, CORE017: Topic sidebar - hidden when no topics, visible on desktop, hamburger on mobile */}
+      <TopicSidebar
+        topics={topics}
+        activeTopic={activeTopic}
+        allSlides={allSlides}
+        onNavigateToTopic={handleNavigateToTopic}
+        onNewTopic={handleNewTopic}
+      />
+
+      {/* Main content area - shifts right on desktop when sidebar is present */}
+      <div className={`
+        flex-1 min-h-screen flex flex-col items-center justify-center
+        px-4 py-4 pb-24 md:pb-4
+        ${topics.length > 0 ? 'md:ml-0' : ''}
+      `}>
+        {/* F055: max-width 800px centered on desktop, F056: full-width on mobile */}
+        <main className="w-full max-w-4xl mx-auto">
         {uiState === UI_STATE.LISTENING && (
           <div className="flex flex-col items-center gap-6 px-4 md:px-0">
             {/* Waveform visualization - responds to audio input when listening */}
@@ -1391,7 +1522,9 @@ function App() {
             </p>
             {/* F015: Show slides count from WebSocket progress */}
             <p className="text-sm text-gray-500">
-              [{generationProgress.slidesReady}/4 slides ready]
+              [{generationProgress.totalSlides > 0
+                ? `Generating ${generationProgress.totalSlides} slides`
+                : 'Preparing slides...'}]
             </p>
 
             {/* Cancel button - shown when taking too long (F053) - F057: 44px touch target */}
@@ -1573,48 +1706,49 @@ function App() {
             )}
           </div>
         )}
-      </main>
+        </main>
 
-      {/* F038, F058: Mic button - fixed on mobile with safe area inset for notched devices */}
-      <button
-        onClick={handleMicClick}
-        disabled={uiState === UI_STATE.GENERATING || uiState === UI_STATE.ERROR}
-        aria-label={isListening ? 'Stop recording' : 'Start recording'}
-        className={`fixed left-1/2 -translate-x-1/2 z-50 w-16 h-16 rounded-full shadow-lg flex items-center justify-center text-2xl transition-all ${
-          uiState === UI_STATE.GENERATING || uiState === UI_STATE.ERROR
-            ? 'bg-gray-300 cursor-not-allowed'
-            : isListening
-              ? 'bg-red-500 hover:bg-red-600 scale-110 mic-pulse'
-              : 'bg-primary hover:scale-105'
-        } text-white`}
-        style={{
-          // F058: Use safe area inset for notched devices, fallback to 24px
-          bottom: 'max(24px, env(safe-area-inset-bottom, 24px))',
-        }}
-      >
-        {/* Show stop icon when listening, mic icon otherwise */}
-        {isListening ? (
-          <span aria-hidden="true" className="w-5 h-5 bg-white rounded" />
-        ) : (
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            className="w-8 h-8"
-            aria-hidden="true"
-          >
-            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
-            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
-          </svg>
-        )}
-      </button>
+        {/* F038, F058: Mic button - fixed on mobile with safe area inset for notched devices */}
+        <button
+          onClick={handleMicClick}
+          disabled={uiState === UI_STATE.GENERATING || uiState === UI_STATE.ERROR}
+          aria-label={isListening ? 'Stop recording' : 'Start recording'}
+          className={`fixed left-1/2 -translate-x-1/2 z-50 w-16 h-16 rounded-full shadow-lg flex items-center justify-center text-2xl transition-all ${
+            uiState === UI_STATE.GENERATING || uiState === UI_STATE.ERROR
+              ? 'bg-gray-300 cursor-not-allowed'
+              : isListening
+                ? 'bg-red-500 hover:bg-red-600 scale-110 mic-pulse'
+                : 'bg-primary hover:scale-105'
+          } text-white`}
+          style={{
+            // F058: Use safe area inset for notched devices, fallback to 24px
+            bottom: 'max(24px, env(safe-area-inset-bottom, 24px))',
+          }}
+        >
+          {/* Show stop icon when listening, mic icon otherwise */}
+          {isListening ? (
+            <span aria-hidden="true" className="w-5 h-5 bg-white rounded" />
+          ) : (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              className="w-8 h-8"
+              aria-hidden="true"
+            >
+              <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+              <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+            </svg>
+          )}
+        </button>
 
-      {/* Toast notification for queue feedback (F047) */}
-      <Toast
-        message={toast.message}
-        visible={toast.visible}
-        onDismiss={hideToast}
-      />
+        {/* Toast notification for queue feedback (F047) */}
+        <Toast
+          message={toast.message}
+          visible={toast.visible}
+          onDismiss={hideToast}
+        />
+      </div>
     </div>
   )
 }
