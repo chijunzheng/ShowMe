@@ -78,6 +78,31 @@ import express from 'express'
 
 ---
 
+## Session 2: 2026-01-17
+
+### Issue 1: Topic Sidebar Limited + Slides Mixed Across Topics
+
+**Symptoms:**
+- Topic sidebar only showed 3 topics.
+- Main slideshow contained header slides from previous topics instead of the current topic only.
+
+**Root Cause:**
+- Frontend enforced a hard `MAX_TOPICS` eviction and flattened slides across topics.
+- Slides were persisted with topic metadata, making unlimited topics risky for memory.
+
+**Fix Applied:** `frontend/src/App.jsx`
+- Introduced `activeTopicId` and `visibleSlides` to render only the current topic in the slideshow.
+- Added a per-topic slide archive in localStorage and migrated legacy stored slides.
+- Implemented a 12-topic in-memory slide cache with `lastAccessedAt` LRU pruning.
+- Removed hard topic eviction from the client; sidebar now supports unlimited topics.
+- Updated topic navigation and resume logic to lazy-load archived slides.
+
+**Notes:**
+- `npm run lint` (frontend) fails due to ESLint pattern only matching `.ts/.tsx`.
+- `npm run test` (frontend) reports no tests found.
+
+---
+
 ## Debugging Tips
 
 ### Accessing Logs

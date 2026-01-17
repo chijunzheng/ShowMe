@@ -31,17 +31,20 @@ const PERMISSION_STATE = {
   DENIED: 'denied',
 }
 
-// Maximum number of topics to retain in state (LRU eviction beyond this - F041, F042)
-const MAX_TOPICS = 3
+// Maximum number of topics with slides cached in memory (LRU eviction beyond this)
+const MAX_CACHED_TOPICS = 12
 
 // localStorage key for tracking if greeting has been played (CORE010)
 const GREETING_PLAYED_KEY = 'showme_greeting_played'
 
 // CORE027: localStorage key for persisting topics across page refresh
 const TOPICS_STORAGE_KEY = 'showme_topics'
+// CORE027: localStorage key prefix for per-topic slide storage
+const TOPIC_SLIDES_STORAGE_PREFIX = 'showme_topic_slides_'
 
 // CORE027: Storage version for schema migration
-const TOPICS_STORAGE_VERSION = 1
+const TOPICS_STORAGE_VERSION = 2
+const TOPIC_SLIDES_STORAGE_VERSION = 1
 
 // Example questions for cold start
 const EXAMPLE_QUESTIONS = [
@@ -69,6 +72,136 @@ const AUDIO_CONFIG = {
   // CORE019: Minimum hold duration for push-to-talk (ms)
   // Prevents accidental taps from triggering recording
   MIN_HOLD_DURATION: 300,
+}
+
+/**
+ * Build a localStorage key for a topic's slide archive.
+ * @param {string} topicId - Topic ID
+ * @returns {string} Storage key for topic slides
+ */
+function getTopicSlidesStorageKey(topicId) {
+  return `${TOPIC_SLIDES_STORAGE_PREFIX}${topicId}`
+}
+
+/**
+ * Normalize slides for storage (strip large audio payloads).
+ * @param {Array} slides - Slide objects
+ * @param {string} topicId - Topic ID for fallback association
+ * @returns {Array} Sanitized slides for storage
+ */
+function sanitizeSlidesForStorage(slides, topicId) {
+  if (!Array.isArray(slides)) return []
+  return slides
+    .filter((slide) => slide && typeof slide === 'object')
+    .map((slide) => ({
+      id: slide.id,
+      imageUrl: slide.imageUrl,
+      subtitle: slide.subtitle,
+      duration: slide.duration,
+      topicId: slide.topicId || topicId,
+      // audioUrl intentionally omitted to reduce storage size
+    }))
+    .filter((slide) =>
+      slide.id &&
+      typeof slide.id === 'string' &&
+      slide.imageUrl &&
+      typeof slide.imageUrl === 'string'
+    )
+}
+
+/**
+ * Persist slides for a topic into localStorage.
+ * @param {string} topicId - Topic ID
+ * @param {Array} slides - Slide objects to store
+ */
+function persistTopicSlides(topicId, slides) {
+  if (!topicId || !Array.isArray(slides)) return
+
+  const sanitizedSlides = sanitizeSlidesForStorage(slides, topicId)
+  if (sanitizedSlides.length === 0) return
+
+  const payload = {
+    version: TOPIC_SLIDES_STORAGE_VERSION,
+    slides: sanitizedSlides,
+    savedAt: Date.now(),
+  }
+
+  try {
+    localStorage.setItem(getTopicSlidesStorageKey(topicId), JSON.stringify(payload))
+  } catch (error) {
+    if (error.name === 'QuotaExceededError') {
+      logger.warn('STORAGE', 'Slides archive quota exceeded, skipping storage', {
+        topicId,
+        slidesCount: sanitizedSlides.length,
+      })
+    } else {
+      logger.error('STORAGE', 'Failed to persist topic slides', {
+        topicId,
+        error: error.message,
+      })
+    }
+  }
+}
+
+/**
+ * Load cached slides for a topic from localStorage.
+ * @param {string} topicId - Topic ID
+ * @returns {Array|null} Slides array or null when unavailable
+ */
+function loadTopicSlidesFromStorage(topicId) {
+  if (!topicId) return null
+
+  try {
+    const stored = localStorage.getItem(getTopicSlidesStorageKey(topicId))
+    if (!stored) return null
+
+    const parsed = JSON.parse(stored)
+    if (!parsed || typeof parsed !== 'object') return null
+
+    const version = parsed.version || 0
+    if (version > TOPIC_SLIDES_STORAGE_VERSION) return null
+
+    const slides = Array.isArray(parsed.slides) ? parsed.slides : null
+    if (!slides) return null
+
+    const validSlides = slides.filter((slide) =>
+      slide &&
+      typeof slide === 'object' &&
+      slide.id &&
+      typeof slide.id === 'string' &&
+      slide.imageUrl &&
+      typeof slide.imageUrl === 'string'
+    )
+
+    return validSlides.length > 0 ? validSlides : null
+  } catch (error) {
+    logger.warn('STORAGE', 'Failed to load topic slides', {
+      topicId,
+      error: error.message,
+    })
+    return null
+  }
+}
+
+/**
+ * Remove slide archives for topics that no longer exist.
+ * @param {Set<string>} validTopicIds - Active topic IDs
+ */
+function removeStaleTopicSlides(validTopicIds) {
+  try {
+    const keys = Object.keys(localStorage)
+    keys.forEach((key) => {
+      if (!key.startsWith(TOPIC_SLIDES_STORAGE_PREFIX)) return
+      const topicId = key.slice(TOPIC_SLIDES_STORAGE_PREFIX.length)
+      if (!validTopicIds.has(topicId)) {
+        localStorage.removeItem(key)
+      }
+    })
+  } catch (error) {
+    logger.warn('STORAGE', 'Failed to clean up stale topic slides', {
+      error: error.message,
+    })
+  }
 }
 
 /**
@@ -117,48 +250,50 @@ function loadPersistedTopics() {
       if (!topic.name || typeof topic.name !== 'string') return false
       // Icon is optional but should be string if present
       if (topic.icon && typeof topic.icon !== 'string') return false
-      // Slides should be an array if present
+      // Legacy storage may include slides array
       if (topic.slides && !Array.isArray(topic.slides)) return false
       return true
     })
 
-    // H1: Validate and filter individual slides within each topic
-    // Corrupted slides could cause runtime errors if not validated
-    validTopics.forEach((topic) => {
-      if (topic.slides && Array.isArray(topic.slides)) {
-        const originalCount = topic.slides.length
-        const validSlides = topic.slides.filter((slide) =>
-          slide &&
-          typeof slide === 'object' &&
-          slide.id &&
-          typeof slide.id === 'string' &&
-          slide.imageUrl &&
-          typeof slide.imageUrl === 'string'
-          // subtitle and duration are optional
-        )
-        topic.slides = validSlides
-        if (validSlides.length < originalCount) {
-          logger.warn('STORAGE', 'Filtered out invalid slides', {
-            topicId: topic.id,
-            originalCount,
-            validCount: validSlides.length,
-          })
-        }
+    const now = Date.now()
+    const normalizedTopics = validTopics.map((topic) => {
+      if (Array.isArray(topic.slides) && topic.slides.length > 0) {
+        // Legacy schema migration: move slides to per-topic storage
+        persistTopicSlides(topic.id, topic.slides)
+      }
+
+      const createdAt = typeof topic.createdAt === 'number' ? topic.createdAt : now
+      const lastAccessedAt = typeof topic.lastAccessedAt === 'number'
+        ? topic.lastAccessedAt
+        : createdAt
+
+      return {
+        id: topic.id,
+        name: topic.name,
+        icon: topic.icon,
+        createdAt,
+        lastAccessedAt,
+        slides: null,
+        headerSlide: createHeaderSlide({
+          id: topic.id,
+          name: topic.name,
+          icon: topic.icon,
+        }),
       }
     })
 
-    // Reconstruct header slides for each valid topic
-    // (Header slides are ephemeral UI elements, regenerate them)
-    const restoredTopics = validTopics.map((topic) => ({
-      ...topic,
-      headerSlide: {
-        id: `header_${topic.id}`,
-        type: 'header',
-        topicId: topic.id,
-        topicName: topic.name,
-        topicIcon: topic.icon,
-      },
-    }))
+    const topicsByAccess = [...normalizedTopics].sort(
+      (a, b) => (b.lastAccessedAt || 0) - (a.lastAccessedAt || 0)
+    )
+    const cachedTopicIds = new Set(
+      topicsByAccess.slice(0, MAX_CACHED_TOPICS).map((topic) => topic.id)
+    )
+
+    const restoredTopics = normalizedTopics.map((topic) => {
+      if (!cachedTopicIds.has(topic.id)) return topic
+      const cachedSlides = loadTopicSlidesFromStorage(topic.id)
+      return cachedSlides ? { ...topic, slides: cachedSlides } : topic
+    })
 
     if (restoredTopics.length > 0) {
       logger.info('STORAGE', 'Restored topics from localStorage', {
@@ -183,34 +318,25 @@ function loadPersistedTopics() {
 
 /**
  * CORE027: Save topics to localStorage
- * Stores topics with essential data, excluding large audio data URLs.
+ * Stores topic metadata only (slides are persisted separately).
  * @param {Array} topics - Array of topic objects to persist
  */
 function saveTopicsToStorage(topics) {
   try {
     if (!topics || topics.length === 0) {
       localStorage.removeItem(TOPICS_STORAGE_KEY)
+      removeStaleTopicSlides(new Set())
       logger.debug('STORAGE', 'Cleared topics from localStorage (no topics)')
       return
     }
 
-    // Strip audioUrl from slides to reduce storage size
-    // Audio can be large (base64 data URLs) and can be regenerated
     const topicsForStorage = topics.map((topic) => ({
       id: topic.id,
       name: topic.name,
       icon: topic.icon,
       createdAt: topic.createdAt,
-      // Persist slides without audioUrl to save space
-      slides: (topic.slides || []).map((slide) => ({
-        id: slide.id,
-        imageUrl: slide.imageUrl,
-        subtitle: slide.subtitle,
-        duration: slide.duration,
-        topicId: slide.topicId,
-        // Intentionally omitting audioUrl to reduce storage size
-      })),
-      // headerSlide is not persisted - it's reconstructed on load
+      lastAccessedAt: topic.lastAccessedAt,
+      // headerSlide and slides are reconstructed or loaded separately
     }))
 
     const storageData = {
@@ -231,6 +357,7 @@ function saveTopicsToStorage(topics) {
     }
 
     localStorage.setItem(TOPICS_STORAGE_KEY, serialized)
+    removeStaleTopicSlides(new Set(topics.map((topic) => topic.id)))
     logger.debug('STORAGE', 'Saved topics to localStorage', {
       count: topics.length,
       sizeKB: sizeKB.toFixed(2),
@@ -240,9 +367,7 @@ function saveTopicsToStorage(topics) {
     if (error.name === 'QuotaExceededError') {
       logger.error('STORAGE', 'localStorage quota exceeded')
 
-      // H2: Recovery strategy - try saving without imageUrl to reduce size
-      // Images are the largest data (base64 data URLs), removing them
-      // significantly reduces storage size while preserving topic structure
+      // H2: Recovery strategy - try saving a minimal metadata payload
       try {
         const minimalData = {
           version: TOPICS_STORAGE_VERSION,
@@ -251,19 +376,12 @@ function saveTopicsToStorage(topics) {
             name: topic.name,
             icon: topic.icon,
             createdAt: topic.createdAt,
-            // Save slides without imageUrl to drastically reduce size
-            slides: (topic.slides || []).map((slide) => ({
-              id: slide.id,
-              // Skip imageUrl entirely to save space
-              subtitle: slide.subtitle,
-              duration: slide.duration,
-              topicId: slide.topicId,
-            })),
+            lastAccessedAt: topic.lastAccessedAt,
           })),
           savedAt: Date.now(),
         }
         localStorage.setItem(TOPICS_STORAGE_KEY, JSON.stringify(minimalData))
-        logger.warn('STORAGE', 'Saved topics without images due to quota limit', {
+        logger.warn('STORAGE', 'Saved minimal topic metadata due to quota limit', {
           count: topics.length,
         })
       } catch (retryError) {
@@ -306,8 +424,9 @@ function createHeaderSlide(topic) {
 function buildTopicSlides(topic) {
   if (!topic) return []
   const slides = []
-  if (topic.headerSlide) {
-    slides.push(topic.headerSlide)
+  const headerSlide = topic.headerSlide || createHeaderSlide(topic)
+  if (headerSlide) {
+    slides.push(headerSlide)
   }
   if (topic.slides && topic.slides.length > 0) {
     slides.push(...topic.slides)
@@ -419,11 +538,12 @@ function App() {
    * - name: Display name for the topic
    * - icon: Emoji icon for the topic
    * - headerSlide: The header/divider slide for this topic (F040, F043)
-   * - slides: Array of content slides for this topic
-   * - createdAt: Timestamp for LRU ordering
+   * - slides: Array of content slides for this topic when cached
+   * - createdAt: Timestamp for topic ordering
+   * - lastAccessedAt: Timestamp for slide cache eviction ordering
    *
    * Topics are ordered by creation time (oldest first).
-   * When a 4th topic is added, the oldest (first) is evicted (F042).
+   * Slides are cached in memory for a limited number of recently accessed topics.
    * CORE027: Initial state loaded from localStorage if available.
    */
   const [topics, setTopics] = useState(() => initialData.topics)
@@ -451,7 +571,45 @@ function App() {
   const visibleSlides = useMemo(() => buildTopicSlides(activeTopic), [activeTopic])
 
   /**
-   * Keep the active topic aligned when topics change (e.g., eviction).
+   * Limit in-memory slides to a recent-access cache to avoid unbounded growth.
+   * @param {Array} topicList - Topics to prune
+   * @param {string|null} keepTopicId - Topic ID to preserve in cache
+   * @returns {Array} Topics with slides evicted beyond cache size
+   */
+  const pruneSlideCache = useCallback((topicList, keepTopicId) => {
+    const cachedTopics = topicList.filter(
+      (topic) => Array.isArray(topic.slides) && topic.slides.length > 0
+    )
+
+    if (cachedTopics.length <= MAX_CACHED_TOPICS) {
+      return topicList
+    }
+
+    const sortedByAccess = [...cachedTopics].sort(
+      (a, b) => (a.lastAccessedAt || 0) - (b.lastAccessedAt || 0)
+    )
+
+    const toEvict = new Set()
+    const evictCount = cachedTopics.length - MAX_CACHED_TOPICS
+    for (const topic of sortedByAccess) {
+      if (toEvict.size >= evictCount) break
+      if (topic.id === keepTopicId) continue
+      toEvict.add(topic.id)
+    }
+
+    if (toEvict.size === 0) {
+      return topicList
+    }
+
+    return topicList.map((topic) =>
+      toEvict.has(topic.id)
+        ? { ...topic, slides: null }
+        : topic
+    )
+  }, [])
+
+  /**
+   * Keep the active topic aligned when topics change.
    */
   useEffect(() => {
     if (topics.length === 0) {
@@ -471,6 +629,39 @@ function App() {
       }
     }
   }, [topics, activeTopicId])
+
+  // Ensure the active topic has slides loaded and update its access timestamp.
+  const lastActiveTopicIdRef = useRef(null)
+  useEffect(() => {
+    if (!activeTopicId) {
+      lastActiveTopicIdRef.current = null
+      return
+    }
+
+    const active = topics.find((topic) => topic.id === activeTopicId)
+    if (!active) return
+
+    const needsSlides = !active.slides || active.slides.length === 0
+    const isNewActive = lastActiveTopicIdRef.current !== activeTopicId
+    const cachedSlides = needsSlides ? loadTopicSlidesFromStorage(activeTopicId) : null
+
+    if (!isNewActive && !cachedSlides) return
+    const now = Date.now()
+
+    setTopics((prev) => {
+      const updated = prev.map((topic) => {
+        if (topic.id !== activeTopicId) return topic
+        return {
+          ...topic,
+          slides: cachedSlides || topic.slides,
+          lastAccessedAt: now,
+        }
+      })
+      return pruneSlideCache(updated, activeTopicId)
+    })
+
+    lastActiveTopicIdRef.current = activeTopicId
+  }, [activeTopicId, topics, pruneSlideCache])
 
   // Toast notification state for queue feedback (F047)
   const [toast, setToast] = useState({ visible: false, message: '' })
@@ -541,8 +732,8 @@ function App() {
   }, [uiState])
 
   /**
-   * CORE027: Persist topics to localStorage whenever they change
-   * This enables topics and slides to survive page refresh.
+   * CORE027: Persist topic metadata to localStorage whenever they change.
+   * Slides are stored separately per topic to allow cache eviction.
    * Note: We use a ref to track if this is the initial render to avoid
    * unnecessary saves on mount.
    */
@@ -1549,20 +1740,19 @@ function App() {
       // Default to new topic on error
       return {
         classification: 'new_topic',
-        shouldEvictOldest: topics.length >= MAX_TOPICS,
-        evictTopicId: topics.length >= MAX_TOPICS ? topics[0].id : null,
+        shouldEvictOldest: false,
+        evictTopicId: null,
       }
     }
   }
 
   /**
    * Handle a user question (from voice or text input)
-   * Classifies the query, handles follow-up vs new topic, manages LRU eviction
+   * Classifies the query, handles follow-up vs new topic, manages slide cache
    * F015: Sends clientId to API for WebSocket progress updates
    * F039: Follow-up appends slides
    * F040: New topic creates header card
-   * F041: Max 3 topics retained
-   * F042: 4th topic evicts oldest (LRU)
+   * F041: Slide cache limits in-memory topics
    * F052: Network error shows retry option
    * F053: Generation timeout handled with AbortController
    */
@@ -1804,7 +1994,7 @@ function App() {
 
         generateData = await response.json()
       } else {
-        // F040, F041, F042: New topic - generate with header card
+        // F040: New topic - generate with header card
         // F015: Include clientId for WebSocket progress updates
         // F068: Log generate API request
         logger.time('API', 'generate-request')
@@ -1856,6 +2046,11 @@ function App() {
       if (isFollowUp && activeTopic && generateData.slides?.length > 0) {
         // F039: Append new slides to current topic, navigate to first new slide
         const previousSlideCount = activeTopic.slides?.length || 0
+        const now = Date.now()
+        const nextSlides = [
+          ...(activeTopic.slides || []),
+          ...generateData.slides,
+        ]
 
         // F073: Log follow-up slide append
         logger.info('STATE', 'Appending slides to existing topic', {
@@ -1865,34 +2060,35 @@ function App() {
           previousSlidesCount: previousSlideCount,
         })
 
+        persistTopicSlides(activeTopic.id, nextSlides)
+
         setTopics((prev) => {
-          const updated = [...prev]
-          const topicIndex = updated.findIndex((t) => t.id === activeTopic.id)
-          if (topicIndex !== -1) {
-            updated[topicIndex] = {
-              ...updated[topicIndex],
-              slides: [...updated[topicIndex].slides, ...generateData.slides],
-            }
-          }
-          return updated
+          const updated = prev.map((topic) =>
+            topic.id === activeTopic.id
+              ? { ...topic, slides: nextSlides, lastAccessedAt: now }
+              : topic
+          )
+          return pruneSlideCache(updated, activeTopic.id)
         })
 
         // Navigate to the first new slide after appending (header + previous slides)
-        const headerOffset = activeTopic.headerSlide ? 1 : 0
+        const headerOffset = 1
         setCurrentIndex(previousSlideCount + headerOffset)
         // F072: End timing for full generation pipeline
         logger.timeEnd('GENERATION', 'full-pipeline')
         setUiState(UI_STATE.SLIDESHOW)
 
       } else if (newTopicData && generateData.slides?.length > 0) {
-        // F040, F041, F042: Create new topic with header card
+        // F040: Create new topic with header card
+        const now = Date.now()
         const newTopic = {
           id: newTopicData.id,
           name: newTopicData.name,
           icon: newTopicData.icon,
           headerSlide: createHeaderSlide(newTopicData),
           slides: generateData.slides,
-          createdAt: Date.now(),
+          createdAt: now,
+          lastAccessedAt: now,
         }
 
         // F073: Log new topic creation
@@ -1903,22 +2099,10 @@ function App() {
           slidesCount: generateData.slides.length,
         })
 
-        const shouldEvictOldest = topics.length >= MAX_TOPICS
-        const topicsAfterEviction = shouldEvictOldest ? topics.slice(1) : topics
-
-        // F042: If we have 3 topics, evict the oldest (LRU)
-        if (shouldEvictOldest) {
-          const evictedTopic = topics[0]
-          logger.info('STATE', 'Evicting oldest topic (LRU)', {
-            evictedTopicId: evictedTopic?.id,
-            evictedTopicName: evictedTopic?.name,
-            currentTopicCount: topics.length,
-            maxTopics: MAX_TOPICS,
-          })
-        }
+        persistTopicSlides(newTopic.id, newTopic.slides)
 
         // Add the new topic
-        setTopics([...topicsAfterEviction, newTopic])
+        setTopics((prev) => pruneSlideCache([...prev, newTopic], newTopic.id))
 
         // Set the new topic as active and show its header slide
         setActiveTopicId(newTopic.id)
@@ -1989,13 +2173,31 @@ function App() {
    */
   const handleNavigateToTopic = useCallback((topicId) => {
     if (!topicId) return
+    const targetTopic = topics.find((topic) => topic.id === topicId)
+    const needsSlides = !targetTopic?.slides || targetTopic.slides.length === 0
+    const cachedSlides = needsSlides ? loadTopicSlidesFromStorage(topicId) : null
+    const now = Date.now()
+
+    setTopics((prev) => {
+      const updated = prev.map((topic) => {
+        if (topic.id !== topicId) return topic
+        return {
+          ...topic,
+          slides: needsSlides ? (cachedSlides || topic.slides) : topic.slides,
+          lastAccessedAt: now,
+          headerSlide: topic.headerSlide || createHeaderSlide(topic),
+        }
+      })
+      return pruneSlideCache(updated, topicId)
+    })
+
     setActiveTopicId(topicId)
     setCurrentIndex(0)
     // If not already in slideshow, switch to slideshow state
     if (uiState !== UI_STATE.SLIDESHOW && topics.length > 0) {
       setUiState(UI_STATE.SLIDESHOW)
     }
-  }, [uiState, topics.length])
+  }, [uiState, topics, pruneSlideCache])
 
   /**
    * CORE022: Handle resuming from an interrupt point
@@ -2006,7 +2208,13 @@ function App() {
 
     const { topicId, slideIndex } = interruptResumePoint
     const resumeTopic = topics.find((topic) => topic.id === topicId)
-    const resumeSlides = buildTopicSlides(resumeTopic)
+    const hasCachedSlides = resumeTopic?.slides && resumeTopic.slides.length > 0
+    const cachedSlides = !hasCachedSlides && resumeTopic?.id
+      ? loadTopicSlidesFromStorage(resumeTopic.id)
+      : null
+    const resumeSlides = cachedSlides
+      ? [createHeaderSlide(resumeTopic), ...cachedSlides]
+      : buildTopicSlides(resumeTopic)
 
     // Validate that the slide index is still valid (topics may have changed)
     if (topicId && resumeSlides.length > 0 && slideIndex < resumeSlides.length) {
@@ -2014,11 +2222,22 @@ function App() {
         slideIndex,
         topicId,
       })
+      if (cachedSlides) {
+        const now = Date.now()
+        setTopics((prev) => {
+          const updated = prev.map((topic) =>
+            topic.id === topicId
+              ? { ...topic, slides: cachedSlides, lastAccessedAt: now }
+              : topic
+          )
+          return pruneSlideCache(updated, topicId)
+        })
+      }
       setActiveTopicId(topicId)
       setCurrentIndex(slideIndex)
       setIsPlaying(true)
     } else {
-      // Slide no longer exists (e.g., topic was evicted), just clear the resume point
+      // Slide no longer exists (e.g., topic was removed), just clear the resume point
       logger.warn('AUDIO', 'Resume point no longer valid, clearing', {
         attemptedIndex: slideIndex,
         currentSlideCount: resumeSlides.length,
@@ -2027,7 +2246,7 @@ function App() {
 
     // Clear the resume point after using it
     setInterruptResumePoint(null)
-  }, [interruptResumePoint, topics])
+  }, [interruptResumePoint, topics, pruneSlideCache])
 
   /**
    * CORE022: Dismiss the resume point without navigating
