@@ -9,19 +9,17 @@ import { useState, useEffect, useCallback } from 'react'
  * - Mobile: Collapsible via hamburger menu button
  * - Active topic highlighting
  * - "+ New Topic" button to return to listening state
- * - Click navigation to jump to topic header slides
+ * - Click navigation to switch active topic
  *
  * @param {Object} props - Component props
  * @param {Array} props.topics - Array of topic objects with {id, name, icon, headerSlide, slides}
- * @param {Object|null} props.activeTopic - Currently active topic (last in array)
- * @param {Array} props.allSlides - Flat array of all slides for index calculation
- * @param {Function} props.onNavigateToTopic - Callback when topic is clicked, receives slide index
+ * @param {Object|null} props.activeTopic - Currently active topic
+ * @param {Function} props.onNavigateToTopic - Callback when topic is clicked, receives topicId
  * @param {Function} props.onNewTopic - Callback when "+ New Topic" is clicked
  */
 function TopicSidebar({
   topics,
   activeTopic,
-  allSlides,
   onNavigateToTopic,
   onNewTopic,
 }) {
@@ -29,27 +27,15 @@ function TopicSidebar({
   const [isOpen, setIsOpen] = useState(false)
 
   /**
-   * Calculate the slide index for a topic's header slide
-   * @param {string} topicId - ID of the topic to find
-   * @returns {number} Index of the header slide in allSlides array
-   */
-  const getTopicHeaderIndex = useCallback((topicId) => {
-    return allSlides.findIndex(
-      (slide) => slide.type === 'header' && slide.topicId === topicId
-    )
-  }, [allSlides])
-
-  /**
-   * Handle topic click - navigate to header slide and close mobile menu
+   * Handle topic click - switch active topic and close mobile menu
    */
   const handleTopicClick = useCallback((topicId) => {
-    const headerIndex = getTopicHeaderIndex(topicId)
-    if (headerIndex !== -1 && onNavigateToTopic) {
-      onNavigateToTopic(headerIndex)
+    if (onNavigateToTopic) {
+      onNavigateToTopic(topicId)
     }
     // Close mobile menu after navigation
     setIsOpen(false)
-  }, [getTopicHeaderIndex, onNavigateToTopic])
+  }, [onNavigateToTopic])
 
   /**
    * Handle new topic button click

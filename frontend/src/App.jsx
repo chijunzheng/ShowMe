@@ -298,6 +298,23 @@ function createHeaderSlide(topic) {
   }
 }
 
+/**
+ * Build the slide list for a topic, including its header divider.
+ * @param {Object|null} topic - Topic object with headerSlide and slides
+ * @returns {Array} Slides for the topic in display order
+ */
+function buildTopicSlides(topic) {
+  if (!topic) return []
+  const slides = []
+  if (topic.headerSlide) {
+    slides.push(topic.headerSlide)
+  }
+  if (topic.slides && topic.slides.length > 0) {
+    slides.push(...topic.slides)
+  }
+  return slides
+}
+
 function App() {
   // CORE027: Load persisted topics on initial mount
   // This uses a lazy initializer to only run once on mount
@@ -410,35 +427,50 @@ function App() {
    * CORE027: Initial state loaded from localStorage if available.
    */
   const [topics, setTopics] = useState(() => initialData.topics)
+  const [activeTopicId, setActiveTopicId] = useState(() => {
+    if (initialData.topics.length === 0) return null
+    return initialData.topics[initialData.topics.length - 1].id
+  })
 
   /**
-   * Computed flat array of all slides from all topics for navigation (F044)
-   * Includes header slides at the start of each topic
-   * Order: [topic1Header, topic1Slides..., topic2Header, topic2Slides..., ...]
-   */
-  const allSlides = useMemo(() => {
-    const slides = []
-    for (const topic of topics) {
-      // Add header slide first (F040, F043)
-      if (topic.headerSlide) {
-        slides.push(topic.headerSlide)
-      }
-      // Add content slides
-      if (topic.slides && topic.slides.length > 0) {
-        slides.push(...topic.slides)
-      }
-    }
-    return slides
-  }, [topics])
-
-  /**
-   * Get the currently active topic (most recently added)
-   * Used for classify API calls
+   * Get the currently active topic (selected for viewing/follow-ups)
+   * Defaults to the most recently added topic when no selection exists.
    */
   const activeTopic = useMemo(() => {
     if (topics.length === 0) return null
+    if (activeTopicId) {
+      const match = topics.find((topic) => topic.id === activeTopicId)
+      if (match) return match
+    }
     return topics[topics.length - 1]
-  }, [topics])
+  }, [topics, activeTopicId])
+
+  /**
+   * Slides to display in the main content (current topic only).
+   */
+  const visibleSlides = useMemo(() => buildTopicSlides(activeTopic), [activeTopic])
+
+  /**
+   * Keep the active topic aligned when topics change (e.g., eviction).
+   */
+  useEffect(() => {
+    if (topics.length === 0) {
+      if (activeTopicId !== null) {
+        setActiveTopicId(null)
+        setCurrentIndex(0)
+      }
+      return
+    }
+
+    const hasActive = activeTopicId && topics.some((topic) => topic.id === activeTopicId)
+    if (!hasActive) {
+      const fallbackId = topics[topics.length - 1].id
+      if (fallbackId !== activeTopicId) {
+        setActiveTopicId(fallbackId)
+        setCurrentIndex(0)
+      }
+    }
+  }, [topics, activeTopicId])
 
   // Toast notification state for queue feedback (F047)
   const [toast, setToast] = useState({ visible: false, message: '' })
@@ -608,8 +640,8 @@ function App() {
 
   // Navigation helper functions with bounds checking (F044)
   const goToNextSlide = useCallback(() => {
-    setCurrentIndex((prev) => Math.min(allSlides.length - 1, prev + 1))
-  }, [allSlides.length])
+    setCurrentIndex((prev) => Math.min(visibleSlides.length - 1, prev + 1))
+  }, [visibleSlides.length])
 
   const goToPrevSlide = useCallback(() => {
     setCurrentIndex((prev) => Math.max(0, prev - 1))
@@ -697,12 +729,12 @@ function App() {
   // Header slides advance faster since they're just dividers
   useEffect(() => {
     // Only run auto-advance when in slideshow state, playing, and slides exist
-    if (uiState !== UI_STATE.SLIDESHOW || !isPlaying || allSlides.length === 0) {
+    if (uiState !== UI_STATE.SLIDESHOW || !isPlaying || visibleSlides.length === 0) {
       return
     }
 
     // Get duration for current slide (in milliseconds)
-    const currentSlide = allSlides[currentIndex]
+    const currentSlide = visibleSlides[currentIndex]
     // Header slides should advance faster since they're just dividers (2 seconds)
     const duration = currentSlide?.type === 'header'
       ? 2000
@@ -712,7 +744,7 @@ function App() {
       setCurrentIndex((prev) => {
         const nextIndex = prev + 1
         // If we reach the end, stop playing and mark slideshow as finished (F048)
-        if (nextIndex >= allSlides.length) {
+        if (nextIndex >= visibleSlides.length) {
           setIsPlaying(false)
           hasFinishedSlideshowRef.current = true
           return prev
@@ -723,7 +755,7 @@ function App() {
 
     // Cleanup interval on unmount or when dependencies change
     return () => clearInterval(intervalId)
-  }, [uiState, isPlaying, currentIndex, allSlides])
+  }, [uiState, isPlaying, currentIndex, visibleSlides])
 
   // Keyboard navigation for slideshow
   // Arrow keys navigate between slides, Space bar toggles play/pause
@@ -769,10 +801,10 @@ function App() {
 
   // Start auto-play when entering slideshow state
   useEffect(() => {
-    if (uiState === UI_STATE.SLIDESHOW && allSlides.length > 0) {
+    if (uiState === UI_STATE.SLIDESHOW && visibleSlides.length > 0) {
       setIsPlaying(true)
     }
-  }, [uiState, allSlides.length])
+  }, [uiState, visibleSlides.length])
 
   /**
    * F037: Restart audio when navigating to a new slide
@@ -781,7 +813,7 @@ function App() {
    */
   useEffect(() => {
     // Only manage audio in slideshow state with valid slides
-    if (uiState !== UI_STATE.SLIDESHOW || allSlides.length === 0) {
+    if (uiState !== UI_STATE.SLIDESHOW || visibleSlides.length === 0) {
       // Stop any playing audio when leaving slideshow
       if (slideAudioRef.current) {
         slideAudioRef.current.pause()
@@ -797,7 +829,7 @@ function App() {
       return
     }
 
-    const currentSlide = allSlides[currentIndex]
+    const currentSlide = visibleSlides[currentIndex]
 
     // Stop previous audio if playing
     if (slideAudioRef.current) {
@@ -840,7 +872,7 @@ function App() {
         slideAudioRef.current.pause()
       }
     }
-  }, [uiState, currentIndex, allSlides, isPlaying])
+  }, [uiState, currentIndex, visibleSlides, isPlaying])
 
   // Auto-trigger queued questions after slideshow ends (F048)
   // This creates a seamless learning flow where users can queue questions
@@ -1282,7 +1314,7 @@ function App() {
 
       // CORE022: Store the current position for resume functionality
       // Find the topic ID for the current slide
-      const currentSlide = allSlides[currentIndex]
+      const currentSlide = visibleSlides[currentIndex]
       if (currentSlide) {
         const resumePoint = {
           topicId: currentSlide.topicId || null,
@@ -1311,7 +1343,7 @@ function App() {
         isRecordingStartedRef.current = true
       }
     }, 50)
-  }, [startListening, uiState, allSlides, currentIndex])
+  }, [startListening, uiState, visibleSlides, currentIndex])
 
   /**
    * CORE019: Handles mic button release (mouse or touch)
@@ -1458,9 +1490,9 @@ function App() {
 
     // CORE023: Get current slide context for slide_question detection
     // Only include context if we're in slideshow state with a valid content slide
-    const currentSlide = uiState === UI_STATE.SLIDESHOW && allSlides[currentIndex] && allSlides[currentIndex].type !== 'header'
+    const currentSlide = uiState === UI_STATE.SLIDESHOW && visibleSlides[currentIndex] && visibleSlides[currentIndex].type !== 'header'
       ? {
-          subtitle: allSlides[currentIndex].subtitle || '',
+          subtitle: visibleSlides[currentIndex].subtitle || '',
           topicName: activeTopic.name,
         }
       : null
@@ -1621,7 +1653,7 @@ function App() {
         setIsStillWorking(false)
 
         // Get current slide context for the response
-        const currentSlide = allSlides[currentIndex]
+        const currentSlide = visibleSlides[currentIndex]
         const slideContext = {
           subtitle: currentSlide?.subtitle || '',
           topicName: activeTopic?.name || '',
@@ -1845,19 +1877,9 @@ function App() {
           return updated
         })
 
-        // Navigate to the first new slide after appending
-        // Calculate the index: sum of all previous topic slides + headers + current topic's previous slides + header
-        let newSlideIndex = 0
-        for (const topic of topics) {
-          if (topic.id === activeTopic.id) {
-            // Add 1 for header + previous slides count
-            newSlideIndex += 1 + previousSlideCount
-            break
-          }
-          // Count header + all slides for previous topics
-          newSlideIndex += 1 + (topic.slides?.length || 0)
-        }
-        setCurrentIndex(newSlideIndex)
+        // Navigate to the first new slide after appending (header + previous slides)
+        const headerOffset = activeTopic.headerSlide ? 1 : 0
+        setCurrentIndex(previousSlideCount + headerOffset)
         // F072: End timing for full generation pipeline
         logger.timeEnd('GENERATION', 'full-pipeline')
         setUiState(UI_STATE.SLIDESHOW)
@@ -1881,38 +1903,26 @@ function App() {
           slidesCount: generateData.slides.length,
         })
 
-        let newSlideIndex = 0
+        const shouldEvictOldest = topics.length >= MAX_TOPICS
+        const topicsAfterEviction = shouldEvictOldest ? topics.slice(1) : topics
 
-        setTopics((prev) => {
-          let updated = [...prev]
+        // F042: If we have 3 topics, evict the oldest (LRU)
+        if (shouldEvictOldest) {
+          const evictedTopic = topics[0]
+          logger.info('STATE', 'Evicting oldest topic (LRU)', {
+            evictedTopicId: evictedTopic?.id,
+            evictedTopicName: evictedTopic?.name,
+            currentTopicCount: topics.length,
+            maxTopics: MAX_TOPICS,
+          })
+        }
 
-          // F042: If we have 3 topics, evict the oldest (LRU)
-          if (updated.length >= MAX_TOPICS) {
-            // F073: Log topic eviction
-            const evictedTopic = updated[0]
-            logger.info('STATE', 'Evicting oldest topic (LRU)', {
-              evictedTopicId: evictedTopic.id,
-              evictedTopicName: evictedTopic.name,
-              currentTopicCount: updated.length,
-              maxTopics: MAX_TOPICS,
-            })
-            // Remove the oldest topic (first in array)
-            updated = updated.slice(1)
-          }
+        // Add the new topic
+        setTopics([...topicsAfterEviction, newTopic])
 
-          // Calculate the index for the new topic's header slide
-          // This will be after all existing topics' slides
-          for (const topic of updated) {
-            newSlideIndex += 1 + (topic.slides?.length || 0)
-          }
-
-          // Add the new topic
-          updated.push(newTopic)
-          return updated
-        })
-
-        // Navigate to the header slide of the new topic
-        setCurrentIndex(newSlideIndex)
+        // Set the new topic as active and show its header slide
+        setActiveTopicId(newTopic.id)
+        setCurrentIndex(0)
         // F072: End timing for full generation pipeline
         logger.timeEnd('GENERATION', 'full-pipeline')
         setUiState(UI_STATE.SLIDESHOW)
@@ -1974,16 +1984,18 @@ function App() {
 
   /**
    * Handle topic navigation from sidebar (CORE017)
-   * Navigates to the specified slide index (typically a topic's header slide)
-   * @param {number} slideIndex - Index of the slide to navigate to
+   * Switches the active topic and navigates to its header slide
+   * @param {string} topicId - ID of the topic to navigate to
    */
-  const handleNavigateToTopic = useCallback((slideIndex) => {
-    setCurrentIndex(slideIndex)
+  const handleNavigateToTopic = useCallback((topicId) => {
+    if (!topicId) return
+    setActiveTopicId(topicId)
+    setCurrentIndex(0)
     // If not already in slideshow, switch to slideshow state
-    if (uiState !== UI_STATE.SLIDESHOW && allSlides.length > 0) {
+    if (uiState !== UI_STATE.SLIDESHOW && topics.length > 0) {
       setUiState(UI_STATE.SLIDESHOW)
     }
-  }, [uiState, allSlides.length])
+  }, [uiState, topics.length])
 
   /**
    * CORE022: Handle resuming from an interrupt point
@@ -1992,25 +2004,30 @@ function App() {
   const handleResumeFromInterrupt = useCallback(() => {
     if (!interruptResumePoint) return
 
+    const { topicId, slideIndex } = interruptResumePoint
+    const resumeTopic = topics.find((topic) => topic.id === topicId)
+    const resumeSlides = buildTopicSlides(resumeTopic)
+
     // Validate that the slide index is still valid (topics may have changed)
-    if (interruptResumePoint.slideIndex < allSlides.length) {
+    if (topicId && resumeSlides.length > 0 && slideIndex < resumeSlides.length) {
       logger.info('AUDIO', 'Resuming from interrupt point', {
-        slideIndex: interruptResumePoint.slideIndex,
-        topicId: interruptResumePoint.topicId,
+        slideIndex,
+        topicId,
       })
-      setCurrentIndex(interruptResumePoint.slideIndex)
+      setActiveTopicId(topicId)
+      setCurrentIndex(slideIndex)
       setIsPlaying(true)
     } else {
       // Slide no longer exists (e.g., topic was evicted), just clear the resume point
       logger.warn('AUDIO', 'Resume point no longer valid, clearing', {
-        attemptedIndex: interruptResumePoint.slideIndex,
-        currentSlideCount: allSlides.length,
+        attemptedIndex: slideIndex,
+        currentSlideCount: resumeSlides.length,
       })
     }
 
     // Clear the resume point after using it
     setInterruptResumePoint(null)
-  }, [interruptResumePoint, allSlides.length])
+  }, [interruptResumePoint, topics])
 
   /**
    * CORE022: Dismiss the resume point without navigating
@@ -2028,7 +2045,6 @@ function App() {
       <TopicSidebar
         topics={topics}
         activeTopic={activeTopic}
-        allSlides={allSlides}
         onNavigateToTopic={handleNavigateToTopic}
         onNewTopic={handleNewTopic}
       />
@@ -2228,17 +2244,17 @@ function App() {
           </div>
         )}
 
-        {uiState === UI_STATE.SLIDESHOW && allSlides.length > 0 && (
+        {uiState === UI_STATE.SLIDESHOW && visibleSlides.length > 0 && (
           <div className="flex flex-col items-center gap-4 px-4 md:px-0">
             {/* F050: Slide content with fade transition - key triggers animation on slide change */}
             {/* F043, F044: handles both header and content slides */}
-            <div key={allSlides[currentIndex]?.id || currentIndex} className="slide-fade w-full">
-              {allSlides[currentIndex]?.type === 'header' ? (
+            <div key={visibleSlides[currentIndex]?.id || currentIndex} className="slide-fade w-full">
+              {visibleSlides[currentIndex]?.type === 'header' ? (
                 // F043: Render topic header card with TopicHeader component
                 <div className="w-full aspect-video bg-surface rounded-xl shadow-lg overflow-hidden">
                   <TopicHeader
-                    icon={allSlides[currentIndex].topicIcon}
-                    name={allSlides[currentIndex].topicName}
+                    icon={visibleSlides[currentIndex].topicIcon}
+                    name={visibleSlides[currentIndex].topicName}
                   />
                 </div>
               ) : (
@@ -2247,7 +2263,7 @@ function App() {
                   {/* CORE024: Container with relative positioning for highlight overlay */}
                   <div className="relative w-full aspect-video bg-surface rounded-xl shadow-lg overflow-hidden">
                     <img
-                      src={allSlides[currentIndex]?.imageUrl}
+                      src={visibleSlides[currentIndex]?.imageUrl}
                       alt="Slide diagram"
                       className="w-full h-full object-contain"
                     />
@@ -2261,15 +2277,15 @@ function App() {
 
                   {/* Subtitle - only shown for content slides */}
                   <p className="text-lg text-center max-h-20 overflow-hidden mt-4">
-                    {allSlides[currentIndex]?.subtitle}
+                    {visibleSlides[currentIndex]?.subtitle}
                   </p>
                 </>
               )}
             </div>
 
-            {/* F044, F057: Progress dots - show all slides across all topics with 44px touch target */}
+            {/* F044, F057: Progress dots - show slides for current topic with 44px touch target */}
             <div className="flex items-center gap-1 flex-wrap justify-center" role="tablist" aria-label="Slide navigation">
-              {allSlides.map((slide, i) => {
+              {visibleSlides.map((slide, i) => {
                 // Use different styling for header vs content dots
                 const isHeader = slide.type === 'header'
                 return (
@@ -2281,7 +2297,7 @@ function App() {
                     aria-label={
                       isHeader
                         ? `Go to ${slide.topicName} topic header`
-                        : `Go to slide ${i + 1} of ${allSlides.length}`
+                        : `Go to slide ${i + 1} of ${visibleSlides.length}`
                     }
                     className="p-2 transition-colors cursor-pointer hover:scale-125"
                   >
@@ -2321,10 +2337,10 @@ function App() {
               </button>
               <button
                 onClick={goToNextSlide}
-                disabled={currentIndex === allSlides.length - 1}
+                disabled={currentIndex === visibleSlides.length - 1}
                 aria-label="Next slide"
                 className={`p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${
-                  currentIndex === allSlides.length - 1
+                  currentIndex === visibleSlides.length - 1
                     ? 'text-gray-300 cursor-not-allowed'
                     : 'text-gray-500 hover:text-primary hover:bg-gray-100'
                 }`}
@@ -2334,7 +2350,7 @@ function App() {
             </div>
 
             {/* CORE022: Resume button - shown when user interrupted a previous slideshow */}
-            {interruptResumePoint && interruptResumePoint.slideIndex !== currentIndex && (
+            {interruptResumePoint && (interruptResumePoint.topicId !== activeTopicId || interruptResumePoint.slideIndex !== currentIndex) && (
               <div className="flex items-center gap-2 mt-3 p-3 bg-surface rounded-lg border border-gray-200">
                 <button
                   onClick={handleResumeFromInterrupt}
