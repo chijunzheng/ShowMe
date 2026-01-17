@@ -17,6 +17,7 @@ import { GoogleGenAI } from '@google/genai'
 const TEXT_MODEL = 'gemini-3-pro-preview'
 const IMAGE_MODEL = 'gemini-3-pro-image-preview'
 const TTS_MODEL = 'gemini-2.5-flash-preview-tts'
+const FAST_MODEL = 'gemini-2.0-flash' // Fast model for low-latency operations
 
 // Default TTS voice - Kore is a clear, engaging voice suitable for education
 const DEFAULT_VOICE = 'Kore'
@@ -833,6 +834,76 @@ If you cannot determine a specific location, set highlight to null.`
   }
 }
 
+/**
+ * Generate a short, relevant topic name from a user query
+ * F087: Automatic topic name generation
+ *
+ * Uses the fast Gemini Flash model for low latency (<1s target)
+ * Extracts a 2-4 word topic name without question words
+ *
+ * @param {string} query - The user's question
+ * @returns {Promise<{topicName: string|null, error: string|null}>}
+ */
+export async function generateTopicName(query) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { topicName: null, error: 'API_NOT_AVAILABLE' }
+  }
+
+  const prompt = `Extract a short topic name (2-4 words) from this question. The topic name should:
+- Be 2-4 words maximum
+- NOT include question words (how, what, why, when, where, who, which, can, do, does, is, are)
+- Be a noun phrase describing the subject matter
+- Be title case
+
+Question: "${query}"
+
+Return ONLY the topic name, nothing else. No quotes, no punctuation, just the words.`
+
+  try {
+    const response = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.3, // Low temperature for consistent results
+        maxOutputTokens: 32, // Short response expected
+      }
+    })
+
+    const rawText = response.text?.trim() || ''
+
+    // Clean up the response: remove quotes, extra punctuation, and validate
+    let topicName = rawText
+      .replace(/^["']|["']$/g, '') // Remove surrounding quotes
+      .replace(/[.!?:]$/g, '') // Remove trailing punctuation
+      .replace(/\n/g, ' ') // Convert newlines to spaces
+      .replace(/\s+/g, ' ') // Collapse multiple spaces
+      .trim()
+
+    // Validate word count (2-4 words per spec)
+    const words = topicName.split(/\s+/).filter(w => w.length > 0)
+    if (words.length > 4) {
+      // If too long, take first 4 words
+      topicName = words.slice(0, 4).join(' ')
+    }
+
+    // Final validation: ensure we have something
+    if (!topicName || topicName.length === 0) {
+      return { topicName: null, error: 'EMPTY_RESPONSE' }
+    }
+
+    return { topicName, error: null }
+  } catch (error) {
+    console.error('[Gemini] Topic name generation error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { topicName: null, error: 'RATE_LIMITED' }
+    }
+
+    return { topicName: null, error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
 export default {
   isGeminiAvailable,
   generateScript,
@@ -842,4 +913,5 @@ export default {
   generateEngagement,
   transcribeAudio,
   generateSlideResponse,
+  generateTopicName,
 }

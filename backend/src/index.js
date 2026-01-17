@@ -115,11 +115,13 @@ import generateRoutes from './routes/generate.js'
 import classifyRoutes from './routes/classify.js'
 import transcribeRoutes from './routes/transcribe.js'
 import greetingRoutes from './routes/greeting.js'
+import topicRoutes from './routes/topic.js'
 
 app.use('/api/generate', generateRoutes)
 app.use('/api/classify', classifyRoutes)
 app.use('/api/transcribe', transcribeRoutes)
 app.use('/api/greeting', greetingRoutes)
+app.use('/api/topic', topicRoutes)
 
 // Error handler for CORS and other errors (returns JSON instead of HTML)
 app.use((err, req, res, next) => {

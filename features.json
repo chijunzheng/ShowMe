@@ -3415,6 +3415,50 @@
         }
       ],
       "files_modified": []
+    },
+    {
+      "id": "F087",
+      "category": "C-core",
+      "name": "Automatic topic name generation",
+      "description": "Generate short, relevant topic names automatically from user queries using a fast, low-latency language model (Gemini Flash)",
+      "priority": 1,
+      "dependencies": [
+        "F010"
+      ],
+      "status": "completed",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "POST /api/topic/name with query 'How do volcanoes work?' returns a short topic name",
+          "status": "passed"
+        },
+        {
+          "id": "T002",
+          "description": "Generated topic name is 2-4 words maximum",
+          "status": "passed"
+        },
+        {
+          "id": "T003",
+          "description": "Topic name is relevant to the query content",
+          "status": "passed"
+        },
+        {
+          "id": "T004",
+          "description": "Response time is under 1 second for latency requirement",
+          "status": "passed"
+        },
+        {
+          "id": "T005",
+          "description": "Topic name does not include question words (how, what, why)",
+          "status": "passed"
+        },
+        {
+          "id": "T006",
+          "description": "Empty or whitespace query returns error response",
+          "status": "passed"
+        }
+      ],
+      "files_modified": []
     }
   ]
 }
