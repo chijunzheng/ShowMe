@@ -17,7 +17,7 @@ import { GoogleGenAI } from '@google/genai'
 const TEXT_MODEL = 'gemini-3-pro-preview'
 const IMAGE_MODEL = 'gemini-3-pro-image-preview'
 const TTS_MODEL = 'gemini-2.5-flash-preview-tts'
-const FAST_MODEL = 'gemini-2.0-flash' // Fast model for low-latency operations
+const FAST_MODEL = 'gemini-2.0-flash' // Fast model for low-latency operations (TODO: upgrade to gemini-2.5-flash-lite when stable)
 
 // Default TTS voice - Kore is a clear, engaging voice suitable for education
 const DEFAULT_VOICE = 'Kore'
