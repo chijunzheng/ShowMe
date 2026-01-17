@@ -3459,6 +3459,65 @@
         }
       ],
       "files_modified": []
+    },
+    {
+      "id": "F088",
+      "category": "K-engagement",
+      "name": "Engagement uses fast Gemini model",
+      "description": "Fun fact and suggested questions are generated with the Gemini fast model and are directly related to the current query",
+      "priority": 1,
+      "dependencies": [
+        "F014"
+      ],
+      "status": "completed",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "POST /api/generate/engagement returns funFact and three suggestions for a valid query",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Engagement content is clearly related to the current query",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Gemini fast model is used for engagement generation",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
+    },
+    {
+      "id": "F089",
+      "category": "K-engagement",
+      "name": "Fun fact refreshes every 15 seconds",
+      "description": "While generating, the fun fact card refreshes every 15 seconds without disrupting suggestions",
+      "priority": 2,
+      "dependencies": [
+        "F045",
+        "F088"
+      ],
+      "status": "completed",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Start generation and verify fun fact refreshes after 15 seconds",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Suggested questions remain stable while fun fact refreshes",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Fun fact refresh stops when generation ends or is aborted",
+          "status": "pending"
+        }
+      ],
+      "files_modified": []
     }
   ]
 }

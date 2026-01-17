@@ -24,6 +24,9 @@ const GENERATION_TIMEOUT = {
   MAX_TIMEOUT_MS: 60000,
 }
 
+// Refresh fun fact content while generating
+const FUN_FACT_REFRESH_MS = 15000
+
 // Microphone permission states
 const PERMISSION_STATE = {
   PROMPT: 'prompt',
@@ -445,6 +448,7 @@ function App() {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [liveTranscription, setLiveTranscription] = useState('')
+  const [lastTranscription, setLastTranscription] = useState('')
   const [textInput, setTextInput] = useState('')
   const [engagement, setEngagement] = useState(null)
   const [questionQueue, setQuestionQueue] = useState([])
@@ -457,6 +461,7 @@ function App() {
   const [isStillWorking, setIsStillWorking] = useState(false)
   const abortControllerRef = useRef(null)
   const stillWorkingTimerRef = useRef(null)
+  const funFactRefreshIntervalRef = useRef(null)
 
   // F015: Generation progress state from WebSocket
   const [generationProgress, setGenerationProgress] = useState({
@@ -731,6 +736,13 @@ function App() {
     }
   }, [uiState])
 
+  // Clear stale transcription text when returning to listening without active recording.
+  useEffect(() => {
+    if (uiState === UI_STATE.LISTENING && !isListening) {
+      setLiveTranscription('')
+    }
+  }, [uiState, isListening])
+
   /**
    * CORE027: Persist topic metadata to localStorage whenever they change.
    * Slides are stored separately per topic to allow cache eviction.
@@ -883,6 +895,13 @@ function App() {
     return questionQueue.includes(question)
   }, [questionQueue])
 
+  const clearFunFactRefresh = useCallback(() => {
+    if (funFactRefreshIntervalRef.current) {
+      clearInterval(funFactRefreshIntervalRef.current)
+      funFactRefreshIntervalRef.current = null
+    }
+  }, [])
+
   /**
    * Cancel ongoing generation request (F053)
    * Aborts the fetch request and returns to listening state
@@ -896,9 +915,10 @@ function App() {
       clearTimeout(stillWorkingTimerRef.current)
       stillWorkingTimerRef.current = null
     }
+    clearFunFactRefresh()
     setIsStillWorking(false)
     setUiState(UI_STATE.LISTENING)
-  }, [])
+  }, [clearFunFactRefresh])
 
   /**
    * Retry the last failed request (F052)
@@ -914,6 +934,12 @@ function App() {
       }, 0)
     }
   }, [lastFailedQuery])
+
+  useEffect(() => {
+    if (uiState !== UI_STATE.GENERATING) {
+      clearFunFactRefresh()
+    }
+  }, [uiState, clearFunFactRefresh])
 
   // Auto-advance slideshow when playing (F044)
   // Uses slide.duration if available, otherwise falls back to DEFAULT_SLIDE_DURATION
@@ -1238,6 +1264,9 @@ function App() {
       if (stillWorkingTimerRef.current) {
         clearTimeout(stillWorkingTimerRef.current)
       }
+      if (funFactRefreshIntervalRef.current) {
+        clearInterval(funFactRefreshIntervalRef.current)
+      }
     }
   }, [])
 
@@ -1306,11 +1335,11 @@ function App() {
         // const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
       }
 
+      // Reset state for new recording session before any chunks arrive
+      audioChunksRef.current = []
+
       // Start recording with timeslice for periodic data chunks
       mediaRecorder.start(100) // Emit data every 100ms
-
-      // Reset state for new recording session
-      audioChunksRef.current = []
       lastSpeechTimeRef.current = null
       isProcessingRecordingRef.current = false
       setIsListening(true)
@@ -1346,15 +1375,19 @@ function App() {
     isProcessingRecordingRef.current = true
     try {
       // Capture MIME type before cleanup (refs will be cleared by stopListening)
-      const mimeType = mediaRecorderRef.current?.mimeType || 'audio/webm'
+      const recorder = mediaRecorderRef.current
+      const mimeType = recorder?.mimeType || 'audio/webm'
 
-      // Stop recording - this triggers ondataavailable for the final chunk
-      // The ondataavailable handler pushes to audioChunksRef.current synchronously
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        mediaRecorderRef.current.stop()
+      // Stop recording and wait for the final dataavailable before reading chunks
+      if (recorder && recorder.state === 'recording') {
+        await new Promise((resolve) => {
+          const handleStop = () => resolve()
+          recorder.addEventListener('stop', handleStop, { once: true })
+          recorder.stop()
+        })
       }
 
-      // Copy chunks AFTER stop() so we get the final chunk from ondataavailable
+      // Copy chunks AFTER stop so we get the final chunk from ondataavailable
       const chunks = [...audioChunksRef.current]
 
       // Clean up audio resources (this also tries to stop, but recorder is already stopped)
@@ -1451,6 +1484,7 @@ function App() {
       const transcription = data.transcription.trim()
 
       // F028: Display the transcription result
+      setLastTranscription(transcription)
       setLiveTranscription(transcription)
 
       logger.info('AUDIO', 'Triggering generation with transcription', {
@@ -1460,7 +1494,7 @@ function App() {
       // F030: Trigger generation with the actual transcribed text
       // Note: handleQuestion is intentionally not in deps to avoid re-renders;
       // it uses current state at call time which is the desired behavior
-      handleQuestion(transcription)
+      handleQuestion(transcription, { source: 'voice' })
     } catch (error) {
       // Handle network errors
       logger.error('API', 'Transcription network error', {
@@ -1756,14 +1790,20 @@ function App() {
    * F052: Network error shows retry option
    * F053: Generation timeout handled with AbortController
    */
-  const handleQuestion = async (query) => {
-    if (!query.trim()) return
+  const handleQuestion = async (query, options = {}) => {
+    const trimmedQuery = query.trim()
+    if (!trimmedQuery) return
+    const { source = 'text' } = options
 
     // Reset engagement from previous queries and transition to generating state
     setEngagement(null)
+    clearFunFactRefresh()
     setIsColdStart(false)
     setUiState(UI_STATE.GENERATING)
-    setLiveTranscription('')
+    setLastTranscription(trimmedQuery)
+    if (source !== 'voice') {
+      setLiveTranscription('')
+    }
     setTextInput('')
     setErrorMessage('')
     setIsStillWorking(false)
@@ -1796,7 +1836,7 @@ function App() {
       const engagementPromise = fetch('/api/generate/engagement', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: query.trim() }),
+        body: JSON.stringify({ query: trimmedQuery }),
         signal,
       })
         .then((res) => {
@@ -1812,6 +1852,7 @@ function App() {
           // Update engagement state immediately when it arrives
           // Note: suggestedQuestions are displayed but NOT auto-added to queue
           // Users must tap them to add (F047)
+          if (abortControllerRef.current?.signal !== signal) return
           setEngagement(data)
         })
         .catch((err) => {
@@ -1825,8 +1866,53 @@ function App() {
           }
         })
 
+      const refreshFunFact = () => {
+        if (signal.aborted || abortControllerRef.current?.signal !== signal) {
+          clearFunFactRefresh()
+          return
+        }
+
+        logger.debug('API', 'Refreshing engagement fun fact', {
+          endpoint: '/api/generate/engagement',
+        })
+
+        fetch('/api/generate/engagement', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: trimmedQuery }),
+          signal,
+        })
+          .then((res) => {
+            if (!res.ok) throw new Error(`Engagement API failed: ${res.status}`)
+            return res.json()
+          })
+          .then((data) => {
+            if (abortControllerRef.current?.signal !== signal || !data?.funFact) return
+            setEngagement((prev) => {
+              if (!prev) {
+                return {
+                  funFact: data.funFact,
+                  suggestedQuestions: Array.isArray(data.suggestedQuestions)
+                    ? data.suggestedQuestions
+                    : [],
+                }
+              }
+              return { ...prev, funFact: data.funFact }
+            })
+          })
+          .catch((err) => {
+            if (err.name !== 'AbortError') {
+              logger.warn('API', 'Engagement refresh failed (non-critical)', {
+                error: err.message,
+              })
+            }
+          })
+      }
+
+      funFactRefreshIntervalRef.current = setInterval(refreshFunFact, FUN_FACT_REFRESH_MS)
+
       // Classify the query to determine if it's a follow-up, new topic, or slide question
-      const classifyResult = await classifyQuery(query, signal)
+      const classifyResult = await classifyQuery(trimmedQuery, signal)
 
       // CORE023, CORE024: Handle slide_question classification
       // This is a question about the current slide content - generate verbal response only
@@ -1861,7 +1947,7 @@ function App() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              query: query.trim(),
+              query: trimmedQuery,
               currentSlide: slideContext,
             }),
             signal,
@@ -1971,7 +2057,7 @@ function App() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            query: query.trim(),
+            query: trimmedQuery,
             topicId: activeTopic.id,
             conversationHistory: [],
             clientId: wsClientId,
@@ -2007,7 +2093,7 @@ function App() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            query: query.trim(),
+            query: trimmedQuery,
             topicId: null,
             conversationHistory: [],
             clientId: wsClientId,
@@ -2389,6 +2475,11 @@ function App() {
                 ? `Generating ${generationProgress.totalSlides} slides`
                 : 'Preparing slides...'}]
             </p>
+            {lastTranscription && (
+              <p className="text-sm text-gray-500">
+                You asked: "{lastTranscription}"
+              </p>
+            )}
 
             {/* Cancel button - shown when taking too long (F053) - F057: 44px touch target */}
             {isStillWorking && (

@@ -612,3 +612,38 @@ const logger = require('./utils/logger')
 - Full pipeline: mic capture → silence detection → STT API → transcription → generation
 - Error handling covers all common failure scenarios
 - Next priorities: Remaining pending features in features.json
+
+---
+
+## Session 9: Engagement Fast Model + Fun Fact Refresh (2026-01-17)
+
+### Completed Features (2 new)
+
+#### Engagement Generation Updates
+- **F088: Engagement uses fast Gemini model** - IMPLEMENTED
+  - /api/generate/engagement now requires Gemini fast model output
+  - Removed curated fallback to ensure query relevance
+  - Added error mapping for API unavailable and rate limiting
+
+#### UI Refresh Behavior
+- **F089: Fun fact refreshes every 15 seconds** - IMPLEMENTED
+  - Fun fact refresh interval runs while generating
+  - Suggested questions remain stable during refresh
+  - Interval stops when generation ends or is canceled
+
+### Sub-Agent Handoffs
+- **Coder Agent**: Not available (Task tool missing); implemented directly
+- **Code-Review Agent**: Not available (Task tool missing); self-reviewed changes
+
+### Files Modified
+- backend/src/services/gemini.js
+- backend/src/routes/generate.js
+- frontend/src/App.jsx
+- features.json
+
+### Tests
+- `pytest tests/ -v --tb=short` (failed: pytest not installed)
+
+### Context for Next Agent
+- Engagement endpoint now requires Gemini fast model; no fallback content
+- Fun fact refresh interval runs during GENERATING state only

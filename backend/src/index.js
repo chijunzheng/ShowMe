@@ -22,7 +22,7 @@ import {
 } from './utils/wsProgress.js'
 
 const app = express()
-const PORT = process.env.PORT || 3001
+const PORT = process.env.PORT || 3002
 
 // Allowed origins for CORS - only allow frontend
 const ALLOWED_ORIGINS = [
@@ -45,7 +45,7 @@ app.use(helmet({
       // Allow fonts from self and common CDNs
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       // Allow API connections to self and WebSocket
-      connectSrc: ["'self'", "ws://localhost:3001", "wss://localhost:3001"],
+      connectSrc: ["'self'", "ws://localhost:3002", "wss://localhost:3002"],
       // Disallow object/embed/applet
       objectSrc: ["'none'"],
       // Only allow HTTPS for upgrades in production

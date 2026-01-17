@@ -17,7 +17,7 @@ import { GoogleGenAI } from '@google/genai'
 const TEXT_MODEL = 'gemini-3-pro-preview'
 const IMAGE_MODEL = 'gemini-3-pro-image-preview'
 const TTS_MODEL = 'gemini-2.5-flash-preview-tts'
-const FAST_MODEL = 'gemini-2.0-flash' // Fast model for low-latency operations (TODO: upgrade to gemini-2.5-flash-lite when stable)
+const FAST_MODEL = 'gemini-2.5-flash-lite' 
 
 // Default TTS voice - Kore is a clear, engaging voice suitable for education
 const DEFAULT_VOICE = 'Kore'
@@ -318,6 +318,51 @@ export function isGeminiAvailable() {
  * @param {boolean} options.isFollowUp - Whether this is a follow-up question
  * @returns {Promise<{slides: Array<{subtitle: string, imagePrompt: string}>, error: string|null}>}
  */
+async function generateScriptWithModel(ai, prompt, model, fallbackTopic) {
+  try {
+    const response = await ai.models.generateContent({
+      model,
+      contents: [
+        { role: 'user', parts: [{ text: prompt }] }
+      ],
+      config: {
+        temperature: 0.7,
+        maxOutputTokens: 2048,
+      }
+    })
+
+    const text = response.text || ''
+
+    // Extract JSON from the response (handle markdown code blocks)
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    if (!parsed.slides || !Array.isArray(parsed.slides)) {
+      throw new Error('Invalid response format: missing slides array')
+    }
+
+    // Validate each slide has required fields
+    const validSlides = parsed.slides.map((slide, index) => ({
+      subtitle: slide.subtitle || `Slide ${index + 1}`,
+      imagePrompt: slide.imagePrompt || `Educational diagram about ${fallbackTopic}`
+    }))
+
+    return { slides: validSlides, error: null }
+  } catch (error) {
+    console.error('[Gemini] Script generation error:', error.message)
+
+    // Handle specific error types
+    if (error.message?.includes('JSON')) {
+      return { slides: null, error: 'PARSE_ERROR' }
+    }
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { slides: null, error: 'RATE_LIMITED' }
+    }
+
+    return { slides: null, error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
 export async function generateScript(query, options = {}) {
   const ai = getAIClient()
   if (!ai) {
@@ -360,48 +405,20 @@ Important: Image prompts should describe detailed educational diagrams with labe
     ? `Follow-up question: ${query}${contextPart}`
     : `Question: ${query}`
 
-  try {
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: [
-        { role: 'user', parts: [{ text: systemPrompt + '\n\n' + userPrompt }] }
-      ],
-      config: {
-        temperature: 0.7,
-        maxOutputTokens: 2048,
-      }
-    })
+  const prompt = systemPrompt + '\n\n' + userPrompt
+  const primaryResult = await generateScriptWithModel(ai, prompt, TEXT_MODEL, query)
 
-    const text = response.text || ''
-
-    // Extract JSON from the response (handle markdown code blocks)
-    const jsonStr = repairJSON(extractJSON(text))
-    const parsed = JSON.parse(jsonStr)
-
-    if (!parsed.slides || !Array.isArray(parsed.slides)) {
-      throw new Error('Invalid response format: missing slides array')
-    }
-
-    // Validate each slide has required fields
-    const validSlides = parsed.slides.map((slide, index) => ({
-      subtitle: slide.subtitle || `Slide ${index + 1}`,
-      imagePrompt: slide.imagePrompt || `Educational diagram about ${query}`
-    }))
-
-    return { slides: validSlides, error: null }
-  } catch (error) {
-    console.error('[Gemini] Script generation error:', error.message)
-
-    // Handle specific error types
-    if (error.message?.includes('JSON')) {
-      return { slides: null, error: 'PARSE_ERROR' }
-    }
-    if (error.message?.includes('quota') || error.message?.includes('rate')) {
-      return { slides: null, error: 'RATE_LIMITED' }
-    }
-
-    return { slides: null, error: error.message || 'UNKNOWN_ERROR' }
+  if (!primaryResult.error) {
+    return primaryResult
   }
+
+  const fallbackResult = await generateScriptWithModel(ai, prompt, FAST_MODEL, query)
+  if (!fallbackResult.error) {
+    console.warn('[Gemini] Script generation fell back to fast model')
+    return fallbackResult
+  }
+
+  return primaryResult
 }
 
 /**
@@ -624,9 +641,11 @@ export async function generateEngagement(query) {
     return { funFact: null, suggestedQuestions: null, error: 'API_NOT_AVAILABLE' }
   }
 
-  const prompt = `Based on the topic "${query}", provide:
+  const prompt = `Based on the user's question "${query}", provide:
 1. One surprising, fascinating fun fact that would engage learners
 2. Three follow-up questions that would help deepen understanding
+
+The fun fact and questions MUST be directly related to the question. Avoid generic facts.
 
 Output Format (JSON):
 {
@@ -643,7 +662,7 @@ Output Format (JSON):
 
   try {
     const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
+      model: FAST_MODEL,
       contents: prompt,
       config: {
         temperature: 0.8,
@@ -662,6 +681,14 @@ Output Format (JSON):
     }
   } catch (error) {
     console.error('[Gemini] Engagement generation error:', error.message)
+
+    if (error.message?.includes('JSON')) {
+      return { funFact: null, suggestedQuestions: null, error: 'PARSE_ERROR' }
+    }
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { funFact: null, suggestedQuestions: null, error: 'RATE_LIMITED' }
+    }
+
     return { funFact: null, suggestedQuestions: null, error: error.message || 'UNKNOWN_ERROR' }
   }
 }
@@ -904,6 +931,89 @@ Return ONLY the topic name, nothing else. No quotes, no punctuation, just the wo
   }
 }
 
+/**
+ * Generate a short topic name and emoji icon from a user query
+ *
+ * Uses the fast Gemini Flash model for low latency (<1s target)
+ *
+ * @param {string} query - The user's question
+ * @returns {Promise<{topicName: string|null, topicIcon: string|null, error: string|null}>}
+ */
+export async function generateTopicMetadata(query) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { topicName: null, topicIcon: null, error: 'API_NOT_AVAILABLE' }
+  }
+
+  const prompt = `Extract a short topic name (2-4 words) and a single emoji icon from this question. The topic name should:
+- Be 2-4 words maximum
+- NOT include question words (how, what, why, when, where, who, which, can, do, does, is, are)
+- Be a noun phrase describing the subject matter
+- Be title case
+
+Return an emoji that best represents the topic. Use a single emoji only.
+
+Question: "${query}"
+
+Output Format (JSON):
+{
+  "topicName": "Your Topic Name",
+  "topicIcon": "Emoji"
+}`
+
+  try {
+    const response = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.3,
+        maxOutputTokens: 64,
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    let topicName = typeof parsed.topicName === 'string' ? parsed.topicName : ''
+    let topicIcon = typeof parsed.topicIcon === 'string' ? parsed.topicIcon : ''
+
+    topicName = topicName
+      .replace(/^["']|["']$/g, '')
+      .replace(/[.!?:]$/g, '')
+      .replace(/\n/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    const words = topicName.split(/\s+/).filter(w => w.length > 0)
+    if (words.length > 4) {
+      topicName = words.slice(0, 4).join(' ')
+    }
+
+    topicIcon = topicIcon
+      .replace(/^["']|["']$/g, '')
+      .replace(/\s+/g, '')
+      .trim()
+
+    if (!topicName || !topicIcon) {
+      return { topicName: null, topicIcon: null, error: 'EMPTY_RESPONSE' }
+    }
+
+    return { topicName, topicIcon, error: null }
+  } catch (error) {
+    console.error('[Gemini] Topic metadata generation error:', error.message)
+
+    if (error.message?.includes('JSON')) {
+      return { topicName: null, topicIcon: null, error: 'PARSE_ERROR' }
+    }
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { topicName: null, topicIcon: null, error: 'RATE_LIMITED' }
+    }
+
+    return { topicName: null, topicIcon: null, error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
 export default {
   isGeminiAvailable,
   generateScript,
@@ -914,4 +1024,5 @@ export default {
   transcribeAudio,
   generateSlideResponse,
   generateTopicName,
+  generateTopicMetadata,
 }

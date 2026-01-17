@@ -22,6 +22,8 @@ const upload = multer({
   },
   fileFilter: (req, file, callback) => {
     // Accept only audio files (webm, wav, mp3, ogg, etc.)
+    const rawMimeType = file.mimetype || ''
+    const normalizedMimeType = rawMimeType.split(';')[0].trim()
     const allowedMimeTypes = [
       'audio/webm',
       'audio/wav',
@@ -34,10 +36,11 @@ const upload = multer({
       'audio/m4a',
     ]
 
-    if (allowedMimeTypes.includes(file.mimetype)) {
+    if (allowedMimeTypes.includes(normalizedMimeType)) {
+      file.mimetype = normalizedMimeType
       callback(null, true)
     } else {
-      callback(new Error(`Unsupported audio format: ${file.mimetype}`), false)
+      callback(new Error(`Unsupported audio format: ${rawMimeType || normalizedMimeType}`), false)
     }
   },
 })
@@ -70,6 +73,8 @@ router.post('/', upload.single('audio'), async (req, res) => {
     }
 
     const { buffer, mimetype, size } = req.file
+    const rawMimeType = mimetype || ''
+    const normalizedMimeType = rawMimeType.split(';')[0].trim()
 
     // Validate buffer has content
     if (!buffer || buffer.length === 0) {
@@ -80,10 +85,14 @@ router.post('/', upload.single('audio'), async (req, res) => {
       })
     }
 
-    logger.info('API', '[Transcribe] Processing audio', {
-      mimeType: mimetype,
+    const logContext = {
+      mimeType: normalizedMimeType,
       size: `${(size / 1024).toFixed(2)}KB`,
-    })
+    }
+    if (rawMimeType && rawMimeType !== normalizedMimeType) {
+      logContext.rawMimeType = rawMimeType
+    }
+    logger.info('API', '[Transcribe] Processing audio', logContext)
 
     // Check if Gemini is available
     if (!isGeminiAvailable()) {
@@ -94,7 +103,7 @@ router.post('/', upload.single('audio'), async (req, res) => {
     }
 
     // Call the transcription service
-    const result = await transcribeAudio(buffer, mimetype)
+    const result = await transcribeAudio(buffer, normalizedMimeType)
 
     if (result.error) {
       logger.error('API', '[Transcribe] Transcription failed', {
