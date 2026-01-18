@@ -647,3 +647,64 @@ const logger = require('./utils/logger')
 ### Context for Next Agent
 - Engagement endpoint now requires Gemini fast model; no fallback content
 - Fun fact refresh interval runs during GENERATING state only
+
+---
+
+## Session 10: Voice Agent UX + Chitchat Routing + TTS Resilience (2026-01-18)
+
+### Completed Enhancements
+- **Always-on voice agent flow** - IMPLEMENTED
+  - Voice agent queue with sequential playback and "finish the sentence" behavior
+  - AI greeting on app open; narration lines for generation start and slides ready
+  - Fun fact + suggested questions narrated once per generation
+- **Raise-hand listening flow** - IMPLEMENTED
+  - Listening is gated by raise-hand; waits for current audio to finish before listening
+  - After a query, hand lowers and mic/listening are disabled until raised again
+  - "Preparing your follow-up" voice line added for follow-up queries
+- **Chitchat router** - IMPLEMENTED
+  - `/api/classify` detects chitchat via intent phrases and avoids slide generation
+  - New `/api/chitchat` endpoint for short conversational replies
+  - Frontend routes chitchat to voice response instead of slide generation
+- **Voice TTS endpoint** - IMPLEMENTED
+  - New `/api/voice/speak` endpoint for voice agent narration
+- **TTS model update + fallback** - IMPLEMENTED
+  - Uses `gemini-2.5-flash-lite-tts-preview` with fallback to preview TTS model
+  - Added optional `@google/generative-ai` support via dynamic import (fallback to `@google/genai`)
+  - Improved audio extraction/mime handling for TTS responses
+- **Rate-limit fallbacks (429)** - IMPLEMENTED
+  - Fallback topic metadata + engagement content to avoid hard failures on 429s
+
+### Files Created
+- backend/src/routes/chitchat.js - Chitchat endpoint
+- backend/src/routes/voice.js - Voice agent TTS endpoint
+
+### Files Modified
+- backend/src/index.js - Registered new routes
+- backend/src/routes/classify.js - Chitchat intent detection + response text
+- backend/src/routes/generate.js - Fallback topic/engagement data on rate limit
+- backend/src/services/gemini.js - Chitchat generator + TTS model update + audio handling
+- frontend/src/App.jsx - Voice agent queue, raise-hand flow, chitchat routing
+
+### Notes
+- `@google/generative-ai` install failed due to offline registry; dynamic import fallback remains in place.
+
+---
+
+## Session 11: Lazy Slide TTS (Just-in-Time Narration) (2026-01-19)
+
+### Completed Enhancements
+- **Lazy slide narration** - IMPLEMENTED
+  - Backend slide generation now skips TTS (images + subtitles only)
+  - Frontend requests slide audio just-in-time via `/api/voice/speak`
+  - Caches slide audio by ID and prefetches the next slide while current plays
+  - Auto-advance waits until narration is ready to avoid desync
+
+### Files Modified
+- backend/src/services/gemini.js - `generateSlideContent` supports `generateAudio` toggle
+- backend/src/routes/generate.js - Slide generation passes `generateAudio: false`
+- frontend/src/App.jsx - JIT slide TTS, caching, and prefetch logic
+
+### Tests
+- `npm run lint` (frontend) failed: ESLint reported no `.ts/.tsx` files found
+- `npm test` (frontend) failed: no test files found
+- `npm test` (backend) failed: no test files found

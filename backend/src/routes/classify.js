@@ -23,6 +23,234 @@ const topicKeywords = {
   dna: ['dna', 'gene', 'genetic', 'chromosome', 'heredity', 'mutation', 'genome', 'rna'],
 }
 
+const chitchatIntents = [
+  {
+    id: 'greeting',
+    phrases: [
+      'hi',
+      'hello',
+      'hey',
+      'yo',
+      'hiya',
+      'howdy',
+      'greetings',
+      'good morning',
+      'good afternoon',
+      'good evening',
+    ],
+    responseText: "Hey! What would you like to learn today?",
+    blockWhenRequest: true,
+    blockWhenTopic: true,
+  },
+  {
+    id: 'status',
+    phrases: [
+      'how are you',
+      'hows it going',
+      'how is it going',
+      'whats up',
+      'what is up',
+      'sup',
+    ],
+    responseText: "I'm ready to teach. What topic should we explore?",
+    blockWhenRequest: true,
+    blockWhenTopic: true,
+  },
+  {
+    id: 'thanks',
+    phrases: [
+      'thanks',
+      'thank you',
+      'thanks a lot',
+      'thank you so much',
+      'appreciate it',
+      'thx',
+    ],
+    responseText: "You're welcome! Want to explore another topic?",
+    blockWhenRequest: true,
+    blockWhenTopic: false,
+  },
+  {
+    id: 'farewell',
+    phrases: [
+      'bye',
+      'goodbye',
+      'see you',
+      'see ya',
+      'later',
+      'take care',
+      'good night',
+      'bye bye',
+    ],
+    responseText: "See you next time!",
+    blockWhenRequest: true,
+    blockWhenTopic: false,
+  },
+  {
+    id: 'capabilities',
+    phrases: [
+      'help',
+      'who are you',
+      'what are you',
+      'what can you do',
+      'what do you do',
+      'how do i use this',
+      'how does this work',
+      'what is this',
+    ],
+    responseText: "Ask me any question and I'll build slides and explain them. What should we start with?",
+    blockWhenRequest: true,
+    blockWhenTopic: true,
+  },
+  {
+    id: 'acknowledgement',
+    phrases: [
+      'ok',
+      'okay',
+      'alright',
+      'cool',
+      'nice',
+      'great',
+      'awesome',
+      'sounds good',
+      'got it',
+      'understood',
+      'all good',
+      'yep',
+      'yeah',
+      'yup',
+      'sure',
+    ],
+    responseText: "Great. What would you like to learn next?",
+    blockWhenRequest: true,
+    blockWhenTopic: true,
+  },
+]
+
+const requestPhrases = [
+  'explain',
+  'describe',
+  'define',
+  'teach',
+  'show me',
+  'tell me about',
+  'tell me more',
+  'what is',
+  'what are',
+  'what does',
+  'how does',
+  'how do',
+  'why does',
+  'why do',
+  'who is',
+  'where is',
+  'when did',
+  'can you explain',
+  'can you show',
+  'can you teach',
+  'could you explain',
+  'please explain',
+  'walk me through',
+  'break down',
+  'slides',
+  'presentation',
+  'lesson',
+  'overview',
+  'diagram',
+  'learn about',
+  'i want to learn',
+  'i want to know',
+]
+
+const followUpRequestPhrases = [
+  'can you',
+  'could you',
+  'please',
+  'tell me',
+  'what is',
+  'what are',
+  'how does',
+  'how do',
+  'why does',
+  'why do',
+  'show me',
+  'teach me',
+  'walk me through',
+  'break down',
+]
+
+function normalizeChitchatQuery(query) {
+  if (!query || typeof query !== 'string') {
+    return ''
+  }
+
+  return query
+    .toLowerCase()
+    .replace(/[’']/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function matchesPhrase(normalized, phrase) {
+  if (!phrase) return false
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = new RegExp(`\\b${escaped}\\b`)
+  return pattern.test(normalized)
+}
+
+function containsTopicKeyword(normalized) {
+  for (const keywords of Object.values(topicKeywords)) {
+    const hasMatch = keywords.some((keyword) => normalized.includes(keyword.toLowerCase()))
+    if (hasMatch) {
+      return true
+    }
+  }
+  return false
+}
+
+function looksLikeTopicRequest(normalized) {
+  const gratitudeExplainPattern = /\b(thanks|thank you|thx|appreciate)\b.*\bfor\b.*\b(explain|explaining|describe|describing|teach|teaching|show|showing)\b/
+  if (gratitudeExplainPattern.test(normalized)) {
+    const hasFollowUpRequest = followUpRequestPhrases.some((phrase) =>
+      matchesPhrase(normalized, phrase)
+    )
+    if (!hasFollowUpRequest) {
+      return false
+    }
+  }
+
+  return requestPhrases.some((phrase) => matchesPhrase(normalized, phrase))
+}
+
+function classifyChitchat(query) {
+  const normalized = normalizeChitchatQuery(query)
+  if (!normalized) return null
+
+  const hasTopicKeyword = containsTopicKeyword(normalized)
+  const hasTopicRequest = looksLikeTopicRequest(normalized)
+
+  for (const intent of chitchatIntents) {
+    const matched = intent.phrases.some((phrase) => matchesPhrase(normalized, phrase))
+    if (matched) {
+      if (intent.blockWhenRequest && hasTopicRequest) {
+        continue
+      }
+      if (intent.blockWhenTopic && hasTopicKeyword) {
+        continue
+      }
+      return {
+        classification: 'chitchat',
+        intent: intent.id,
+        responseText: intent.responseText,
+        reasoning: `Query matches ${intent.id} chitchat pattern.`,
+      }
+    }
+  }
+
+  return null
+}
+
 /**
  * Extract keywords from topic name and find matching keyword set
  * @param {string} topicName - The topic name from activeTopic
@@ -226,7 +454,7 @@ function classifyQueryRelation(query, activeTopic, conversationHistory = [], cur
 
 /**
  * POST /api/classify
- * Classify query as follow_up, new_topic, or slide_question based on context
+ * Classify query as follow_up, new_topic, slide_question, or chitchat based on context
  *
  * CORE023: Added slide_question classification for questions about current slide
  *
@@ -242,8 +470,9 @@ function classifyQueryRelation(query, activeTopic, conversationHistory = [], cur
  *   - imageUrl: The slide's image URL (for context)
  *
  * Response:
- * - classification: 'follow_up' | 'new_topic' | 'slide_question'
+ * - classification: 'follow_up' | 'new_topic' | 'slide_question' | 'chitchat'
  * - reasoning: Human-readable explanation of the classification
+ * - responseText: Spoken reply for chitchat queries
  * - shouldEvictOldest: Whether the oldest topic should be evicted
  * - evictTopicId: ID of topic to evict (if shouldEvictOldest is true)
  */
@@ -265,6 +494,26 @@ router.post('/', async (req, res) => {
       return res.status(400).json({
         error: queryError,
         field: 'query'
+      })
+    }
+
+    if (currentSlide && isSlideQuestion(sanitizedQuery)) {
+      return res.json({
+        classification: 'slide_question',
+        reasoning: 'Query appears to be asking about something visible on the current slide.',
+        shouldEvictOldest: false,
+        evictTopicId: null,
+      })
+    }
+
+    const chitchatResult = classifyChitchat(sanitizedQuery)
+    if (chitchatResult) {
+      return res.json({
+        classification: chitchatResult.classification,
+        reasoning: chitchatResult.reasoning,
+        responseText: chitchatResult.responseText,
+        shouldEvictOldest: false,
+        evictTopicId: null,
       })
     }
 

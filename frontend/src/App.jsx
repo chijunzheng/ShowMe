@@ -24,9 +24,6 @@ const GENERATION_TIMEOUT = {
   MAX_TIMEOUT_MS: 60000,
 }
 
-// Refresh fun fact content while generating
-const FUN_FACT_REFRESH_MS = 15000
-
 // Microphone permission states
 const PERMISSION_STATE = {
   PROMPT: 'prompt',
@@ -36,9 +33,6 @@ const PERMISSION_STATE = {
 
 // Maximum number of topics with slides cached in memory (LRU eviction beyond this)
 const MAX_CACHED_TOPICS = 12
-
-// localStorage key for tracking if greeting has been played (CORE010)
-const GREETING_PLAYED_KEY = 'showme_greeting_played'
 
 // CORE027: localStorage key for persisting topics across page refresh
 const TOPICS_STORAGE_KEY = 'showme_topics'
@@ -54,6 +48,16 @@ const EXAMPLE_QUESTIONS = [
   "How do black holes work?",
   "Why do we dream?",
   "How does WiFi work?",
+]
+
+// Display greetings - matches voice greetings for consistency
+const DISPLAY_GREETINGS = [
+  "What would you like to learn today?",
+  "Ready to explore something new?",
+  "What's on your curious mind?",
+  "Let's discover something together!",
+  "What would you like to understand?",
+  "Ready for a learning adventure?",
 ]
 
 // Audio configuration constants
@@ -72,9 +76,23 @@ const AUDIO_CONFIG = {
   MIN_AUDIO_SIZE: 5000,
   // Maximum audio size in bytes (matches backend 10MB limit)
   MAX_AUDIO_SIZE: 10 * 1024 * 1024,
-  // CORE019: Minimum hold duration for push-to-talk (ms)
-  // Prevents accidental taps from triggering recording
-  MIN_HOLD_DURATION: 300,
+}
+
+// Voice agent greetings - randomly selected each session
+const VOICE_GREETINGS = [
+  "Hey there! What would you like to learn today?",
+  "Hi! Ready to explore something new?",
+  "Hello! What's on your curious mind?",
+  "Hey! Let's discover something together!",
+  "Hi there! What would you like to understand?",
+  "Hello! Ready for a learning adventure?",
+]
+
+// Voice agent script templates
+const VOICE_AGENT_SCRIPT = {
+  GENERATION_START: "Got it. Give me a moment.",
+  SLIDES_READY: "Here we go!",
+  PREPARING_FOLLOW_UP: "Preparing your follow-up now.",
 }
 
 /**
@@ -202,6 +220,22 @@ function removeStaleTopicSlides(validTopicIds) {
     })
   } catch (error) {
     logger.warn('STORAGE', 'Failed to clean up stale topic slides', {
+      error: error.message,
+    })
+  }
+}
+
+/**
+ * Remove cached slides for a specific topic.
+ * @param {string} topicId - Topic ID to remove slides for
+ */
+function removeTopicSlides(topicId) {
+  try {
+    const key = getTopicSlidesStorageKey(topicId)
+    localStorage.removeItem(key)
+  } catch (error) {
+    logger.warn('STORAGE', 'Failed to remove topic slides', {
+      topicId,
       error: error.message,
     })
   }
@@ -434,6 +468,15 @@ function buildTopicSlides(topic) {
   if (topic.slides && topic.slides.length > 0) {
     slides.push(...topic.slides)
   }
+  // Add suggestions slide at the end if questions exist
+  if (topic.suggestedQuestions && topic.suggestedQuestions.length > 0) {
+    slides.push({
+      id: `suggestions_${topic.id}`,
+      type: 'suggestions',
+      topicId: topic.id,
+      questions: topic.suggestedQuestions,
+    })
+  }
   return slides
 }
 
@@ -445,6 +488,8 @@ function App() {
   const [uiState, setUiState] = useState(UI_STATE.LISTENING)
   // CORE027: isColdStart is false if we restored topics from localStorage
   const [isColdStart, setIsColdStart] = useState(() => !initialData.hadPersistedData)
+  // Random greeting picked once per session for variety
+  const [displayGreeting] = useState(() => DISPLAY_GREETINGS[Math.floor(Math.random() * DISPLAY_GREETINGS.length)])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [liveTranscription, setLiveTranscription] = useState('')
@@ -459,9 +504,11 @@ function App() {
 
   // Generation timeout state (F053)
   const [isStillWorking, setIsStillWorking] = useState(false)
+  const [isPreparingFollowUp, setIsPreparingFollowUp] = useState(false)
+  const [isSlideRevealPending, setIsSlideRevealPending] = useState(false)
   const abortControllerRef = useRef(null)
   const stillWorkingTimerRef = useRef(null)
-  const funFactRefreshIntervalRef = useRef(null)
+  const currentQueryRef = useRef(null) // Track current query for fun fact refresh
 
   // F015: Generation progress state from WebSocket
   const [generationProgress, setGenerationProgress] = useState({
@@ -675,6 +722,35 @@ function App() {
   const [isListening, setIsListening] = useState(false)
   const [audioLevel, setAudioLevel] = useState(0)
   const [permissionState, setPermissionState] = useState(PERMISSION_STATE.PROMPT)
+  // Mic enabled by default - voice-first experience
+  const [isMicEnabled, setIsMicEnabled] = useState(true)
+  // Auto-listen enabled by default - mic starts listening on app load
+  const [allowAutoListen, setAllowAutoListen] = useState(true)
+  const [isSlideNarrationPlaying, setIsSlideNarrationPlaying] = useState(false)
+  const [isSlideNarrationReady, setIsSlideNarrationReady] = useState(false)
+  const [isSlideNarrationLoading, setIsSlideNarrationLoading] = useState(false)
+  // Raise-hand state for gated listening
+  const [isRaiseHandPending, setIsRaiseHandPending] = useState(false)
+  const isListeningRef = useRef(false)
+  const isMicEnabledRef = useRef(true)
+  const allowAutoListenRef = useRef(true)
+  const isRaiseHandPendingRef = useRef(false)
+
+  useEffect(() => {
+    isListeningRef.current = isListening
+  }, [isListening])
+
+  useEffect(() => {
+    isMicEnabledRef.current = isMicEnabled
+  }, [isMicEnabled])
+
+  useEffect(() => {
+    allowAutoListenRef.current = allowAutoListen
+  }, [allowAutoListen])
+
+  useEffect(() => {
+    isRaiseHandPendingRef.current = isRaiseHandPending
+  }, [isRaiseHandPending])
 
   // Audio refs - these persist across renders without causing re-renders
   const audioContextRef = useRef(null)
@@ -686,24 +762,39 @@ function App() {
   const animationFrameRef = useRef(null)
   const lastSpeechTimeRef = useRef(null)
   const isProcessingRecordingRef = useRef(false)
+  const isStartingListeningRef = useRef(false)
+  const startListeningRef = useRef(null)
+  const stopListeningRef = useRef(null)
 
   // Track whether slideshow just finished (for auto-trigger of queued questions - F048)
   const hasFinishedSlideshowRef = useRef(false)
 
-  // CORE019: Push-to-talk refs
-  // Track when the mic button was pressed to calculate hold duration
-  const micPressStartTimeRef = useRef(null)
-  // Track if the recording was started (for edge cases like mouse leaving button)
-  const isRecordingStartedRef = useRef(false)
-  // Track if touch is active to prevent double event firing on mobile
-  // (touchstart/touchend AND mousedown/mouseup both fire for the same interaction)
-  const isTouchActiveRef = useRef(false)
+  // Voice agent queue state
+  const [voiceAgentQueue, setVoiceAgentQueue] = useState([])
+  const [isVoiceAgentSpeaking, setIsVoiceAgentSpeaking] = useState(false)
+  const voiceAgentBusyRef = useRef(false)
+  const voiceAgentAudioRef = useRef(null)
+  const voiceAgentQueueRef = useRef([])
+  const hasQueuedGreetingRef = useRef(false)
+  const resumeListeningAfterVoiceAgentRef = useRef(false)
+  const spokenFunFactRef = useRef(null)
+
+  useEffect(() => {
+    voiceAgentQueueRef.current = voiceAgentQueue
+  }, [voiceAgentQueue])
+
 
   // Audio playback ref for slide narration (F037)
   const slideAudioRef = useRef(null)
+  const resumeListeningAfterSlideRef = useRef(false)
+  const slideAudioCacheRef = useRef(new Map())
+  const slideAudioRequestRef = useRef(new Map())
+  const slideAudioFailureRef = useRef(new Set())
 
-  // Audio playback ref for greeting audio (CORE010)
-  const greetingAudioRef = useRef(null)
+  // Track if we should pause after the current slide (raise-hand flow)
+  const pauseAfterCurrentSlideRef = useRef(false)
+
+  const raiseHandRequestRef = useRef(false)
 
   // CORE022: Interrupt resume point - stores position when user interrupts slideshow
   // Format: { topicId: string, slideIndex: number } or null when no interrupt occurred
@@ -744,6 +835,259 @@ function App() {
   }, [uiState, isListening])
 
   /**
+   * Returns the currently playing audio element, if any.
+   * Used to avoid overlapping narration with voice-agent speech.
+   */
+  const getActiveAudioElement = useCallback(() => {
+    const candidates = [
+      voiceAgentAudioRef.current,
+      slideResponseAudioRef.current,
+      slideAudioRef.current,
+    ]
+
+    return candidates.find((audio) =>
+      audio && !audio.paused && !audio.ended
+    ) || null
+  }, [])
+
+  /**
+   * Wait for the current audio to finish before continuing.
+   * This enforces "finish the current sentence" behavior.
+   */
+  const waitForActiveAudioToEnd = useCallback(() => {
+    const activeAudio = getActiveAudioElement()
+    if (!activeAudio) {
+      return Promise.resolve()
+    }
+
+    return new Promise((resolve) => {
+      const handleDone = () => {
+        activeAudio.removeEventListener('ended', handleDone)
+        activeAudio.removeEventListener('pause', handleDone)
+        resolve()
+      }
+
+      activeAudio.addEventListener('ended', handleDone)
+      activeAudio.addEventListener('pause', handleDone)
+    })
+  }, [getActiveAudioElement])
+
+  const getCachedSlideAudio = useCallback((slideId) => {
+    if (!slideId) return null
+    return slideAudioCacheRef.current.get(slideId) || null
+  }, [])
+
+  const requestSlideAudio = useCallback(async (slide) => {
+    if (!slide || slide.type === 'header') return null
+    if (!slide.subtitle || typeof slide.subtitle !== 'string') return null
+    if (slideAudioFailureRef.current.has(slide.id)) return null
+
+    const cached = getCachedSlideAudio(slide.id)
+    if (cached) return cached
+
+    const inFlight = slideAudioRequestRef.current.get(slide.id)
+    if (inFlight) return inFlight
+
+    const requestPromise = (async () => {
+      try {
+        const response = await fetch('/api/voice/speak', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: slide.subtitle }),
+        })
+
+        if (!response.ok) {
+          slideAudioFailureRef.current.add(slide.id)
+          logger.warn('AUDIO', 'Slide narration TTS request failed', {
+            status: response.status,
+            slideId: slide.id,
+          })
+          return null
+        }
+
+        const data = await response.json()
+        if (!data?.audioUrl) {
+          slideAudioFailureRef.current.add(slide.id)
+          return null
+        }
+
+        const duration = Number.isFinite(data.duration) && data.duration > 0
+          ? data.duration
+          : (slide.duration || DEFAULT_SLIDE_DURATION)
+        const audioPayload = { audioUrl: data.audioUrl, duration }
+        slideAudioCacheRef.current.set(slide.id, audioPayload)
+        return audioPayload
+      } catch (error) {
+        slideAudioFailureRef.current.add(slide.id)
+        logger.warn('AUDIO', 'Slide narration TTS request failed', {
+          error: error.message,
+          slideId: slide.id,
+        })
+        return null
+      } finally {
+        slideAudioRequestRef.current.delete(slide.id)
+      }
+    })()
+
+    slideAudioRequestRef.current.set(slide.id, requestPromise)
+    return requestPromise
+  }, [DEFAULT_SLIDE_DURATION, getCachedSlideAudio])
+
+  const prefetchSlideAudio = useCallback((slide) => {
+    if (!slide || slide.type === 'header') return
+    if (slideAudioFailureRef.current.has(slide.id)) return
+    if (slideAudioCacheRef.current.has(slide.id)) return
+    void requestSlideAudio(slide)
+  }, [requestSlideAudio])
+
+  const getSlideDuration = useCallback((slide) => {
+    if (!slide) return DEFAULT_SLIDE_DURATION
+    const cached = getCachedSlideAudio(slide.id)
+    return cached?.duration || slide.duration || DEFAULT_SLIDE_DURATION
+  }, [DEFAULT_SLIDE_DURATION, getCachedSlideAudio])
+
+  /**
+   * Queue a voice-agent line to be spoken via Gemini TTS.
+   * If options.audioUrl is provided, uses pre-generated audio instead of fetching.
+   */
+  const enqueueVoiceAgentMessage = useCallback((text, options = {}) => {
+    if (!text || typeof text !== 'string') return
+    const trimmed = text.trim()
+    if (!trimmed) return
+
+    const entry = {
+      id: `va_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      text: trimmed,
+      priority: options.priority || 'normal',
+      waitForAudio: options.waitForAudio !== false,
+      onComplete: typeof options.onComplete === 'function' ? options.onComplete : null,
+      audioUrl: options.audioUrl || null, // Pre-generated audio URL (skips /api/voice/speak)
+    }
+
+    setVoiceAgentQueue((prev) => {
+      if (entry.priority === 'high') {
+        return [entry, ...prev]
+      }
+      return [...prev, entry]
+    })
+  }, [])
+
+  /**
+   * Process queued voice-agent messages sequentially.
+   */
+  useEffect(() => {
+    if (voiceAgentBusyRef.current || voiceAgentQueue.length === 0) {
+      return
+    }
+
+    const nextItem = voiceAgentQueue[0]
+
+    const finishItem = () => {
+      setIsVoiceAgentSpeaking(false)
+      voiceAgentBusyRef.current = false
+      voiceAgentAudioRef.current = null
+      const shouldResumeListening = resumeListeningAfterVoiceAgentRef.current
+      resumeListeningAfterVoiceAgentRef.current = false
+      if (nextItem.onComplete) {
+        nextItem.onComplete()
+      }
+      setVoiceAgentQueue((prev) => prev.filter((item) => item.id !== nextItem.id))
+
+      if (
+        shouldResumeListening &&
+        isMicEnabled &&
+        allowAutoListen &&
+        !isRaiseHandPending &&
+        !isSlideNarrationPlaying &&
+        !isProcessingRecordingRef.current
+      ) {
+        startListeningRef.current?.()
+      }
+    }
+
+    const playVoiceAgentLine = async () => {
+      voiceAgentBusyRef.current = true
+
+      if (uiState === UI_STATE.SLIDESHOW && isPlaying) {
+        pauseAfterCurrentSlideRef.current = true
+      }
+
+      if (isListening) {
+        resumeListeningAfterVoiceAgentRef.current = true
+        stopListeningRef.current?.()
+      }
+
+      if (nextItem.waitForAudio) {
+        await waitForActiveAudioToEnd()
+      }
+
+      if (!voiceAgentQueueRef.current.some((item) => item.id === nextItem.id)) {
+        voiceAgentBusyRef.current = false
+        return
+      }
+
+      try {
+        let audioUrl = nextItem.audioUrl
+
+        // If no pre-generated audio, fetch from TTS endpoint
+        if (!audioUrl) {
+          const response = await fetch('/api/voice/speak', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: nextItem.text }),
+          })
+
+          if (!response.ok) {
+            logger.warn('AUDIO', 'Voice agent TTS request failed', {
+              status: response.status,
+            })
+            finishItem()
+            return
+          }
+
+          const data = await response.json()
+          if (!data?.audioUrl) {
+            finishItem()
+            return
+          }
+          audioUrl = data.audioUrl
+        }
+
+        const audio = new Audio(audioUrl)
+        voiceAgentAudioRef.current = audio
+        setIsVoiceAgentSpeaking(true)
+
+        const handleDone = () => {
+          finishItem()
+        }
+
+        audio.addEventListener('ended', handleDone, { once: true })
+        audio.addEventListener('error', handleDone, { once: true })
+
+        audio.play().catch((error) => {
+          logger.warn('AUDIO', 'Voice agent playback blocked', { error: error.message })
+          finishItem()
+        })
+      } catch (error) {
+        logger.warn('AUDIO', 'Voice agent playback failed', { error: error.message })
+        finishItem()
+      }
+    }
+
+    playVoiceAgentLine()
+  }, [
+    voiceAgentQueue,
+    waitForActiveAudioToEnd,
+    uiState,
+    isPlaying,
+    isListening,
+    isMicEnabled,
+    allowAutoListen,
+    isRaiseHandPending,
+    isSlideNarrationPlaying,
+  ])
+
+  /**
    * CORE027: Persist topic metadata to localStorage whenever they change.
    * Slides are stored separately per topic to allow cache eviction.
    * Note: We use a ref to track if this is the initial render to avoid
@@ -762,84 +1106,28 @@ function App() {
   }, [topics])
 
   /**
-   * CORE010: AI greeting on cold start
-   * Plays a TTS greeting when the app opens for the first time (true cold start).
-   * Conditions:
-   * - isColdStart is true (no topics exist yet)
-   * - No greeting has been played before (localStorage flag not set)
-   * - App is in LISTENING state
+   * CORE010: AI greeting - plays after mic permission granted (user interaction)
+   * This avoids browser autoplay blocking which requires user interaction first
    */
   useEffect(() => {
-    // Only play greeting on true cold start
-    // Check localStorage first to avoid unnecessary API calls
-    const hasPlayedGreeting = localStorage.getItem(GREETING_PLAYED_KEY) === 'true'
-
-    if (hasPlayedGreeting) {
-      // Greeting already played in a previous session, skip
+    if (hasQueuedGreetingRef.current) {
       return
     }
 
-    if (!isColdStart || topics.length > 0 || uiState !== UI_STATE.LISTENING) {
-      // Not a true cold start, or already navigated away
+    // Only greet after user has granted mic permission (requires interaction)
+    if (permissionState !== PERMISSION_STATE.GRANTED) {
       return
     }
 
-    // Fetch and play the greeting audio
-    const playGreeting = async () => {
-      try {
-        logger.info('AUDIO', 'Fetching cold start greeting')
+    hasQueuedGreetingRef.current = true
+    const randomGreeting = VOICE_GREETINGS[Math.floor(Math.random() * VOICE_GREETINGS.length)]
 
-        const response = await fetch('/api/greeting', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        })
+    const timer = setTimeout(() => {
+      enqueueVoiceAgentMessage(randomGreeting, { priority: 'high' })
+    }, 500)
 
-        if (!response.ok) {
-          logger.warn('AUDIO', 'Greeting API request failed', { status: response.status })
-          return
-        }
-
-        const data = await response.json()
-
-        if (!data.available || !data.audioUrl) {
-          logger.info('AUDIO', 'Greeting audio not available (TTS may be disabled)')
-          // Still mark as played so we don't retry
-          localStorage.setItem(GREETING_PLAYED_KEY, 'true')
-          return
-        }
-
-        // Create and play the greeting audio
-        const audio = new Audio(data.audioUrl)
-        greetingAudioRef.current = audio
-
-        logger.info('AUDIO', 'Playing cold start greeting', { duration: data.duration })
-
-        audio.play().catch((error) => {
-          // Autoplay might be blocked
-          logger.warn('AUDIO', 'Greeting autoplay blocked', { error: error.message })
-        })
-
-        // Mark greeting as played regardless of playback success
-        // (we fetched it successfully, user heard it or autoplay was blocked)
-        localStorage.setItem(GREETING_PLAYED_KEY, 'true')
-
-      } catch (error) {
-        logger.error('AUDIO', 'Failed to fetch greeting', { error: error.message })
-      }
-    }
-
-    // Small delay to let the UI render first
-    const timer = setTimeout(playGreeting, 500)
-
-    return () => {
-      clearTimeout(timer)
-      // Stop greeting audio if component unmounts
-      if (greetingAudioRef.current) {
-        greetingAudioRef.current.pause()
-        greetingAudioRef.current = null
-      }
-    }
-  }, [isColdStart, topics.length, uiState])
+    return () => clearTimeout(timer)
+  }, [permissionState, enqueueVoiceAgentMessage])
 
   // Navigation helper functions with bounds checking (F044)
   const goToNextSlide = useCallback(() => {
@@ -896,11 +1184,88 @@ function App() {
   }, [questionQueue])
 
   const clearFunFactRefresh = useCallback(() => {
-    if (funFactRefreshIntervalRef.current) {
-      clearInterval(funFactRefreshIntervalRef.current)
-      funFactRefreshIntervalRef.current = null
-    }
+    currentQueryRef.current = null
   }, [])
+
+  /**
+   * Refresh fun fact by fetching a new one from the engagement endpoint.
+   * Called after current fun fact audio finishes playing (TTS-driven refresh).
+   */
+  const refreshFunFact = useCallback(() => {
+    const query = currentQueryRef.current
+    const signal = abortControllerRef.current?.signal
+
+    // Don't refresh if no query or generation was cancelled
+    if (!query || signal?.aborted) {
+      return
+    }
+
+    logger.debug('API', 'Refreshing fun fact after audio complete', {
+      endpoint: '/api/generate/engagement',
+    })
+
+    fetch('/api/generate/engagement', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+      signal,
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Engagement API failed: ${res.status}`)
+        return res.json()
+      })
+      .then((data) => {
+        // Check signal again after async operation
+        if (abortControllerRef.current?.signal !== signal || !data?.funFact) return
+        setEngagement((prev) => {
+          if (!prev) {
+            return {
+              funFact: data.funFact,
+              suggestedQuestions: Array.isArray(data.suggestedQuestions)
+                ? data.suggestedQuestions
+                : [],
+            }
+          }
+          // Only update fun fact, keep existing suggestions
+          return { ...prev, funFact: data.funFact }
+        })
+        // Reset spoken ref so the new fun fact will be spoken
+        spokenFunFactRef.current = null
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') {
+          logger.warn('API', 'Fun fact refresh failed (non-critical)', {
+            error: err.message,
+          })
+        }
+      })
+  }, [])
+
+  /**
+   * Transition to slideshow with "slides ready" narration.
+   * Interrupts any playing fun fact audio to avoid blocking the transition.
+   */
+  const queueSlidesReadyTransition = useCallback(() => {
+    // Stop any currently playing voice agent audio (e.g., fun fact)
+    if (voiceAgentAudioRef.current) {
+      voiceAgentAudioRef.current.pause()
+      voiceAgentAudioRef.current = null
+    }
+    // Clear pending voice queue and stop fun fact refresh chain
+    setVoiceAgentQueue([])
+    setIsVoiceAgentSpeaking(false)
+    voiceAgentBusyRef.current = false
+    clearFunFactRefresh()
+
+    setIsSlideRevealPending(true)
+    enqueueVoiceAgentMessage(VOICE_AGENT_SCRIPT.SLIDES_READY, {
+      priority: 'high',
+      onComplete: () => {
+        setIsSlideRevealPending(false)
+        setUiState(UI_STATE.SLIDESHOW)
+      },
+    })
+  }, [enqueueVoiceAgentMessage, clearFunFactRefresh])
 
   /**
    * Cancel ongoing generation request (F053)
@@ -917,6 +1282,9 @@ function App() {
     }
     clearFunFactRefresh()
     setIsStillWorking(false)
+    setIsPreparingFollowUp(false)
+    setIsSlideRevealPending(false)
+    setVoiceAgentQueue([])
     setUiState(UI_STATE.LISTENING)
   }, [clearFunFactRefresh])
 
@@ -941,24 +1309,57 @@ function App() {
     }
   }, [uiState, clearFunFactRefresh])
 
+  /**
+   * Speak fun facts using pre-generated audio from engagement endpoint.
+   * Audio is generated server-side to eliminate the round-trip to /api/voice/speak.
+   * Uses TTS-driven refresh: next fun fact fetched only after current audio finishes.
+   */
+  useEffect(() => {
+    if (!engagement) return
+
+    if (engagement.funFact?.text && !spokenFunFactRef.current) {
+      spokenFunFactRef.current = engagement.funFact.text
+      // Use pre-generated audio if available, otherwise fall back to TTS fetch
+      // When audio finishes, trigger refresh to get next fun fact
+      enqueueVoiceAgentMessage(`Fun fact: ${engagement.funFact.text}`, {
+        audioUrl: engagement.funFact.audioUrl || null,
+        onComplete: refreshFunFact,
+      })
+    }
+
+    // Suggested questions are shown visually only (no TTS) to avoid
+    // race condition where suggestions narrate after slides are ready
+  }, [engagement, enqueueVoiceAgentMessage, refreshFunFact])
+
   // Auto-advance slideshow when playing (F044)
   // Uses slide.duration if available, otherwise falls back to DEFAULT_SLIDE_DURATION
   // Header slides advance faster since they're just dividers
   useEffect(() => {
     // Only run auto-advance when in slideshow state, playing, and slides exist
-    if (uiState !== UI_STATE.SLIDESHOW || !isPlaying || visibleSlides.length === 0) {
+    if (uiState !== UI_STATE.SLIDESHOW || !isPlaying || isVoiceAgentSpeaking || visibleSlides.length === 0) {
+      return
+    }
+
+    const currentSlide = visibleSlides[currentIndex]
+
+    if (currentSlide?.type !== 'header' && !isSlideNarrationReady) {
       return
     }
 
     // Get duration for current slide (in milliseconds)
-    const currentSlide = visibleSlides[currentIndex]
     // Header slides should advance faster since they're just dividers (2 seconds)
     const duration = currentSlide?.type === 'header'
       ? 2000
-      : (currentSlide?.duration || DEFAULT_SLIDE_DURATION)
+      : getSlideDuration(currentSlide)
 
     const intervalId = setInterval(() => {
       setCurrentIndex((prev) => {
+        if (pauseAfterCurrentSlideRef.current) {
+          pauseAfterCurrentSlideRef.current = false
+          setIsPlaying(false)
+          return prev
+        }
+
         const nextIndex = prev + 1
         // If we reach the end, stop playing and mark slideshow as finished (F048)
         if (nextIndex >= visibleSlides.length) {
@@ -972,7 +1373,15 @@ function App() {
 
     // Cleanup interval on unmount or when dependencies change
     return () => clearInterval(intervalId)
-  }, [uiState, isPlaying, currentIndex, visibleSlides])
+  }, [
+    uiState,
+    isPlaying,
+    isVoiceAgentSpeaking,
+    isSlideNarrationReady,
+    currentIndex,
+    visibleSlides,
+    getSlideDuration,
+  ])
 
   // Keyboard navigation for slideshow
   // Arrow keys navigate between slides, Space bar toggles play/pause
@@ -1036,6 +1445,10 @@ function App() {
         slideAudioRef.current.pause()
         slideAudioRef.current = null
       }
+      setIsSlideNarrationPlaying(false)
+      setIsSlideNarrationReady(false)
+      setIsSlideNarrationLoading(false)
+      resumeListeningAfterSlideRef.current = false
       // CORE023: Stop slide response audio when leaving slideshow
       if (slideResponseAudioRef.current) {
         slideResponseAudioRef.current.pause()
@@ -1047,6 +1460,8 @@ function App() {
     }
 
     const currentSlide = visibleSlides[currentIndex]
+    setIsSlideNarrationReady(false)
+    setIsSlideNarrationLoading(false)
 
     // Stop previous audio if playing
     if (slideAudioRef.current) {
@@ -1061,10 +1476,53 @@ function App() {
     }
     setHighlightPosition(null)
 
-    // Only play audio for content slides (not header slides) that have an audioUrl
-    if (currentSlide?.type !== 'header' && currentSlide?.audioUrl && isPlaying) {
-      const audio = new Audio(currentSlide.audioUrl)
+    if (currentSlide?.type === 'header') {
+      setIsSlideNarrationPlaying(false)
+      setIsSlideNarrationReady(true)
+      prefetchSlideAudio(visibleSlides[currentIndex + 1])
+      return
+    }
+
+    if (!isPlaying || isVoiceAgentSpeaking) {
+      setIsSlideNarrationPlaying(false)
+      return
+    }
+
+    if (isListeningRef.current) {
+      resumeListeningAfterSlideRef.current = true
+      stopListeningRef.current?.()
+    }
+
+    let cancelled = false
+
+    const playSlideAudio = async () => {
+      let audioPayload = getCachedSlideAudio(currentSlide.id)
+
+      if (!audioPayload) {
+        if (slideAudioFailureRef.current.has(currentSlide.id)) {
+          setIsSlideNarrationPlaying(false)
+          setIsSlideNarrationReady(true)
+          return
+        }
+
+        setIsSlideNarrationLoading(true)
+        audioPayload = await requestSlideAudio(currentSlide)
+        if (cancelled) return
+        setIsSlideNarrationLoading(false)
+      }
+
+      if (cancelled) return
+
+      if (!audioPayload?.audioUrl) {
+        setIsSlideNarrationPlaying(false)
+        setIsSlideNarrationReady(true)
+        return
+      }
+
+      const audio = new Audio(audioPayload.audioUrl)
       slideAudioRef.current = audio
+      setIsSlideNarrationPlaying(true)
+      setIsSlideNarrationReady(true)
 
       // F071: Log audio playback start
       logger.debug('AUDIO', 'Starting slide narration playback', {
@@ -1074,22 +1532,55 @@ function App() {
 
       // Start from the beginning
       audio.currentTime = 0
+      audio.onended = () => {
+        setIsSlideNarrationPlaying(false)
+        if (
+          resumeListeningAfterSlideRef.current &&
+          isMicEnabledRef.current &&
+          allowAutoListenRef.current &&
+          !isRaiseHandPendingRef.current &&
+          !isProcessingRecordingRef.current
+        ) {
+          startListeningRef.current?.()
+        }
+        resumeListeningAfterSlideRef.current = false
+      }
+      audio.onerror = () => {
+        setIsSlideNarrationPlaying(false)
+        resumeListeningAfterSlideRef.current = false
+      }
       audio.play().catch((error) => {
         // F071: Log autoplay blocked error
         logger.warn('AUDIO', 'Slide audio playback failed (autoplay may be blocked)', {
           error: error.message,
           slideId: currentSlide.id,
         })
+        setIsSlideNarrationPlaying(false)
+        resumeListeningAfterSlideRef.current = false
       })
+
+      prefetchSlideAudio(visibleSlides[currentIndex + 1])
     }
+
+    playSlideAudio()
 
     // Cleanup on unmount or when slide changes
     return () => {
+      cancelled = true
       if (slideAudioRef.current) {
         slideAudioRef.current.pause()
       }
     }
-  }, [uiState, currentIndex, visibleSlides, isPlaying])
+  }, [
+    uiState,
+    currentIndex,
+    visibleSlides,
+    isPlaying,
+    isVoiceAgentSpeaking,
+    requestSlideAudio,
+    prefetchSlideAudio,
+    getCachedSlideAudio,
+  ])
 
   // Auto-trigger queued questions after slideshow ends (F048)
   // This creates a seamless learning flow where users can queue questions
@@ -1144,7 +1635,7 @@ function App() {
     if (isSpeaking) {
       // User is speaking - record the time and update transcription status
       lastSpeechTimeRef.current = Date.now()
-      setLiveTranscription('Listening...')
+      setLiveTranscription('')
 
       // Clear any existing silence timer
       if (silenceTimerRef.current) {
@@ -1237,6 +1728,8 @@ function App() {
     lastSpeechTimeRef.current = null
   }, [])
 
+  stopListeningRef.current = stopListening
+
   // Cleanup audio resources when component unmounts
   useEffect(() => {
     return () => {
@@ -1257,15 +1750,16 @@ function App() {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current)
       }
+      if (voiceAgentAudioRef.current) {
+        voiceAgentAudioRef.current.pause()
+        voiceAgentAudioRef.current = null
+      }
       // Cleanup generation-related refs
       if (abortControllerRef.current) {
         abortControllerRef.current.abort()
       }
       if (stillWorkingTimerRef.current) {
         clearTimeout(stillWorkingTimerRef.current)
-      }
-      if (funFactRefreshIntervalRef.current) {
-        clearInterval(funFactRefreshIntervalRef.current)
       }
     }
   }, [])
@@ -1276,6 +1770,11 @@ function App() {
    * F071: Logs recording start and permission events
    */
   const startListening = useCallback(async () => {
+    if (isStartingListeningRef.current || isListeningRef.current) {
+      return
+    }
+
+    isStartingListeningRef.current = true
     logger.debug('AUDIO', 'Requesting microphone permission')
 
     try {
@@ -1343,7 +1842,7 @@ function App() {
       lastSpeechTimeRef.current = null
       isProcessingRecordingRef.current = false
       setIsListening(true)
-      setLiveTranscription('Listening...')
+      setLiveTranscription('')
     } catch (error) {
       // Handle permission denial or other errors
       if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
@@ -1357,8 +1856,37 @@ function App() {
           errorMessage: error.message,
         })
       }
+    } finally {
+      isStartingListeningRef.current = false
     }
   }, [])
+
+  startListeningRef.current = startListening
+
+  /**
+   * Auto-start listening when enabled and no narration is playing.
+   */
+  useEffect(() => {
+    if (!allowAutoListen || !isMicEnabled) return
+    if (permissionState === PERMISSION_STATE.DENIED) return
+    if (isListening || isRaiseHandPending || isVoiceAgentSpeaking || isSlideNarrationPlaying) return
+    if (voiceAgentQueue.length > 0) return
+    if (isProcessingRecordingRef.current) return
+    if (uiState === UI_STATE.ERROR) return
+
+    startListening()
+  }, [
+    allowAutoListen,
+    isMicEnabled,
+    permissionState,
+    isListening,
+    isRaiseHandPending,
+    isVoiceAgentSpeaking,
+    isSlideNarrationPlaying,
+    voiceAgentQueue.length,
+    uiState,
+    startListening,
+  ])
 
   /**
    * Handles completion of voice recording.
@@ -1507,38 +2035,38 @@ function App() {
   }, [stopListening])
 
   /**
-   * CORE019, CORE020: Handles mic button press down (mouse or touch)
-   * Starts recording immediately when user presses the button.
-   * Records the press start time for minimum hold duration check.
-   * Handles double event firing on mobile by tracking touch state.
-   * CORE020: If in slideshow mode, pauses audio and stores resume point.
+   * Cancel a raise-hand request or active listening session.
    */
-  const handleMicPressStart = useCallback((event) => {
-    // Handle double event firing on mobile: touchstart fires first, then mousedown
-    // Track touch state to skip the duplicate mouse event
-    if (event.type === 'touchstart') {
-      isTouchActiveRef.current = true
-    } else if (event.type === 'mousedown' && isTouchActiveRef.current) {
-      // Skip mouse event if touch is active (prevents double firing)
+  const cancelRaiseHand = useCallback(() => {
+    raiseHandRequestRef.current = false
+    setIsRaiseHandPending(false)
+    isProcessingRecordingRef.current = false
+
+    if (isListening) {
+      stopListening()
+      setLiveTranscription('')
+    }
+  }, [isListening, stopListening])
+
+  /**
+   * Raise-hand flow: wait for the current sentence to finish, then listen.
+   */
+  const handleRaiseHandClick = useCallback(async () => {
+    if (isMicEnabled) {
+      setIsMicEnabled(false)
+      cancelRaiseHand()
       return
     }
 
-    // Prevent default to avoid any text selection or context menus
-    event.preventDefault()
+    setIsMicEnabled(true)
+    setAllowAutoListen(true)
+    raiseHandRequestRef.current = true
+    setIsRaiseHandPending(true)
+    setVoiceAgentQueue([])
 
-    // CORE020: If in slideshow mode, pause audio and store resume point
     if (uiState === UI_STATE.SLIDESHOW) {
-      // Pause the current slide audio immediately
-      if (slideAudioRef.current) {
-        slideAudioRef.current.pause()
-        logger.debug('AUDIO', 'Interrupt: paused slideshow audio during mic press')
-      }
+      pauseAfterCurrentSlideRef.current = true
 
-      // Pause slideshow auto-advance
-      setIsPlaying(false)
-
-      // CORE022: Store the current position for resume functionality
-      // Find the topic ID for the current slide
       const currentSlide = visibleSlides[currentIndex]
       if (currentSlide) {
         const resumePoint = {
@@ -1546,176 +2074,63 @@ function App() {
           slideIndex: currentIndex,
         }
         setInterruptResumePoint(resumePoint)
-        logger.info('AUDIO', 'Interrupt: stored resume point', {
+        logger.info('AUDIO', 'Raise hand: stored resume point', {
           slideIndex: currentIndex,
           topicId: resumePoint.topicId,
         })
       }
     }
 
-    // Record the press start time for duration check
-    micPressStartTimeRef.current = Date.now()
-    isRecordingStartedRef.current = false
+    await waitForActiveAudioToEnd()
 
-    // Start recording immediately
-    logger.debug('AUDIO', 'Push-to-talk: button pressed, starting recording')
+    if (!raiseHandRequestRef.current) {
+      return
+    }
+
+    raiseHandRequestRef.current = false
+    setIsRaiseHandPending(false)
+    pauseAfterCurrentSlideRef.current = false
+
+    if (uiState === UI_STATE.SLIDESHOW) {
+      setIsPlaying(false)
+    }
+
     startListening()
-
-    // Mark recording as started after a brief moment
-    // This allows startListening to initialize before we track it
-    setTimeout(() => {
-      if (micPressStartTimeRef.current !== null) {
-        isRecordingStartedRef.current = true
-      }
-    }, 50)
-  }, [startListening, uiState, visibleSlides, currentIndex])
-
-  /**
-   * CORE019: Handles mic button release (mouse or touch)
-   * Checks if the hold duration meets minimum threshold, then processes recording.
-   * Quick taps (< 300ms) are ignored to prevent accidental activation.
-   * Handles double event firing on mobile by tracking touch state.
-   */
-  const handleMicPressEnd = useCallback((event) => {
-    // Handle double event firing on mobile: touchend fires first, then mouseup
-    // Track touch state to skip the duplicate mouse event
-    if (event.type === 'touchend') {
-      // Reset touch state after a short delay to allow for edge cases
-      setTimeout(() => { isTouchActiveRef.current = false }, 100)
-    } else if (event.type === 'mouseup' && isTouchActiveRef.current) {
-      // Skip mouse event if touch is active (prevents double firing)
-      return
-    }
-
-    // Prevent default behavior
-    event.preventDefault()
-
-    // Check if there was a valid press start
-    if (micPressStartTimeRef.current === null) {
-      return
-    }
-
-    const holdDuration = Date.now() - micPressStartTimeRef.current
-    micPressStartTimeRef.current = null
-
-    // Check minimum hold duration to prevent accidental taps
-    if (holdDuration < AUDIO_CONFIG.MIN_HOLD_DURATION) {
-      logger.debug('AUDIO', 'Push-to-talk: quick tap detected, canceling recording', {
-        holdDuration,
-        minRequired: AUDIO_CONFIG.MIN_HOLD_DURATION,
-      })
-      // Cancel the recording without processing
-      stopListening()
-      setLiveTranscription('')
-      isRecordingStartedRef.current = false
-      return
-    }
-
-    // Valid hold duration - stop recording and process
-    logger.debug('AUDIO', 'Push-to-talk: button released, processing recording', {
-      holdDuration,
-    })
-
-    // Process the recording
-    handleVoiceComplete()
-    isRecordingStartedRef.current = false
-  }, [handleVoiceComplete, stopListening])
+  }, [
+    isMicEnabled,
+    cancelRaiseHand,
+    uiState,
+    visibleSlides,
+    currentIndex,
+    waitForActiveAudioToEnd,
+    startListening,
+  ])
 
   /**
-   * CORE019: Handles mouse leaving the mic button while pressed
-   * This is an edge case where user drags mouse off the button.
-   * We still process the recording in this case.
-   */
-  const handleMicMouseLeave = useCallback(() => {
-    // Only handle if we're actively recording from a button press
-    if (micPressStartTimeRef.current !== null && isRecordingStartedRef.current) {
-      const holdDuration = Date.now() - micPressStartTimeRef.current
-      micPressStartTimeRef.current = null
-
-      // If held long enough, process the recording
-      if (holdDuration >= AUDIO_CONFIG.MIN_HOLD_DURATION) {
-        logger.debug('AUDIO', 'Push-to-talk: mouse left button, processing recording', {
-          holdDuration,
-        })
-        handleVoiceComplete()
-      } else {
-        // Cancel if not held long enough
-        logger.debug('AUDIO', 'Push-to-talk: mouse left button too early, canceling', {
-          holdDuration,
-        })
-        stopListening()
-        setLiveTranscription('')
-      }
-      isRecordingStartedRef.current = false
-    }
-  }, [handleVoiceComplete, stopListening])
-
-  /**
-   * CORE019: Handles touch cancel events (e.g., system interruption)
-   * Ensures recording is cleaned up properly if the touch is cancelled.
-   */
-  const handleMicTouchCancel = useCallback(() => {
-    if (micPressStartTimeRef.current !== null) {
-      logger.debug('AUDIO', 'Push-to-talk: touch cancelled, canceling recording')
-      micPressStartTimeRef.current = null
-      stopListening()
-      setLiveTranscription('')
-      isRecordingStartedRef.current = false
-    }
-  }, [stopListening])
-
-  /**
-   * CORE019: Handles keyboard key down for mic button accessibility
-   * Allows Enter and Space keys to activate push-to-talk for keyboard users.
-   */
-  const handleMicKeyDown = useCallback((event) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault()
-      handleMicPressStart(event)
-    }
-  }, [handleMicPressStart])
-
-  /**
-   * CORE019: Handles keyboard key up for mic button accessibility
-   * Allows Enter and Space keys to release push-to-talk for keyboard users.
-   */
-  const handleMicKeyUp = useCallback((event) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault()
-      handleMicPressEnd(event)
-    }
-  }, [handleMicPressEnd])
-
-  /**
-   * Classify a query to determine if it's a follow-up, new topic, or slide question
+   * Classify a query to determine if it's a follow-up, new topic, slide question, or chitchat
    * CORE023: Added slide_question classification support
    * F068: Logs API request and response
    * @param {string} query - The user's question
    * @param {AbortSignal} signal - AbortController signal for cancellation (F053)
-   * @returns {Promise<{classification: string, shouldEvictOldest: boolean, evictTopicId: string|null}>}
+   * @returns {Promise<{classification: string, shouldEvictOldest: boolean, evictTopicId: string|null, responseText?: string}>}
    */
   const classifyQuery = async (query, signal) => {
-    // If no active topic, it's always a new topic
-    if (!activeTopic) {
-      logger.debug('API', 'Skipping classify (no active topic)')
-      return {
-        classification: 'new_topic',
-        shouldEvictOldest: false,
-        evictTopicId: null,
-      }
-    }
+    const activeTopicId = activeTopic?.id || null
 
     // F068: Start timing for classify API
     logger.time('API', 'classify-request')
     logger.info('API', 'POST /api/classify', {
       endpoint: '/api/classify',
       method: 'POST',
-      activeTopicId: activeTopic.id,
+      activeTopicId,
     })
 
     // CORE023: Get current slide context for slide_question detection
     // Only include context if we're in slideshow state with a valid content slide
-    const currentSlide = uiState === UI_STATE.SLIDESHOW && visibleSlides[currentIndex] && visibleSlides[currentIndex].type !== 'header'
+    const currentSlide = uiState === UI_STATE.SLIDESHOW &&
+      activeTopic &&
+      visibleSlides[currentIndex] &&
+      visibleSlides[currentIndex].type !== 'header'
       ? {
           subtitle: visibleSlides[currentIndex].subtitle || '',
           topicName: activeTopic.name,
@@ -1728,11 +2143,13 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: query.trim(),
-          activeTopicId: activeTopic.id,
-          activeTopic: {
-            name: activeTopic.name,
-            icon: activeTopic.icon,
-          },
+          activeTopicId,
+          activeTopic: activeTopic
+            ? {
+                name: activeTopic.name,
+                icon: activeTopic.icon,
+              }
+            : null,
           conversationHistory: [], // Could be enhanced with actual history
           topicCount: topics.length,
           oldestTopicId: topics.length > 0 ? topics[0].id : null,
@@ -1781,6 +2198,57 @@ function App() {
   }
 
   /**
+   * Request a short chitchat response from the backend.
+   * @param {string} query - The user's message
+   * @param {AbortSignal} signal - AbortController signal for cancellation
+   * @returns {Promise<{responseText: string}|null>}
+   */
+  const requestChitchatResponse = async (query, signal) => {
+    logger.time('API', 'chitchat-request')
+    logger.info('API', 'POST /api/chitchat', {
+      endpoint: '/api/chitchat',
+      method: 'POST',
+    })
+
+    try {
+      const response = await fetch('/api/chitchat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: query.trim(),
+          activeTopicName: activeTopic?.name || '',
+        }),
+        signal,
+      })
+
+      logger.timeEnd('API', 'chitchat-request')
+
+      if (!response.ok) {
+        logger.warn('API', 'Chitchat request failed', {
+          status: response.status,
+        })
+        return null
+      }
+
+      const result = await response.json()
+      logger.info('API', 'Chitchat response received', {
+        status: response.status,
+      })
+
+      return result
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        logger.debug('API', 'Chitchat request aborted by user')
+        throw error
+      }
+      logger.warn('API', 'Chitchat request failed', {
+        error: error.message,
+      })
+      return null
+    }
+  }
+
+  /**
    * Handle a user question (from voice or text input)
    * Classifies the query, handles follow-up vs new topic, manages slide cache
    * F015: Sends clientId to API for WebSocket progress updates
@@ -1795,124 +2263,73 @@ function App() {
     if (!trimmedQuery) return
     const { source = 'text' } = options
 
-    // Reset engagement from previous queries and transition to generating state
-    setEngagement(null)
-    clearFunFactRefresh()
-    setIsColdStart(false)
-    setUiState(UI_STATE.GENERATING)
+    // Lower the hand after a question so listening only resumes on explicit raise.
+    raiseHandRequestRef.current = false
+    if (isRaiseHandPending) {
+      setIsRaiseHandPending(false)
+    }
+    if (isMicEnabled) {
+      setIsMicEnabled(false)
+    }
+    if (allowAutoListen) {
+      setAllowAutoListen(false)
+    }
+    if (isListening) {
+      stopListening()
+    }
+
+    if (uiState === UI_STATE.GENERATING || isSlideRevealPending) {
+      setQuestionQueue((prev) => [trimmedQuery, ...prev])
+      showToast('Question queued')
+      enqueueVoiceAgentMessage('Got it. I will answer that right after this.')
+      return
+    }
+
+    if (uiState === UI_STATE.ERROR) {
+      setUiState(UI_STATE.LISTENING)
+    }
+
     setLastTranscription(trimmedQuery)
     if (source !== 'voice') {
       setLiveTranscription('')
     }
     setTextInput('')
     setErrorMessage('')
-    setIsStillWorking(false)
-    // F015: Reset generation progress for new query
-    setGenerationProgress({ stage: null, message: '', slidesReady: 0, totalSlides: 0 })
-    // Reset the slideshow finished flag when starting new generation
-    hasFinishedSlideshowRef.current = false
 
     // Create AbortController for timeout handling (F053)
     abortControllerRef.current = new AbortController()
     const { signal } = abortControllerRef.current
 
-    // Start "Still working..." timer (F053)
-    stillWorkingTimerRef.current = setTimeout(() => {
-      setIsStillWorking(true)
-    }, GENERATION_TIMEOUT.STILL_WORKING_MS)
-
     // F072: Start timing for full generation pipeline
     logger.time('GENERATION', 'full-pipeline')
 
     try {
-      // F068: Log engagement API request
-      logger.time('API', 'engagement-request')
-      logger.info('API', 'POST /api/generate/engagement', {
-        endpoint: '/api/generate/engagement',
-        method: 'POST',
-      })
+      // Classify the query to determine if it's a follow-up, new topic, slide question, or chitchat
+      const classifyResult = await classifyQuery(trimmedQuery, signal)
 
-      // Start engagement call immediately for fast feedback
-      const engagementPromise = fetch('/api/generate/engagement', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: trimmedQuery }),
-        signal,
-      })
-        .then((res) => {
-          // F068: Log engagement response status
-          logger.timeEnd('API', 'engagement-request')
-          logger.info('API', 'Engagement response received', {
-            status: res.status,
-          })
-          if (!res.ok) throw new Error(`Engagement API failed: ${res.status}`)
-          return res.json()
-        })
-        .then((data) => {
-          // Update engagement state immediately when it arrives
-          // Note: suggestedQuestions are displayed but NOT auto-added to queue
-          // Users must tap them to add (F047)
-          if (abortControllerRef.current?.signal !== signal) return
-          setEngagement(data)
-        })
-        .catch((err) => {
-          // Engagement failure is non-critical, log but continue
-          // Ignore abort errors
-          if (err.name !== 'AbortError') {
-            // F068: Log engagement API error
-            logger.warn('API', 'Engagement request failed (non-critical)', {
-              error: err.message,
-            })
+      if (classifyResult.classification === 'chitchat') {
+        try {
+          const chitchatResult = await requestChitchatResponse(trimmedQuery, signal)
+          const responseText = chitchatResult?.responseText ||
+            classifyResult.responseText ||
+            "I'm ready to help. What would you like to learn?"
+          setVoiceAgentQueue([])
+          enqueueVoiceAgentMessage(responseText, { priority: 'high' })
+          logger.timeEnd('GENERATION', 'full-pipeline')
+          return
+        } catch (error) {
+          if (error.name === 'AbortError') {
+            setUiState(UI_STATE.LISTENING)
+            return
           }
-        })
-
-      const refreshFunFact = () => {
-        if (signal.aborted || abortControllerRef.current?.signal !== signal) {
-          clearFunFactRefresh()
+          const fallbackText = classifyResult.responseText ||
+            "I'm ready to help. What would you like to learn?"
+          setVoiceAgentQueue([])
+          enqueueVoiceAgentMessage(fallbackText, { priority: 'high' })
+          logger.timeEnd('GENERATION', 'full-pipeline')
           return
         }
-
-        logger.debug('API', 'Refreshing engagement fun fact', {
-          endpoint: '/api/generate/engagement',
-        })
-
-        fetch('/api/generate/engagement', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: trimmedQuery }),
-          signal,
-        })
-          .then((res) => {
-            if (!res.ok) throw new Error(`Engagement API failed: ${res.status}`)
-            return res.json()
-          })
-          .then((data) => {
-            if (abortControllerRef.current?.signal !== signal || !data?.funFact) return
-            setEngagement((prev) => {
-              if (!prev) {
-                return {
-                  funFact: data.funFact,
-                  suggestedQuestions: Array.isArray(data.suggestedQuestions)
-                    ? data.suggestedQuestions
-                    : [],
-                }
-              }
-              return { ...prev, funFact: data.funFact }
-            })
-          })
-          .catch((err) => {
-            if (err.name !== 'AbortError') {
-              logger.warn('API', 'Engagement refresh failed (non-critical)', {
-                error: err.message,
-              })
-            }
-          })
       }
-
-      funFactRefreshIntervalRef.current = setInterval(refreshFunFact, FUN_FACT_REFRESH_MS)
-
-      // Classify the query to determine if it's a follow-up, new topic, or slide question
-      const classifyResult = await classifyQuery(trimmedQuery, signal)
 
       // CORE023, CORE024: Handle slide_question classification
       // This is a question about the current slide content - generate verbal response only
@@ -2037,7 +2454,78 @@ function App() {
         }
       }
 
+      // Reset engagement from previous queries and transition to generating state
+      setEngagement(null)
+      setVoiceAgentQueue([])
+      spokenFunFactRef.current = null
+      clearFunFactRefresh()
+      currentQueryRef.current = trimmedQuery // Store query for TTS-driven fun fact refresh
+      setIsColdStart(false)
+      setUiState(UI_STATE.GENERATING)
+      setIsStillWorking(false)
+      setIsPreparingFollowUp(false)
+      setIsSlideRevealPending(false)
+      enqueueVoiceAgentMessage(VOICE_AGENT_SCRIPT.GENERATION_START, { priority: 'high' })
+      // F015: Reset generation progress for new query
+      setGenerationProgress({ stage: null, message: '', slidesReady: 0, totalSlides: 0 })
+      // Reset the slideshow finished flag when starting new generation
+      hasFinishedSlideshowRef.current = false
+
+      // Start "Still working..." timer (F053)
+      stillWorkingTimerRef.current = setTimeout(() => {
+        setIsStillWorking(true)
+      }, GENERATION_TIMEOUT.STILL_WORKING_MS)
+
+      // F068: Log engagement API request
+      logger.time('API', 'engagement-request')
+      logger.info('API', 'POST /api/generate/engagement', {
+        endpoint: '/api/generate/engagement',
+        method: 'POST',
+      })
+
+      // Start engagement call immediately for fast feedback
+      const engagementPromise = fetch('/api/generate/engagement', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: trimmedQuery }),
+        signal,
+      })
+        .then((res) => {
+          // F068: Log engagement response status
+          logger.timeEnd('API', 'engagement-request')
+          logger.info('API', 'Engagement response received', {
+            status: res.status,
+          })
+          if (!res.ok) throw new Error(`Engagement API failed: ${res.status}`)
+          return res.json()
+        })
+        .then((data) => {
+          // Update engagement state immediately when it arrives
+          if (abortControllerRef.current?.signal !== signal) return null
+          setEngagement(data)
+          // Return data so we can use suggestedQuestions for the suggestions slide
+          return data
+        })
+        .catch((err) => {
+          // Engagement failure is non-critical, log but continue
+          // Ignore abort errors
+          if (err.name !== 'AbortError') {
+            // F068: Log engagement API error
+            logger.warn('API', 'Engagement request failed (non-critical)', {
+              error: err.message,
+            })
+          }
+        })
+
+      // TTS-driven refresh: fun fact refreshes after audio finishes (via onComplete callback)
+      // No interval needed - refresh is triggered by refreshFunFact callback
+
       const isFollowUp = classifyResult.classification === 'follow_up'
+
+      if (isFollowUp) {
+        setIsPreparingFollowUp(true)
+        enqueueVoiceAgentMessage(VOICE_AGENT_SCRIPT.PREPARING_FOLLOW_UP)
+      }
 
       let generateData
       let newTopicData = null
@@ -2124,9 +2612,17 @@ function App() {
         stillWorkingTimerRef.current = null
       }
       setIsStillWorking(false)
+      setIsPreparingFollowUp(false)
+      setIsSlideRevealPending(false)
 
       // Wait for engagement to complete before transitioning (if still pending)
-      await engagementPromise
+      // Get the engagement data for suggested questions
+      const engagementData = await engagementPromise
+
+      setIsPreparingFollowUp(false)
+
+      // Extract suggested questions for the suggestions slide
+      const suggestedQuestions = engagementData?.suggestedQuestions || []
 
       // Update state based on whether it's a follow-up or new topic
       if (isFollowUp && activeTopic && generateData.slides?.length > 0) {
@@ -2151,7 +2647,7 @@ function App() {
         setTopics((prev) => {
           const updated = prev.map((topic) =>
             topic.id === activeTopic.id
-              ? { ...topic, slides: nextSlides, lastAccessedAt: now }
+              ? { ...topic, slides: nextSlides, suggestedQuestions, lastAccessedAt: now }
               : topic
           )
           return pruneSlideCache(updated, activeTopic.id)
@@ -2162,7 +2658,7 @@ function App() {
         setCurrentIndex(previousSlideCount + headerOffset)
         // F072: End timing for full generation pipeline
         logger.timeEnd('GENERATION', 'full-pipeline')
-        setUiState(UI_STATE.SLIDESHOW)
+        queueSlidesReadyTransition()
 
       } else if (newTopicData && generateData.slides?.length > 0) {
         // F040: Create new topic with header card
@@ -2173,6 +2669,7 @@ function App() {
           icon: newTopicData.icon,
           headerSlide: createHeaderSlide(newTopicData),
           slides: generateData.slides,
+          suggestedQuestions, // Add suggestions for end-of-slideshow card
           createdAt: now,
           lastAccessedAt: now,
         }
@@ -2195,7 +2692,7 @@ function App() {
         setCurrentIndex(0)
         // F072: End timing for full generation pipeline
         logger.timeEnd('GENERATION', 'full-pipeline')
-        setUiState(UI_STATE.SLIDESHOW)
+        queueSlidesReadyTransition()
 
       } else {
         // No slides returned - stay in generating state with a message
@@ -2253,6 +2750,16 @@ function App() {
   }, [])
 
   /**
+   * Handle suggestion click from suggestions slide
+   * Triggers a follow-up query with the selected question
+   */
+  const handleSuggestionClick = useCallback((question) => {
+    if (!question) return
+    // Trigger the generation pipeline with the selected question
+    handleQuestion(question, { source: 'suggestion' })
+  }, [handleQuestion])
+
+  /**
    * Handle topic navigation from sidebar (CORE017)
    * Switches the active topic and navigates to its header slide
    * @param {string} topicId - ID of the topic to navigate to
@@ -2284,6 +2791,65 @@ function App() {
       setUiState(UI_STATE.SLIDESHOW)
     }
   }, [uiState, topics, pruneSlideCache])
+
+  /**
+   * Handle topic rename from sidebar
+   * @param {string} topicId - ID of the topic to rename
+   * @param {string} newName - New name for the topic
+   */
+  const handleRenameTopic = useCallback((topicId, newName) => {
+    if (!topicId || !newName) return
+
+    setTopics((prev) =>
+      prev.map((topic) =>
+        topic.id === topicId
+          ? {
+              ...topic,
+              name: newName,
+              // Update header slide with new name
+              headerSlide: topic.headerSlide
+                ? { ...topic.headerSlide, subtitle: newName }
+                : null,
+            }
+          : topic
+      )
+    )
+    logger.info('STATE', 'Topic renamed', { topicId, newName })
+  }, [])
+
+  /**
+   * Handle topic deletion from sidebar
+   * @param {string} topicId - ID of the topic to delete
+   */
+  const handleDeleteTopic = useCallback((topicId) => {
+    if (!topicId) return
+
+    // Remove topic from state
+    setTopics((prev) => prev.filter((topic) => topic.id !== topicId))
+
+    // Clear cached slides for this topic
+    removeTopicSlides(topicId)
+
+    // If deleting the active topic, switch to another topic or listening state
+    if (activeTopicId === topicId) {
+      const remainingTopics = topics.filter((topic) => topic.id !== topicId)
+      if (remainingTopics.length > 0) {
+        // Switch to the most recently accessed remaining topic
+        const sortedByAccess = [...remainingTopics].sort(
+          (a, b) => (b.lastAccessedAt || 0) - (a.lastAccessedAt || 0)
+        )
+        setActiveTopicId(sortedByAccess[0].id)
+        setCurrentIndex(0)
+      } else {
+        // No topics left, go to listening state
+        setActiveTopicId(null)
+        setUiState(UI_STATE.LISTENING)
+        setIsColdStart(true)
+      }
+    }
+
+    logger.info('STATE', 'Topic deleted', { topicId })
+  }, [activeTopicId, topics])
 
   /**
    * CORE022: Handle resuming from an interrupt point
@@ -2345,48 +2911,42 @@ function App() {
 
   return (
     // F055, F056, F058: Responsive container with sidebar layout on desktop
-    <div className="min-h-screen flex">
+    <div className="h-screen flex overflow-hidden">
       {/* CORE016, CORE017: Topic sidebar - hidden when no topics, visible on desktop, hamburger on mobile */}
       <TopicSidebar
         topics={topics}
         activeTopic={activeTopic}
         onNavigateToTopic={handleNavigateToTopic}
         onNewTopic={handleNewTopic}
+        onRenameTopic={handleRenameTopic}
+        onDeleteTopic={handleDeleteTopic}
       />
 
       {/* Main content area - centered on wide screens when sidebar is present */}
       <div className={`
-        flex-1 min-h-screen flex flex-col items-center justify-center
+        flex-1 h-full flex flex-col items-center justify-center
         px-4 py-4 pb-24 md:pb-4
+        overflow-y-auto
         ${topics.length > 0 ? 'md:ml-0' : ''}
       `}>
         {/* F055: max-width 800px centered on desktop, F056: full-width on mobile */}
         <main className="w-full max-w-4xl mx-auto">
         {uiState === UI_STATE.LISTENING && (
-          <div className="flex flex-col items-center gap-6 px-4 md:px-0">
+          <div className="flex flex-col items-center gap-6 px-4 md:px-0 animate-fade-in">
             {/* Waveform visualization - responds to audio input when listening */}
             <div className="flex items-center justify-center gap-1 h-16">
               {[...Array(AUDIO_CONFIG.WAVEFORM_BARS)].map((_, i) => {
-                // Calculate bar height based on audio level when listening
-                // Each bar gets a slightly different height for visual variety
                 const baseHeight = 10
                 const maxAdditionalHeight = 50
+                const middleIndex = AUDIO_CONFIG.WAVEFORM_BARS / 2
+                const distanceFromMiddle = Math.abs(i - middleIndex)
+                const positionFactor = 1 - (distanceFromMiddle / middleIndex) * 0.5
 
-                // When listening, use actual audio level; otherwise use subtle animation
                 let height
                 if (isListening && audioLevel > 0) {
-                  // Create wave effect by varying height based on bar position
-                  // Bars in the middle are taller, creating a natural wave shape
-                  const middleIndex = AUDIO_CONFIG.WAVEFORM_BARS / 2
-                  const distanceFromMiddle = Math.abs(i - middleIndex)
-                  const positionFactor = 1 - (distanceFromMiddle / middleIndex) * 0.5
-
-                  // Add some randomness for organic feel
                   const randomFactor = 0.8 + Math.random() * 0.4
-
                   height = baseHeight + (audioLevel / 100) * maxAdditionalHeight * positionFactor * randomFactor
                 } else {
-                  // Default idle animation - gentle wave
                   height = baseHeight + Math.sin(Date.now() / 500 + i * 0.5) * 5 + 10
                 }
 
@@ -2396,25 +2956,19 @@ function App() {
                     className={`w-1 rounded-full transition-all duration-75 ${
                       isListening ? 'bg-primary' : 'bg-primary/50'
                     }`}
-                    style={{
-                      height: `${Math.max(baseHeight, Math.min(60, height))}px`,
-                      // Only use CSS animation when not actively listening
-                      // Use longhand properties to avoid shorthand/longhand conflict warning
-                      animationName: isListening ? 'none' : 'wave',
-                      animationDuration: '0.5s',
-                      animationTimingFunction: 'ease-in-out',
-                      animationIterationCount: 'infinite',
-                      animationDelay: isListening ? '0s' : `${i * 0.05}s`,
-                    }}
+                    style={{ height: `${Math.max(baseHeight, Math.min(60, height))}px` }}
                   />
                 )
               })}
             </div>
 
-            {/* Status text or live transcription */}
-            <p className={`text-lg ${isListening ? 'text-primary font-medium' : 'text-gray-500'}`}>
-              {liveTranscription || "Ask me anything..."}
+            {/* Greeting or live transcription */}
+            <p className={`text-xl text-center max-w-md transition-all duration-300 ${
+              isListening ? 'text-primary font-medium' : 'text-gray-600'
+            }`}>
+              {liveTranscription || displayGreeting}
             </p>
+
 
             {/* Permission denied message (F054) - directs user to text input */}
             {permissionState === PERMISSION_STATE.DENIED && (
@@ -2428,14 +2982,14 @@ function App() {
               </div>
             )}
 
-            {/* Text input fallback - F057: min-height 44px for touch target */}
-            <form onSubmit={handleTextSubmit} className="w-full max-w-md">
+            {/* Text input fallback - secondary, smaller */}
+            <form onSubmit={handleTextSubmit} className="w-full max-w-sm">
               <input
                 type="text"
                 value={textInput}
                 onChange={(e) => setTextInput(e.target.value)}
-                placeholder="Or type your question here..."
-                className="w-full px-4 py-3 min-h-[44px] border border-gray-200 rounded-lg focus:border-primary focus:outline-none"
+                placeholder="or type here..."
+                className="w-full px-4 py-2 min-h-[44px] text-sm border border-gray-200 rounded-lg focus:border-primary focus:outline-none text-center"
               />
             </form>
 
@@ -2469,6 +3023,16 @@ function App() {
                 ? 'Still working...'
                 : generationProgress.message || 'Creating your explanation...'}
             </p>
+            {isPreparingFollowUp && (
+              <p className="text-sm text-primary">
+                Preparing your follow-up...
+              </p>
+            )}
+            {isSlideRevealPending && (
+              <p className="text-sm text-gray-500">
+                Finishing the teacher narration...
+              </p>
+            )}
             {/* F015: Show slides count from WebSocket progress */}
             <p className="text-sm text-gray-500">
               [{generationProgress.totalSlides > 0
@@ -2496,20 +3060,7 @@ function App() {
               <FunFactCard funFact={engagement.funFact} />
             )}
 
-            {/* Suggestion cards - follow-up questions to queue (F046, F047) */}
-            {engagement?.suggestedQuestions && engagement.suggestedQuestions.length > 0 && (
-              <div className="w-full max-w-md space-y-2 mt-2">
-                <p className="text-sm text-gray-400">You might also wonder...</p>
-                {engagement.suggestedQuestions.map((question, i) => (
-                  <SuggestionCard
-                    key={i}
-                    question={question}
-                    isQueued={isQuestionQueued(question)}
-                    onToggleQueue={toggleQueueStatus}
-                  />
-                ))}
-              </div>
-            )}
+            {/* Suggestions moved to end-of-slideshow card for better UX */}
           </div>
         )}
 
@@ -2556,6 +3107,11 @@ function App() {
 
         {uiState === UI_STATE.SLIDESHOW && visibleSlides.length > 0 && (
           <div className="flex flex-col items-center gap-4 px-4 md:px-0">
+            {isPreparingFollowUp && (
+              <div className="px-3 py-1 text-xs text-primary bg-primary/10 rounded-full">
+                Preparing your follow-up...
+              </div>
+            )}
             {/* F050: Slide content with fade transition - key triggers animation on slide change */}
             {/* F043, F044: handles both header and content slides */}
             <div key={visibleSlides[currentIndex]?.id || currentIndex} className="slide-fade w-full">
@@ -2566,6 +3122,24 @@ function App() {
                     icon={visibleSlides[currentIndex].topicIcon}
                     name={visibleSlides[currentIndex].topicName}
                   />
+                </div>
+              ) : visibleSlides[currentIndex]?.type === 'suggestions' ? (
+                // Render suggestions slide with clickable question buttons
+                <div className="w-full aspect-video bg-gradient-to-br from-primary/5 to-primary/10 rounded-xl shadow-lg overflow-hidden flex flex-col items-center justify-center p-6 md:p-8">
+                  <h3 className="text-xl md:text-2xl font-semibold text-gray-800 mb-6 text-center">
+                    Want to learn more?
+                  </h3>
+                  <div className="flex flex-col gap-3 w-full max-w-md">
+                    {visibleSlides[currentIndex]?.questions?.map((question, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => handleSuggestionClick(question)}
+                        className="w-full px-4 py-3 bg-white hover:bg-primary hover:text-white text-gray-700 rounded-lg shadow-sm border border-gray-200 hover:border-primary transition-all duration-200 text-left text-sm md:text-base"
+                      >
+                        {question}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ) : (
                 // Regular content slide with image and subtitle
@@ -2596,8 +3170,9 @@ function App() {
             {/* F044, F057: Progress dots - show slides for current topic with 44px touch target */}
             <div className="flex items-center gap-1 flex-wrap justify-center" role="tablist" aria-label="Slide navigation">
               {visibleSlides.map((slide, i) => {
-                // Use different styling for header vs content dots
+                // Use different styling for header, suggestions, and content dots
                 const isHeader = slide.type === 'header'
+                const isSuggestions = slide.type === 'suggestions'
                 return (
                   <button
                     key={slide.id}
@@ -2607,15 +3182,20 @@ function App() {
                     aria-label={
                       isHeader
                         ? `Go to ${slide.topicName} topic header`
+                        : isSuggestions
+                        ? 'Go to suggested questions'
                         : `Go to slide ${i + 1} of ${visibleSlides.length}`
                     }
                     className="p-2 transition-colors cursor-pointer hover:scale-125"
                   >
                     {/* Inner dot - visual indicator, outer padding provides 44px touch target */}
+                    {/* Header: rectangle, Suggestions: diamond, Content: circle */}
                     <span
                       className={`block ${
                         isHeader
                           ? `w-4 h-3 rounded ${i === currentIndex ? 'bg-primary' : 'bg-gray-400'}`
+                          : isSuggestions
+                          ? `w-3 h-3 rotate-45 ${i === currentIndex ? 'bg-primary' : 'bg-gray-300'}`
                           : `w-3 h-3 rounded-full ${i === currentIndex ? 'bg-primary' : 'bg-gray-300'}`
                       }`}
                     />
@@ -2706,59 +3286,45 @@ function App() {
         )}
         </main>
 
-        {/* F038, F058, CORE019: Mic button - push-to-talk with fixed position for mobile */}
-        {/* Hold to record, release to send. Quick taps (<300ms) are ignored. */}
-        <button
-          // CORE019: Push-to-talk event handlers for mouse
-          onMouseDown={uiState !== UI_STATE.GENERATING && uiState !== UI_STATE.ERROR ? handleMicPressStart : undefined}
-          onMouseUp={uiState !== UI_STATE.GENERATING && uiState !== UI_STATE.ERROR ? handleMicPressEnd : undefined}
-          onMouseLeave={handleMicMouseLeave}
-          // CORE019: Push-to-talk event handlers for touch (mobile)
-          onTouchStart={uiState !== UI_STATE.GENERATING && uiState !== UI_STATE.ERROR ? handleMicPressStart : undefined}
-          onTouchEnd={uiState !== UI_STATE.GENERATING && uiState !== UI_STATE.ERROR ? handleMicPressEnd : undefined}
-          onTouchCancel={handleMicTouchCancel}
-          // CORE019: Keyboard accessibility - Enter/Space activate push-to-talk
-          onKeyDown={uiState !== UI_STATE.GENERATING && uiState !== UI_STATE.ERROR ? handleMicKeyDown : undefined}
-          onKeyUp={uiState !== UI_STATE.GENERATING && uiState !== UI_STATE.ERROR ? handleMicKeyUp : undefined}
-          disabled={uiState === UI_STATE.GENERATING || uiState === UI_STATE.ERROR}
-          aria-label={isListening ? 'Recording - release to send' : 'Hold to record'}
-          className={`fixed left-1/2 z-50 w-16 h-16 rounded-full shadow-lg flex items-center justify-center text-2xl transition-all select-none ${
-            uiState === UI_STATE.GENERATING || uiState === UI_STATE.ERROR
-              ? 'bg-gray-300 cursor-not-allowed'
-              : isListening
-                ? 'bg-red-500 hover:bg-red-600 mic-pulse'
-                : 'bg-primary hover:scale-105'
-          } text-white`}
-          style={{
-            // F058: Use safe area inset for notched devices, fallback to 24px
-            bottom: 'max(24px, env(safe-area-inset-bottom, 24px))',
-            // Prevent touch callout on iOS
-            WebkitTouchCallout: 'none',
-            // Prevent text selection
-            userSelect: 'none',
-            // Explicit transform to ensure centering works with scale
-            // Tailwind's -translate-x-1/2 and scale-110 don't compose properly
-            transform: isListening
-              ? 'translateX(-50%) scale(1.1)'
-              : 'translateX(-50%)',
-          }}
-        >
-          {/* Show stop icon when listening, mic icon otherwise */}
-          {isListening ? (
-            <span aria-hidden="true" className="w-5 h-5 bg-white rounded" />
-          ) : (
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              className="w-8 h-8"
-              aria-hidden="true"
+        {/* Raise hand button - only shown during slideshow */}
+        {uiState === UI_STATE.SLIDESHOW && (
+          <div
+            className={`
+              fixed z-50 flex flex-col items-center gap-2
+              left-1/2 -translate-x-1/2
+              ${topics.length > 0 ? 'md:left-[calc(50%+128px)]' : ''}
+            `}
+            style={{
+              // F058: Use safe area inset for notched devices, fallback to 24px
+              bottom: 'max(24px, env(safe-area-inset-bottom, 24px))',
+            }}
+          >
+            {isMicEnabled && (
+              <span className="text-xs text-gray-500 bg-white/90 px-3 py-1 rounded-full shadow-sm">
+                {isListening
+                  ? 'Listening...'
+                  : isRaiseHandPending
+                    ? 'Waiting for the current sentence...'
+                    : 'Mic on'}
+              </span>
+            )}
+            <button
+              onClick={handleRaiseHandClick}
+              aria-label={isMicEnabled ? 'Lower hand' : 'Raise hand'}
+              className={`px-5 py-3 min-h-[44px] rounded-full shadow-lg font-semibold transition-all select-none ${
+                isMicEnabled
+                  ? 'bg-red-500 hover:bg-red-600 text-white'
+                  : 'bg-primary hover:scale-105 text-white'
+              }`}
+              style={{
+                WebkitTouchCallout: 'none',
+                userSelect: 'none',
+              }}
             >
-              <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
-              <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
-            </svg>
-          )}
-        </button>
+              {isMicEnabled ? 'Lower hand' : 'Raise hand'}
+            </button>
+          </div>
+        )}
 
         {/* Toast notification for queue feedback (F047) */}
         <Toast

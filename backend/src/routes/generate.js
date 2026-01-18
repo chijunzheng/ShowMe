@@ -8,6 +8,7 @@ import {
   generateEngagement as geminiGenerateEngagement,
   generateSlideResponse,
   generateTopicMetadata,
+  generateTTS,
 } from '../services/gemini.js'
 
 const router = express.Router()
@@ -24,6 +25,79 @@ function generateId(prefix) {
   const timestamp = Date.now()
   const random = Math.random().toString(36).substring(2, 8)
   return `${prefix}_${timestamp}_${random}`
+}
+
+const FALLBACK_TOPIC_ICON = '📚'
+const FALLBACK_FUN_FACT = 'Visual explanations help people remember new ideas.'
+
+const QUESTION_WORDS = new Set([
+  'how',
+  'what',
+  'why',
+  'when',
+  'where',
+  'who',
+  'which',
+  'can',
+  'could',
+  'do',
+  'does',
+  'did',
+  'is',
+  'are',
+  'was',
+  'were',
+  'will',
+  'would',
+  'should',
+  'tell',
+  'explain',
+])
+
+function toTitleCase(value) {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
+function buildFallbackTopicName(query) {
+  const cleaned = query
+    .replace(/[?.!]/g, '')
+    .replace(/[^a-zA-Z0-9\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (!cleaned) return 'New Topic'
+
+  const words = cleaned.split(/\s+/)
+  const filtered = words.filter((word) => !QUESTION_WORDS.has(word.toLowerCase()))
+  const baseWords = (filtered.length > 0 ? filtered : words).slice(0, 4)
+
+  return toTitleCase(baseWords.join(' '))
+}
+
+function buildFallbackTopicMetadata(query) {
+  return {
+    name: buildFallbackTopicName(query),
+    icon: FALLBACK_TOPIC_ICON,
+  }
+}
+
+function buildFallbackEngagement(topicName) {
+  const safeTopic = topicName || 'this topic'
+  return {
+    funFact: {
+      emoji: null,
+      text: FALLBACK_FUN_FACT,
+    },
+    suggestedQuestions: [
+      `What are the basics of ${safeTopic}?`,
+      `Why does ${safeTopic} matter?`,
+      `Can you give a simple example of ${safeTopic}?`,
+    ],
+  }
 }
 
 /**
@@ -121,41 +195,17 @@ router.post('/', async (req, res) => {
     const segmentId = generateId('seg')
     const generatedTopicId = topicId || generateId('topic')
 
-    // Generate topic metadata using Gemini (no heuristic fallback)
+    // Generate topic metadata using Gemini with fallback if rate limited/unavailable
     const topicMetadataResult = await generateTopicMetadata(sanitizedQuery)
+    const topicMetadata = topicMetadataResult.error
+      ? buildFallbackTopicMetadata(sanitizedQuery)
+      : {
+          name: topicMetadataResult.topicName,
+          icon: topicMetadataResult.topicIcon,
+        }
 
     if (topicMetadataResult.error) {
-      console.error('[Generate] Topic metadata generation failed:', topicMetadataResult.error)
-
-      if (clientId) {
-        sendProgress(clientId, PROGRESS_TYPES.ERROR, {
-          error: 'Failed to generate topic metadata'
-        })
-      }
-
-      if (topicMetadataResult.error === 'API_NOT_AVAILABLE') {
-        return res.status(503).json({
-          error: 'Topic metadata service unavailable'
-        })
-      }
-
-      if (topicMetadataResult.error === 'RATE_LIMITED') {
-        return res.status(429)
-          .set('Retry-After', '60')
-          .json({
-            error: 'Rate limit exceeded. Please try again later.',
-            retryAfter: 60,
-          })
-      }
-
-      return res.status(500).json({
-        error: 'Failed to generate topic metadata'
-      })
-    }
-
-    const topicMetadata = {
-      name: topicMetadataResult.topicName,
-      icon: topicMetadataResult.topicIcon,
+      console.warn('[Generate] Topic metadata fallback used:', topicMetadataResult.error)
     }
 
     let slides
@@ -193,7 +243,8 @@ router.post('/', async (req, res) => {
       // Step 2: Generate images and audio for each slide in parallel
       const slidePromises = scriptResult.slides.map(async (slideScript, index) => {
         const content = await generateSlideContent(slideScript, {
-          topic: topicMetadata.name
+          topic: topicMetadata.name,
+          generateAudio: false,
         })
 
         // Log any errors but continue with partial content
@@ -340,7 +391,8 @@ router.post('/follow-up', async (req, res) => {
         // Generate images and audio for each slide in parallel
         const slidePromises = scriptResult.slides.map(async (slideScript, index) => {
           const content = await generateSlideContent(slideScript, {
-            topic: conversationHistory[0]?.topic || ''
+            topic: conversationHistory[0]?.topic || '',
+            generateAudio: false,
           })
 
           if (content.errors.length > 0) {
@@ -434,37 +486,38 @@ router.post('/engagement', async (req, res) => {
     }
 
     const aiEngagement = await geminiGenerateEngagement(sanitizedQuery)
+    const fallbackTopic = buildFallbackTopicName(sanitizedQuery)
 
-    if (aiEngagement.error) {
-      if (aiEngagement.error === 'API_NOT_AVAILABLE') {
-        return res.status(503).json({
-          error: 'Engagement service unavailable'
-        })
-      }
-
-      if (aiEngagement.error === 'RATE_LIMITED') {
-        return res.status(429)
-          .set('Retry-After', '60')
-          .json({
-            error: 'Rate limit exceeded. Please try again later.',
-            retryAfter: 60,
-          })
-      }
-
-      return res.status(500).json({
-        error: 'Failed to generate engagement content'
+    if (aiEngagement.error ||
+      !aiEngagement.funFact ||
+      !Array.isArray(aiEngagement.suggestedQuestions)) {
+      const fallbackEngagement = buildFallbackEngagement(fallbackTopic)
+      // Generate TTS for fallback fun fact
+      const ttsResult = await generateTTS(`Fun fact: ${fallbackEngagement.funFact.text}`)
+      return res.json({
+        funFact: {
+          ...fallbackEngagement.funFact,
+          audioUrl: ttsResult.audioUrl || null,
+          duration: ttsResult.duration || 0,
+        },
+        suggestedQuestions: fallbackEngagement.suggestedQuestions,
+        fallback: true,
       })
     }
 
-    if (!aiEngagement.funFact || !Array.isArray(aiEngagement.suggestedQuestions)) {
-      return res.status(500).json({
-        error: 'Failed to generate engagement content'
-      })
-    }
+    // Generate TTS for the fun fact - this runs after text is ready
+    // so it adds ~2-3s but eliminates a separate frontend request
+    const funFactText = `Fun fact: ${aiEngagement.funFact.text}`
+    const ttsResult = await generateTTS(funFactText)
 
     res.json({
-      funFact: aiEngagement.funFact,
+      funFact: {
+        ...aiEngagement.funFact,
+        audioUrl: ttsResult.audioUrl || null,
+        duration: ttsResult.duration || 0,
+      },
       suggestedQuestions: aiEngagement.suggestedQuestions.slice(0, 3),
+      fallback: false,
     })
   } catch (error) {
     console.error('Engagement generation error:', error)

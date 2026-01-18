@@ -16,8 +16,9 @@ import { GoogleGenAI } from '@google/genai'
 // Configuration constants
 const TEXT_MODEL = 'gemini-3-pro-preview'
 const IMAGE_MODEL = 'gemini-3-pro-image-preview'
+const FAST_MODEL = 'gemini-2.5-flash-lite'
 const TTS_MODEL = 'gemini-2.5-flash-preview-tts'
-const FAST_MODEL = 'gemini-2.5-flash-lite' 
+const TTS_FALLBACK_MODEL = 'gemini-2.5-pro-preview-tts'
 
 // Default TTS voice - Kore is a clear, engaging voice suitable for education
 const DEFAULT_VOICE = 'Kore'
@@ -274,6 +275,7 @@ function repairJSON(jsonStr) {
 // Initialize the Google GenAI client
 // Uses GEMINI_API_KEY from environment if not explicitly provided
 let aiClient = null
+let ttsClientPromise = null
 
 /**
  * Get or initialize the Gemini AI client
@@ -299,6 +301,36 @@ function getAIClient() {
     console.error('[Gemini] Failed to initialize AI client:', error.message)
     return null
   }
+}
+
+/**
+ * Get or initialize the Gemini TTS client (uses @google/generative-ai if available).
+ * Falls back to @google/genai if the SDK is not installed.
+ * @returns {Promise<Object|null>} The TTS client or null if no API key or SDK missing
+ */
+async function getTtsClient() {
+  if (ttsClientPromise) {
+    return ttsClientPromise
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey || apiKey === 'your_gemini_api_key_here') {
+    return null
+  }
+
+  ttsClientPromise = (async () => {
+    try {
+      const { GoogleGenerativeAI } = await import('@google/generative-ai')
+      const client = new GoogleGenerativeAI(apiKey)
+      console.log('[Gemini] TTS client initialized successfully')
+      return client
+    } catch (error) {
+      console.warn('[Gemini] TTS SDK unavailable, falling back to @google/genai:', error.message)
+      return null
+    }
+  })()
+
+  return ttsClientPromise
 }
 
 /**
@@ -486,29 +518,116 @@ ${topic ? `- Topic context: ${topic}` : ''}`
   }
 }
 
-/**
- * Generate TTS audio from text
- *
- * @param {string} text - The text to convert to speech
- * @param {Object} options - TTS options
- * @param {string} options.voice - Voice name to use (default: Kore)
- * @returns {Promise<{audioUrl: string|null, duration: number, error: string|null}>}
- */
-export async function generateTTS(text, options = {}) {
-  const ai = getAIClient()
-  if (!ai) {
-    return { audioUrl: null, duration: 0, error: 'API_NOT_AVAILABLE' }
+function normalizeTtsError(error) {
+  const message = error?.message || ''
+  if (message.includes('quota') || message.includes('rate') || message.includes('429')) {
+    return 'RATE_LIMITED'
+  }
+  return message || 'UNKNOWN_ERROR'
+}
+
+function extractInlineAudio(response) {
+  const resolved = response?.response || response
+  const parts = resolved?.candidates?.[0]?.content?.parts || []
+
+  for (const part of parts) {
+    if (part?.inlineData?.data) {
+      return {
+        data: part.inlineData.data,
+        mimeType: part.inlineData.mimeType,
+      }
+    }
   }
 
-  const { voice = DEFAULT_VOICE } = options
+  return null
+}
 
-  // Prepare text with speaking instructions for natural delivery
-  const speakingPrompt = `Speak clearly and engagingly, as if teaching a curious student: ${text}`
+function estimatePcmDurationMs(pcmBuffer, sampleRate = 24000, numChannels = 1, bitsPerSample = 16) {
+  const bytesPerSample = bitsPerSample / 8
+  const totalSamples = pcmBuffer.length / bytesPerSample / numChannels
+  return Math.round((totalSamples / sampleRate) * 1000)
+}
 
+function estimateWavDurationMs(wavBuffer) {
+  if (wavBuffer.length < 44) {
+    return 0
+  }
+
+  if (wavBuffer.toString('ascii', 0, 4) !== 'RIFF' || wavBuffer.toString('ascii', 8, 12) !== 'WAVE') {
+    return 0
+  }
+
+  let offset = 12
+  let sampleRate = null
+  let numChannels = null
+  let bitsPerSample = null
+  let dataSize = null
+
+  while (offset + 8 <= wavBuffer.length) {
+    const chunkId = wavBuffer.toString('ascii', offset, offset + 4)
+    const chunkSize = wavBuffer.readUInt32LE(offset + 4)
+
+    if (chunkId === 'fmt ' && offset + 24 <= wavBuffer.length) {
+      numChannels = wavBuffer.readUInt16LE(offset + 10)
+      sampleRate = wavBuffer.readUInt32LE(offset + 12)
+      bitsPerSample = wavBuffer.readUInt16LE(offset + 22)
+    } else if (chunkId === 'data') {
+      dataSize = chunkSize
+      break
+    }
+
+    offset += 8 + chunkSize
+    if (chunkSize % 2 === 1) {
+      offset += 1
+    }
+  }
+
+  if (!sampleRate || !numChannels || !bitsPerSample || !dataSize) {
+    return 0
+  }
+
+  const bytesPerSample = bitsPerSample / 8
+  const durationSeconds = dataSize / (sampleRate * numChannels * bytesPerSample)
+  return Math.round(durationSeconds * 1000)
+}
+
+function buildAudioResult(inlineData) {
+  if (!inlineData?.data) {
+    return { audioUrl: null, duration: 0, error: 'NO_AUDIO_GENERATED' }
+  }
+
+  const mimeType = inlineData.mimeType || 'audio/pcm'
+  const normalizedMimeType = mimeType.split(';')[0].trim().toLowerCase()
+  const audioBuffer = Buffer.from(inlineData.data, 'base64')
+
+  if (
+    !normalizedMimeType ||
+    normalizedMimeType === 'audio/pcm' ||
+    normalizedMimeType === 'audio/l16' ||
+    normalizedMimeType === 'audio/x-l16' ||
+    normalizedMimeType === 'audio/raw'
+  ) {
+    const wavBuffer = pcmToWav(audioBuffer, 24000, 1, 16)
+    const audioUrl = `data:audio/wav;base64,${wavBuffer.toString('base64')}`
+    const duration = estimatePcmDurationMs(audioBuffer)
+    return { audioUrl, duration, error: null }
+  }
+
+  if (normalizedMimeType === 'audio/wav' || normalizedMimeType === 'audio/x-wav') {
+    const duration = estimateWavDurationMs(audioBuffer)
+    const audioUrl = `data:${mimeType};base64,${inlineData.data}`
+    return { audioUrl, duration, error: null }
+  }
+
+  const audioUrl = `data:${mimeType};base64,${inlineData.data}`
+  return { audioUrl, duration: 0, error: null }
+}
+
+async function generateTtsWithGenAI(ai, model, prompt, voice) {
   try {
     const response = await ai.models.generateContent({
-      model: TTS_MODEL,
-      contents: [{ parts: [{ text: speakingPrompt }] }],
+      model,
+      contents: [{ parts: [{ text: prompt }] }],
       config: {
         responseModalities: ['AUDIO'],
         speechConfig: {
@@ -519,33 +638,83 @@ export async function generateTTS(text, options = {}) {
       },
     })
 
-    // Extract audio data
-    const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data
-
-    if (!audioData) {
-      return { audioUrl: null, duration: 0, error: 'NO_AUDIO_GENERATED' }
-    }
-
-    // Convert PCM to WAV and create data URI
-    // The Gemini TTS returns raw PCM data at 24kHz, 16-bit mono
-    const pcmBuffer = Buffer.from(audioData, 'base64')
-    const wavBuffer = pcmToWav(pcmBuffer, 24000, 1, 16)
-    const audioUrl = `data:audio/wav;base64,${wavBuffer.toString('base64')}`
-
-    // Estimate duration from PCM data length
-    // PCM at 24kHz, 16-bit (2 bytes per sample), mono
-    const durationMs = Math.round((pcmBuffer.length / 2 / 24000) * 1000)
-
-    return { audioUrl, duration: durationMs, error: null }
+    const inlineData = extractInlineAudio(response)
+    return buildAudioResult(inlineData)
   } catch (error) {
     console.error('[Gemini] TTS generation error:', error.message)
-
-    if (error.message?.includes('quota') || error.message?.includes('rate')) {
-      return { audioUrl: null, duration: 0, error: 'RATE_LIMITED' }
-    }
-
-    return { audioUrl: null, duration: 0, error: error.message || 'UNKNOWN_ERROR' }
+    return { audioUrl: null, duration: 0, error: normalizeTtsError(error) }
   }
+}
+
+async function generateTtsWithGenerativeAI(client, model, prompt, voice) {
+  try {
+    const ttsModel = client.getGenerativeModel({ model })
+    const result = await ttsModel.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: voice },
+          },
+        },
+      },
+    })
+
+    const inlineData = extractInlineAudio(result)
+    return buildAudioResult(inlineData)
+  } catch (error) {
+    console.error('[Gemini] TTS generation error (generative-ai):', error.message)
+    return { audioUrl: null, duration: 0, error: normalizeTtsError(error) }
+  }
+}
+
+/**
+ * Generate TTS audio from text
+ *
+ * @param {string} text - The text to convert to speech
+ * @param {Object} options - TTS options
+ * @param {string} options.voice - Voice name to use (default: Kore)
+ * @returns {Promise<{audioUrl: string|null, duration: number, error: string|null}>}
+ */
+export async function generateTTS(text, options = {}) {
+  const { voice = DEFAULT_VOICE } = options
+
+  // Prepare text with speaking instructions for natural delivery
+  const speakingPrompt = `Speak clearly and engagingly, as if teaching a curious student: ${text}`
+
+  const ttsClient = await getTtsClient()
+  if (ttsClient) {
+    const ttsResult = await generateTtsWithGenerativeAI(ttsClient, TTS_MODEL, speakingPrompt, voice)
+    if (!ttsResult.error) {
+      return ttsResult
+    }
+    if (ttsResult.error === 'RATE_LIMITED') {
+      return ttsResult
+    }
+    console.warn('[Gemini] TTS via @google/generative-ai failed, falling back:', ttsResult.error)
+  }
+
+  const ai = getAIClient()
+  if (!ai) {
+    return { audioUrl: null, duration: 0, error: 'API_NOT_AVAILABLE' }
+  }
+
+  const primaryResult = await generateTtsWithGenAI(ai, TTS_MODEL, speakingPrompt, voice)
+  if (!primaryResult.error) {
+    return primaryResult
+  }
+  if (primaryResult.error === 'RATE_LIMITED') {
+    return primaryResult
+  }
+
+  const fallbackResult = await generateTtsWithGenAI(ai, TTS_FALLBACK_MODEL, speakingPrompt, voice)
+  if (!fallbackResult.error) {
+    console.warn('[Gemini] TTS fell back to preview model')
+    return fallbackResult
+  }
+
+  return primaryResult
 }
 
 /**
@@ -605,12 +774,17 @@ function pcmToWav(pcmData, sampleRate = 24000, numChannels = 1, bitsPerSample = 
  */
 export async function generateSlideContent(slideScript, options = {}) {
   const { subtitle, imagePrompt } = slideScript
+  const { generateAudio = true, ...contentOptions } = options
   const errors = []
 
   // Generate image and audio in parallel for faster response
+  const audioPromise = generateAudio
+    ? generateTTS(subtitle, contentOptions)
+    : Promise.resolve({ audioUrl: null, duration: 0, error: null })
+
   const [imageResult, audioResult] = await Promise.all([
-    generateEducationalImage(imagePrompt, options),
-    generateTTS(subtitle, options)
+    generateEducationalImage(imagePrompt, contentOptions),
+    audioPromise
   ])
 
   if (imageResult.error) {
@@ -690,6 +864,64 @@ Output Format (JSON):
     }
 
     return { funFact: null, suggestedQuestions: null, error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
+ * Generate a short chitchat response for small-talk queries.
+ *
+ * @param {string} query - The user's message
+ * @param {Object} options - Optional context
+ * @param {string} options.activeTopicName - Current topic name for context
+ * @returns {Promise<{responseText: string|null, error: string|null}>}
+ */
+export async function generateChitchatResponse(query, options = {}) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { responseText: null, error: 'API_NOT_AVAILABLE' }
+  }
+
+  const { activeTopicName = '' } = options
+  const topicContext = activeTopicName
+    ? `The current topic is "${activeTopicName}". If it helps, you may invite the user to continue it.`
+    : 'No active topic is set.'
+
+  const prompt = `You are a friendly AI tutor in a voice-first learning app.
+The user said: "${query}"
+
+Respond in 1-2 short sentences (max 30 words). Be warm and concise.
+If the user greets you, greet back and ask what they want to learn.
+If they thank you, acknowledge and invite another question.
+If they ask what you can do, explain you can generate slides and teach topics.
+Do not start a lesson, and do not suggest slide content.
+${topicContext}
+
+Return plain text only.`
+
+  try {
+    const response = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.7,
+        maxOutputTokens: 120,
+      }
+    })
+
+    const responseText = response.text?.trim() || ''
+    if (!responseText) {
+      return { responseText: null, error: 'EMPTY_RESPONSE' }
+    }
+
+    return { responseText, error: null }
+  } catch (error) {
+    console.error('[Gemini] Chitchat generation error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { responseText: null, error: 'RATE_LIMITED' }
+    }
+
+    return { responseText: null, error: error.message || 'UNKNOWN_ERROR' }
   }
 }
 
@@ -1021,6 +1253,7 @@ export default {
   generateTTS,
   generateSlideContent,
   generateEngagement,
+  generateChitchatResponse,
   transcribeAudio,
   generateSlideResponse,
   generateTopicName,
