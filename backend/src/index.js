@@ -8,6 +8,11 @@ import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
 import { WebSocketServer } from 'ws'
 import { createServer } from 'http'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 // Import logger utility (F076)
 import logger from './utils/logger.js'
@@ -27,8 +32,12 @@ const PORT = process.env.PORT || 3002
 // Allowed origins for CORS - only allow frontend
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
+  'http://localhost:3002',
   process.env.CORS_ORIGIN,
 ].filter(Boolean)
+
+// In production, allow same-origin requests (frontend served from same server)
+const isProduction = process.env.NODE_ENV === 'production'
 
 // Security headers with helmet
 // F006: Content Security Policy headers
@@ -45,7 +54,9 @@ app.use(helmet({
       // Allow fonts from self and common CDNs
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       // Allow API connections to self and WebSocket
-      connectSrc: ["'self'", "ws://localhost:3002", "wss://localhost:3002"],
+      connectSrc: isProduction
+        ? ["'self'", "wss://*.run.app"]
+        : ["'self'", "ws://localhost:3002", "wss://localhost:3002"],
       // Disallow object/embed/applet
       objectSrc: ["'none'"],
       // Only allow HTTPS for upgrades in production
@@ -63,6 +74,15 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps or curl requests in dev)
     if (!origin) {
       return callback(null, true)
+    }
+
+    // In production, allow same-origin (no origin header for same-origin requests)
+    // and allow explicit CORS_ORIGIN if set
+    if (isProduction) {
+      // Cloud Run URLs follow pattern: https://*.run.app
+      if (origin.endsWith('.run.app') || ALLOWED_ORIGINS.includes(origin)) {
+        return callback(null, true)
+      }
     }
 
     if (ALLOWED_ORIGINS.includes(origin)) {
@@ -127,6 +147,20 @@ app.use('/api/topic', topicRoutes)
 app.use('/api/voice', voiceRoutes)
 app.use('/api/chitchat', chitchatRoutes)
 
+// Serve frontend static files in production
+if (process.env.NODE_ENV === 'production') {
+  const publicPath = path.join(__dirname, '..', 'public')
+  app.use(express.static(publicPath))
+
+  // SPA fallback - serve index.html for non-API routes
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/') || req.path === '/health') {
+      return next()
+    }
+    res.sendFile(path.join(publicPath, 'index.html'))
+  })
+}
+
 // Error handler for CORS and other errors (returns JSON instead of HTML)
 app.use((err, req, res, next) => {
   // Handle CORS errors
@@ -169,6 +203,9 @@ const wss = new WebSocketServer({
 
     // Allow connections from allowed origins or no origin (local tools)
     if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+      callback(true)
+    } else if (isProduction && origin.endsWith('.run.app')) {
+      // Allow Cloud Run origins in production
       callback(true)
     } else {
       logger.warn('WS', 'WebSocket connection rejected', { origin })

@@ -28,11 +28,32 @@ export const WS_STATE = {
 }
 
 /**
+ * Get WebSocket URL based on current environment
+ * In production, uses same host with wss:// protocol
+ * In development, falls back to localhost
+ */
+function getWebSocketUrl() {
+  // Use environment variable if set
+  if (import.meta.env.VITE_WS_URL) {
+    return import.meta.env.VITE_WS_URL
+  }
+
+  // In production (served from backend), use same origin
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${protocol}//${window.location.host}/ws/generation`
+  }
+
+  // Development fallback
+  return 'ws://localhost:3002/ws/generation'
+}
+
+/**
  * Configuration constants for WebSocket connection
  */
 const WS_CONFIG = {
-  // WebSocket server URL - uses environment variable with fallback for local dev
-  URL: import.meta.env.VITE_WS_URL || 'ws://localhost:3001/ws/generation',
+  // WebSocket server URL - dynamically determined based on environment
+  URL: getWebSocketUrl(),
   // Delay before attempting reconnection (ms)
   RECONNECT_DELAY: 2000,
   // Maximum reconnection attempts before giving up
