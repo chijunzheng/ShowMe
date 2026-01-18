@@ -3,12 +3,14 @@
  * F027a: Backend STT endpoint
  *
  * POST /api/transcribe - Accepts audio blob and returns transcription
+ * Uses Chirp 3 (Google's latest ASR model) as primary, Gemini as fallback
  * Supports audio/webm and audio/wav formats
  */
 
 import express from 'express'
 import multer from 'multer'
 import logger from '../utils/logger.js'
+import { isChirp3Available, transcribeWithChirp3 } from '../services/speechToText.js'
 import { isGeminiAvailable, transcribeAudio } from '../services/gemini.js'
 
 const router = express.Router()
@@ -45,19 +47,20 @@ const upload = multer({
   },
 })
 
-// Log Gemini availability on startup
-logger.info('API', `[Transcribe] Gemini API available: ${isGeminiAvailable()}`)
+// Log service availability on startup
+logger.info('API', `[Transcribe] Chirp 3 available: ${isChirp3Available()}`)
+logger.info('API', `[Transcribe] Gemini fallback available: ${isGeminiAvailable()}`)
 
 /**
  * POST /api/transcribe
- * Transcribe audio blob to text
+ * Transcribe audio blob to text using Chirp 3 (primary) or Gemini (fallback)
  *
  * Request: multipart/form-data with 'audio' field containing audio file
- * Response: { transcription: "text here" }
+ * Response: { transcription: "text here", model: "chirp3" | "gemini" }
  * Errors:
  *   - 400: Empty audio, missing audio field, unsupported format
  *   - 500: Transcription failed
- *   - 503: Gemini API not available
+ *   - 503: No transcription service available
  */
 router.post('/', upload.single('audio'), async (req, res) => {
   logger.time('API', 'transcribe-request')
@@ -94,20 +97,42 @@ router.post('/', upload.single('audio'), async (req, res) => {
     }
     logger.info('API', '[Transcribe] Processing audio', logContext)
 
-    // Check if Gemini is available
-    if (!isGeminiAvailable()) {
-      logger.warn('API', '[Transcribe] Gemini API not available')
+    let result
+    let modelUsed
+
+    // Try Chirp 3 first (faster, more accurate)
+    if (isChirp3Available()) {
+      logger.info('API', '[Transcribe] Using Chirp 3')
+      result = await transcribeWithChirp3(buffer, normalizedMimeType)
+      modelUsed = 'chirp3'
+
+      // If Chirp 3 fails with permission/config error, fall back to Gemini
+      if (result.error && ['PERMISSION_DENIED', 'RECOGNIZER_NOT_FOUND', 'SPEECH_CLIENT_NOT_AVAILABLE'].includes(result.error)) {
+        logger.warn('API', '[Transcribe] Chirp 3 unavailable, falling back to Gemini', { error: result.error })
+        result = null
+        modelUsed = null
+      }
+    }
+
+    // Fallback to Gemini if Chirp 3 not available or failed
+    if (!result && isGeminiAvailable()) {
+      logger.info('API', '[Transcribe] Using Gemini fallback')
+      result = await transcribeAudio(buffer, normalizedMimeType)
+      modelUsed = 'gemini'
+    }
+
+    // No service available
+    if (!result) {
+      logger.error('API', '[Transcribe] No transcription service available')
       return res.status(503).json({
         error: 'Transcription service temporarily unavailable',
       })
     }
 
-    // Call the transcription service
-    const result = await transcribeAudio(buffer, normalizedMimeType)
-
     if (result.error) {
       logger.error('API', '[Transcribe] Transcription failed', {
         error: result.error,
+        model: modelUsed,
       })
 
       // Map error types to appropriate HTTP status codes
@@ -124,6 +149,12 @@ router.post('/', upload.single('audio'), async (req, res) => {
         })
       }
 
+      if (result.error === 'PERMISSION_DENIED') {
+        return res.status(503).json({
+          error: 'Transcription service configuration error',
+        })
+      }
+
       return res.status(500).json({
         error: 'Transcription failed',
       })
@@ -131,12 +162,15 @@ router.post('/', upload.single('audio'), async (req, res) => {
 
     logger.info('API', '[Transcribe] Success', {
       transcriptionLength: result.transcription?.length || 0,
+      model: modelUsed,
+      duration: result.duration ? `${result.duration}ms` : undefined,
     })
     logger.timeEnd('API', 'transcribe-request')
 
     // Return successful transcription
     res.json({
       transcription: result.transcription,
+      model: modelUsed,
     })
   } catch (error) {
     logger.error('API', '[Transcribe] Request error', {
@@ -187,7 +221,6 @@ router.use((error, req, res, next) => {
 
     return res.status(400).json({
       error: `Upload error: ${error.message}`,
-      field: 'audio',
     })
   }
 
