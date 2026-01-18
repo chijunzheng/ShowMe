@@ -3566,6 +3566,49 @@
         "backend/src/routes/topic.js",
         "frontend/src/App.jsx"
       ]
+    },
+    {
+      "id": "F091",
+      "category": "K-engagement",
+      "name": "Concluding slide with key takeaways",
+      "description": "Every topic ends with a summary slide that recaps 2-3 key takeaways. The conclusion slide has a 'Key Takeaways' badge and summarizes the main learning points. This provides closure and reinforces learning.",
+      "priority": 2,
+      "dependencies": [
+        "F012"
+      ],
+      "status": "completed",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Script generation includes a conclusion slide with isConclusion: true",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Conclusion slide subtitle summarizes key points",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Frontend displays 'Key Takeaways' badge for conclusion slides",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Conclusion slide is the last slide in the topic",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Follow-up slides also include a conclusion slide",
+          "status": "pending"
+        }
+      ],
+      "files_modified": [
+        "backend/src/services/gemini.js",
+        "backend/src/routes/generate.js",
+        "frontend/src/App.jsx"
+      ]
     }
   ]
 }

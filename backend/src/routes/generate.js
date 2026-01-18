@@ -260,6 +260,8 @@ router.post('/', async (req, res) => {
           duration: content.duration || 5000,
           topicId: generatedTopicId,
           segmentId,
+          // F091: Mark conclusion slides
+          ...(slideScript.isConclusion && { isConclusion: true }),
         }
       })
 
@@ -407,6 +409,8 @@ router.post('/follow-up', async (req, res) => {
             duration: content.duration || 5000,
             topicId: sanitizedTopicId,
             segmentId,
+            // F091: Mark conclusion slides
+            ...(slideScript.isConclusion && { isConclusion: true }),
           }
         })
 

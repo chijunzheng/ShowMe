@@ -14,7 +14,7 @@
 import { GoogleGenAI } from '@google/genai'
 
 // Configuration constants
-const TEXT_MODEL = 'gemini-3-pro-preview'
+const TEXT_MODEL = 'gemini-3-flash-preview'
 const IMAGE_MODEL = 'gemini-3-pro-image-preview'
 const FAST_MODEL = 'gemini-2.5-flash-lite'
 const TTS_MODEL = 'gemini-2.5-flash-preview-tts'
@@ -375,8 +375,10 @@ async function generateScriptWithModel(ai, prompt, model, fallbackTopic) {
 
     // Validate each slide has required fields
     const validSlides = parsed.slides.map((slide, index) => ({
-      subtitle: slide.subtitle || `Slide ${index + 1}`,
-      imagePrompt: slide.imagePrompt || `Educational diagram about ${fallbackTopic}`
+      // Strip markdown formatting from subtitles (they're spoken by TTS)
+      subtitle: (slide.subtitle || `Slide ${index + 1}`).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1'),
+      imagePrompt: slide.imagePrompt || `Educational diagram about ${fallbackTopic}`,
+      ...(slide.isConclusion && { isConclusion: true })
     }))
 
     return { slides: validSlides, error: null }
@@ -407,15 +409,22 @@ export async function generateScript(query, options = {}) {
 Your task is to create a script for an educational slideshow that explains topics clearly.
 
 Guidelines:
-- Create 3-6 slides based on topic complexity:
+- Create 3-5 content slides based on topic complexity:
   - Simple concepts (definitions, basic facts): 3 slides
   - Moderate topics (processes, comparisons): 4 slides
-  - Complex topics (multi-step systems, deep explanations): 5-6 slides
+  - Complex topics (multi-step systems, deep explanations): 5 slides
 - Each slide should have a clear, concise explanation (2-3 sentences max)
 - Include an image prompt describing what educational diagram/visual should accompany each slide
 - Make content accessible for general audiences (ages 10+)
 - Use analogies and relatable examples when possible
 - For follow-up questions, build on previous context without repeating it
+
+IMPORTANT: Always end with a CONCLUSION slide that:
+- Summarizes 2-3 key takeaways from the explanation
+- Uses a clear "key takeaways" format in the subtitle
+- Has isConclusion: true to mark it as the final summary
+
+CRITICAL: Subtitles are spoken aloud by TTS. Do NOT use markdown formatting (no **bold**, *italics*, or other markup). Write plain text only.
 
 Output Format (JSON):
 {
@@ -423,6 +432,11 @@ Output Format (JSON):
     {
       "subtitle": "Clear explanation text that will be spoken aloud",
       "imagePrompt": "Description of educational diagram showing [concept], with labeled parts including [details]. Style: clean, colorful educational illustration."
+    },
+    {
+      "subtitle": "To wrap up: First, [key point 1]. Second, [key point 2]. And remember, [key point 3].",
+      "imagePrompt": "Summary infographic with three key points highlighted in boxes or icons. Clean, minimal design with bullet points.",
+      "isConclusion": true
     }
   ]
 }

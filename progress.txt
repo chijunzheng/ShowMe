@@ -792,3 +792,84 @@ const logger = require('./utils/logger')
 - Voice agent TTS flow is resilient to 429 errors
 - Generation UI is cleaner and more focused
 - New topics correctly appear at top of sidebar list
+
+---
+
+## Session 13: Concluding Slides + UX Polish + Bug Fixes (2026-01-18)
+
+### Completed Features
+
+#### F091: Concluding slide with key takeaways - IMPLEMENTED
+- Backend: Updated `generateScript` prompt to always include a conclusion slide
+  - Conclusion slide has `isConclusion: true` marker
+  - Summarizes 2-3 key takeaways in "To wrap up:" format
+  - Image prompt requests summary infographic style
+- Backend: Pass through `isConclusion` property in generate.js (both new topics and follow-ups)
+- Frontend: Display "Key Takeaways" badge above subtitle for conclusion slides
+- Frontend: Preserve `isConclusion` in localStorage persistence
+
+#### Suggestions slide TTS - IMPLEMENTED
+- Added 3 random message variations for variety:
+  1. "Want to learn more? Here are some questions you might enjoy."
+  2. "Curious for more? Try one of these questions."
+  3. "Ready to keep exploring? Here are some ideas."
+- TTS plays once per suggestions slide (tracked by slide ID)
+- Reset on new query so next topic's suggestions can speak
+
+#### Fun fact refresh interval - CHANGED
+- Changed from immediate (after TTS finishes) to 60-second delay
+- Added `FUN_FACT_REFRESH_DELAY_MS: 60000` constant
+
+#### Raise hand button - CHANGED TO EMOJI
+- Changed from text ("Raise hand" / "Lower hand") to emoji (✋ / 🤚)
+- Button is now circular (56x56px) with emoji centered
+
+#### Model change for latency - IMPLEMENTED
+- Changed `TEXT_MODEL` from `gemini-3-pro-preview` to `gemini-3-flash-preview`
+- Affects: script generation, audio transcription, slide response generation
+- Image generation stays on `gemini-3-pro-image-preview` for quality
+
+### Bug Fixes
+
+1. **Markdown in subtitles not rendering** - Fixed
+   - Gemini was outputting `**bold**` markdown in subtitles
+   - Added prompt instruction: "Do NOT use markdown formatting"
+   - Added regex to strip `**bold**` and `*italics*` as fallback
+
+2. **TTS repeating on suggestions slide** - Fixed
+   - Added `spokenSuggestionsSlideRef` to track which slide was already spoken
+   - Only speaks once per slide ID, resets on new query
+
+3. **Slides disappearing on refresh** - Fixed
+   - Root cause: `sanitizeSlidesForStorage` filtered out slides missing `imageUrl`
+   - Fix: Use fallbacks instead of filtering (placeholder image, generated ID)
+   - Made `loadTopicSlidesFromStorage` validation lenient to match
+   - Added better logging to `persistTopicSlides`
+
+4. **Raise hand button misaligned after F12 dev tools** - Fixed
+   - Root cause: Flexbox centering didn't recalculate on viewport changes
+   - Fix: Use explicit `calc(50% + 128px)` positioning with `transform: translateX(-50%)`
+   - Accounts for 256px sidebar (128px = half)
+
+5. **Port 3001 in use (EADDRINUSE)** - Fixed
+   - `lsof -ti:3001 | xargs kill -9`
+
+### Files Modified
+- `backend/src/services/gemini.js` - Conclusion prompt, markdown stripping, model change
+- `backend/src/routes/generate.js` - Pass through isConclusion property
+- `frontend/src/App.jsx` - All frontend changes (badges, TTS, positioning, persistence)
+- `features.json` - Added F091
+
+### Git Commits
+- (pending): feat: concluding slides, UX polish, and bug fixes
+
+### Features Status
+- **Total Features**: 92 (previous 91 + F091)
+- **Completed**: F091 implemented and working
+
+### Context for Next Agent
+- Concluding slides provide closure to each topic
+- Suggestions slide speaks random encouraging message
+- Fun facts refresh every 60 seconds during generation
+- Raise hand button uses emoji and stays centered on viewport changes
+- Slide persistence is more robust with fallbacks

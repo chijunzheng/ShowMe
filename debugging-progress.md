@@ -144,6 +144,115 @@ window.LOG_CATEGORIES = ['API', 'WS']  // Filter to specific categories
 
 ---
 
+## Session 3: 2026-01-18
+
+### Issue 1: Slides Disappearing on Refresh
+
+**Symptoms:**
+- Topics remained in sidebar after refresh
+- Slides within topics were gone (empty slideshows)
+- Console showed `[STORAGE] Slides persisted successfully` but slides didn't load
+
+**Root Cause:** Overly strict validation in `sanitizeSlidesForStorage`
+- Filter required both `slide.id` AND `slide.imageUrl` to be valid strings
+- If image generation failed (rate limit, etc.), `imageUrl` could be null
+- All slides got filtered out → nothing persisted to localStorage
+- Topic metadata persisted but slides didn't
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// BEFORE (too strict):
+.filter((slide) =>
+  slide.id && typeof slide.id === 'string' &&
+  slide.imageUrl && typeof slide.imageUrl === 'string'
+)
+
+// AFTER (with fallbacks):
+.map((slide, index) => ({
+  id: slide.id || `slide_${topicId}_${index}_${Date.now()}`,
+  imageUrl: slide.imageUrl || 'data:image/svg+xml,...placeholder...',
+  // ... other fields with defaults
+}))
+.filter((slide) => slide.id && (slide.subtitle || slide.imageUrl))
+```
+
+Also updated `loadTopicSlidesFromStorage` to match lenient validation.
+
+---
+
+### Issue 2: Raise Hand Button Misaligned After Dev Tools Toggle
+
+**Symptoms:**
+- Button centered correctly on initial load
+- After opening/closing F12 dev tools, button shifted to the right
+- Not re-centering on viewport resize
+
+**Root Cause:** Flexbox centering with responsive classes
+- Used `left-1/2 -translate-x-1/2` with `md:left-[calc(50%+128px)]`
+- Flexbox `justify-center` didn't reliably recalculate on viewport changes
+- Browser rendering quirk with fixed positioning + translate
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// BEFORE (unreliable):
+className="fixed left-0 right-0 md:left-64 flex justify-center"
+
+// AFTER (explicit calc):
+style={{
+  left: topics.length > 0 ? 'calc(50% + 128px)' : '50%',
+  transform: 'translateX(-50%)',
+}}
+```
+
+Uses explicit `calc()` positioning instead of relying on flexbox container width.
+
+---
+
+### Issue 3: TTS Repeating on Suggestions Slide
+
+**Symptoms:**
+- Voice agent kept repeating "Want to learn more?" message
+- Happened in an infinite loop on the suggestions slide
+
+**Root Cause:** useEffect re-triggering
+- Effect had `isVoiceAgentSpeaking` in dependency array
+- When TTS started, `isVoiceAgentSpeaking` changed → effect re-ran → triggered TTS again
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// Added ref to track which suggestions slide was already spoken
+const spokenSuggestionsSlideRef = useRef(null)
+
+// In the effect:
+if (isPlaying && spokenSuggestionsSlideRef.current !== currentSlide.id) {
+  spokenSuggestionsSlideRef.current = currentSlide.id
+  enqueueVoiceAgentMessage(...)
+}
+```
+
+---
+
+### Issue 4: Markdown Formatting Showing as Raw Text
+
+**Symptoms:**
+- Subtitles displayed `**Primordial Black Holes**` instead of bold text
+- Markdown asterisks visible in UI
+
+**Root Cause:** Gemini outputting markdown in plain text field
+- Script generation prompt didn't explicitly forbid markdown
+- Subtitles are spoken by TTS, shouldn't have formatting
+
+**Fix Applied:** `backend/src/services/gemini.js`
+```javascript
+// Added to prompt:
+"CRITICAL: Subtitles are spoken aloud by TTS. Do NOT use markdown formatting (no **bold**, *italics*, or other markup). Write plain text only."
+
+// Added fallback regex stripping:
+subtitle: (slide.subtitle || '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1')
+```
+
+---
+
 ## Files Reference
 
 | File | Purpose |

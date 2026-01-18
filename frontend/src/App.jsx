@@ -22,6 +22,8 @@ const GENERATION_TIMEOUT = {
   STILL_WORKING_MS: 15000,
   // Maximum time before allowing user to cancel (60 seconds)
   MAX_TIMEOUT_MS: 60000,
+  // Delay before refreshing fun fact (60 seconds)
+  FUN_FACT_REFRESH_DELAY_MS: 60000,
 }
 
 // Microphone permission states
@@ -91,6 +93,16 @@ const VOICE_AGENT_SCRIPT = {
     }
     return "Your explanation is ready. Let's take a look!"
   },
+  // Suggestions slide messages - randomly selected for variety
+  SUGGESTIONS_MESSAGES: [
+    "Want to learn more? Here are some questions you might enjoy.",
+    "Curious for more? Try one of these questions.",
+    "Ready to keep exploring? Here are some ideas.",
+  ],
+  getRandomSuggestionsMessage: () => {
+    const messages = VOICE_AGENT_SCRIPT.SUGGESTIONS_MESSAGES
+    return messages[Math.floor(Math.random() * messages.length)]
+  },
 }
 
 /**
@@ -112,20 +124,20 @@ function sanitizeSlidesForStorage(slides, topicId) {
   if (!Array.isArray(slides)) return []
   return slides
     .filter((slide) => slide && typeof slide === 'object')
-    .map((slide) => ({
-      id: slide.id,
-      imageUrl: slide.imageUrl,
-      subtitle: slide.subtitle,
-      duration: slide.duration,
+    .map((slide, index) => ({
+      // Use fallback ID if missing to ensure slide is always persisted
+      id: slide.id || `slide_${topicId}_${index}_${Date.now()}`,
+      // Use placeholder image if missing - slide content is more important than image
+      imageUrl: slide.imageUrl || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect fill="%23f0f0f0" width="400" height="300"/><text x="200" y="150" text-anchor="middle" fill="%23999">Image unavailable</text></svg>',
+      subtitle: slide.subtitle || '',
+      duration: slide.duration || 5000,
       topicId: slide.topicId || topicId,
+      // F091: Preserve conclusion slide marker
+      ...(slide.isConclusion && { isConclusion: true }),
       // audioUrl intentionally omitted to reduce storage size
     }))
-    .filter((slide) =>
-      slide.id &&
-      typeof slide.id === 'string' &&
-      slide.imageUrl &&
-      typeof slide.imageUrl === 'string'
-    )
+    // Only filter out completely invalid slides (no content at all)
+    .filter((slide) => slide.id && (slide.subtitle || slide.imageUrl))
 }
 
 /**
@@ -134,10 +146,19 @@ function sanitizeSlidesForStorage(slides, topicId) {
  * @param {Array} slides - Slide objects to store
  */
 function persistTopicSlides(topicId, slides) {
-  if (!topicId || !Array.isArray(slides)) return
+  if (!topicId || !Array.isArray(slides)) {
+    logger.warn('STORAGE', 'Cannot persist slides: invalid input', { topicId, slidesType: typeof slides })
+    return false
+  }
 
   const sanitizedSlides = sanitizeSlidesForStorage(slides, topicId)
-  if (sanitizedSlides.length === 0) return
+  if (sanitizedSlides.length === 0) {
+    logger.warn('STORAGE', 'No valid slides to persist after sanitization', {
+      topicId,
+      originalCount: slides.length
+    })
+    return false
+  }
 
   const payload = {
     version: TOPIC_SLIDES_STORAGE_VERSION,
@@ -147,6 +168,11 @@ function persistTopicSlides(topicId, slides) {
 
   try {
     localStorage.setItem(getTopicSlidesStorageKey(topicId), JSON.stringify(payload))
+    logger.debug('STORAGE', 'Slides persisted successfully', {
+      topicId,
+      slidesCount: sanitizedSlides.length,
+    })
+    return true
   } catch (error) {
     if (error.name === 'QuotaExceededError') {
       logger.warn('STORAGE', 'Slides archive quota exceeded, skipping storage', {
@@ -159,6 +185,7 @@ function persistTopicSlides(topicId, slides) {
         error: error.message,
       })
     }
+    return false
   }
 }
 
@@ -183,13 +210,12 @@ function loadTopicSlidesFromStorage(topicId) {
     const slides = Array.isArray(parsed.slides) ? parsed.slides : null
     if (!slides) return null
 
+    // Lenient validation - only require slide to have id and some content
     const validSlides = slides.filter((slide) =>
       slide &&
       typeof slide === 'object' &&
       slide.id &&
-      typeof slide.id === 'string' &&
-      slide.imageUrl &&
-      typeof slide.imageUrl === 'string'
+      (slide.subtitle || slide.imageUrl)
     )
 
     return validSlides.length > 0 ? validSlides : null
@@ -779,6 +805,8 @@ function App() {
   const voiceAgentQueueRef = useRef([])
   const resumeListeningAfterVoiceAgentRef = useRef(false)
   const spokenFunFactRef = useRef(null)
+  // Track which suggestions slide we've already spoken for (to avoid repeating)
+  const spokenSuggestionsSlideRef = useRef(null)
 
   useEffect(() => {
     voiceAgentQueueRef.current = voiceAgentQueue
@@ -1341,10 +1369,12 @@ function App() {
     if (engagement.funFact?.text && !spokenFunFactRef.current) {
       spokenFunFactRef.current = engagement.funFact.text
       // Use pre-generated audio if available, otherwise fall back to TTS fetch
-      // When audio finishes, trigger refresh to get next fun fact
+      // When audio finishes, wait 60s before refreshing to get next fun fact
       enqueueVoiceAgentMessage(`Fun fact: ${engagement.funFact.text}`, {
         audioUrl: engagement.funFact.audioUrl || null,
-        onComplete: refreshFunFact,
+        onComplete: () => {
+          setTimeout(refreshFunFact, GENERATION_TIMEOUT.FUN_FACT_REFRESH_DELAY_MS)
+        },
       })
     }
 
@@ -1504,6 +1534,18 @@ function App() {
       return
     }
 
+    // Suggestions slide - play random TTS message via voice agent
+    if (currentSlide?.type === 'suggestions') {
+      setIsSlideNarrationPlaying(false)
+      setIsSlideNarrationReady(true)
+      // Only speak once per suggestions slide (check by slide ID)
+      if (isPlaying && spokenSuggestionsSlideRef.current !== currentSlide.id) {
+        spokenSuggestionsSlideRef.current = currentSlide.id
+        enqueueVoiceAgentMessage(VOICE_AGENT_SCRIPT.getRandomSuggestionsMessage())
+      }
+      return
+    }
+
     if (!isPlaying || isVoiceAgentSpeaking) {
       setIsSlideNarrationPlaying(false)
       return
@@ -1601,6 +1643,7 @@ function App() {
     requestSlideAudio,
     prefetchSlideAudio,
     getCachedSlideAudio,
+    enqueueVoiceAgentMessage,
   ])
 
   // Auto-trigger queued questions after slideshow ends (F048)
@@ -2479,6 +2522,7 @@ function App() {
       setEngagement(null)
       setVoiceAgentQueue([])
       spokenFunFactRef.current = null
+      spokenSuggestionsSlideRef.current = null
       clearFunFactRefresh()
       currentQueryRef.current = trimmedQuery // Store query for TTS-driven fun fact refresh
       setIsColdStart(false)
@@ -3162,9 +3206,19 @@ function App() {
                   </div>
 
                   {/* Subtitle - only shown for content slides */}
-                  <p className="text-lg text-center max-h-20 overflow-hidden mt-4">
-                    {visibleSlides[currentIndex]?.subtitle}
-                  </p>
+                  <div className="mt-4">
+                    {/* F091: Show "Key Takeaways" badge for conclusion slides */}
+                    {visibleSlides[currentIndex]?.isConclusion && (
+                      <div className="flex justify-center mb-2">
+                        <span className="text-xs font-medium px-2 py-0.5 bg-primary/10 text-primary rounded-full">
+                          Key Takeaways
+                        </span>
+                      </div>
+                    )}
+                    <p className="text-lg text-center max-h-20 overflow-hidden">
+                      {visibleSlides[currentIndex]?.subtitle}
+                    </p>
+                  </div>
                 </>
               )}
             </div>
@@ -3291,40 +3345,40 @@ function App() {
         {/* Raise hand button - only shown during slideshow */}
         {uiState === UI_STATE.SLIDESHOW && (
           <div
-            className={`
-              fixed z-50 flex flex-col items-center gap-2
-              left-1/2 -translate-x-1/2
-              ${topics.length > 0 ? 'md:left-[calc(50%+128px)]' : ''}
-            `}
+            className={`fixed z-50 pointer-events-none left-1/2 -translate-x-1/2 ${
+              topics.length > 0 ? 'md:left-[calc(50%+128px)] xl:left-1/2' : ''
+            }`}
             style={{
               // F058: Use safe area inset for notched devices, fallback to 24px
               bottom: 'max(24px, env(safe-area-inset-bottom, 24px))',
             }}
           >
-            {isMicEnabled && (
-              <span className="text-xs text-gray-500 bg-white/90 px-3 py-1 rounded-full shadow-sm">
-                {isListening
-                  ? 'Listening...'
-                  : isRaiseHandPending
-                    ? 'Waiting for the current sentence...'
-                    : 'Mic on'}
-              </span>
-            )}
-            <button
-              onClick={handleRaiseHandClick}
-              aria-label={isMicEnabled ? 'Lower hand' : 'Raise hand'}
-              className={`px-5 py-3 min-h-[44px] rounded-full shadow-lg font-semibold transition-all select-none ${
-                isMicEnabled
-                  ? 'bg-red-500 hover:bg-red-600 text-white'
-                  : 'bg-primary hover:scale-105 text-white'
-              }`}
-              style={{
-                WebkitTouchCallout: 'none',
-                userSelect: 'none',
-              }}
-            >
-              {isMicEnabled ? 'Lower hand' : 'Raise hand'}
-            </button>
+            <div className="flex flex-col items-center gap-2 pointer-events-auto">
+              {isMicEnabled && (
+                <span className="text-xs text-gray-500 bg-white/90 px-3 py-1 rounded-full shadow-sm">
+                  {isListening
+                    ? 'Listening...'
+                    : isRaiseHandPending
+                      ? 'Waiting for the current sentence...'
+                      : 'Mic on'}
+                </span>
+              )}
+              <button
+                onClick={handleRaiseHandClick}
+                aria-label={isMicEnabled ? 'Lower hand' : 'Raise hand'}
+                className={`w-14 h-14 min-h-[44px] rounded-full shadow-lg text-2xl transition-all select-none flex items-center justify-center ${
+                  isMicEnabled
+                    ? 'bg-red-500 hover:bg-red-600'
+                    : 'bg-primary hover:scale-105'
+                }`}
+                style={{
+                  WebkitTouchCallout: 'none',
+                  userSelect: 'none',
+                }}
+              >
+                {isMicEnabled ? '🤚' : '✋'}
+              </button>
+            </div>
           </div>
         )}
 
