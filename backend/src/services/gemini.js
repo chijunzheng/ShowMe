@@ -1246,6 +1246,72 @@ Output Format (JSON):
   }
 }
 
+/**
+ * Generate suggested questions based on topic history or default commonly asked questions
+ * Uses FAST_MODEL (gemini-2.5-flash-lite) for quick response
+ * @param {Array<string>} topicNames - Array of topic names from user's history
+ * @returns {Promise<{questions: string[], error: string|null}>}
+ */
+export async function generateSuggestedQuestions(topicNames = []) {
+  if (!isGeminiAvailable()) {
+    return { questions: [], error: 'API_KEY_MISSING' }
+  }
+
+  try {
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+
+    let prompt
+    if (topicNames.length > 0) {
+      prompt = `Based on these topics the user has explored: ${topicNames.join(', ')}
+
+Generate 3 related follow-up questions they might want to learn about next. Questions should:
+- Be naturally curious and educational
+- Connect to or expand on the topics they've explored
+- Be concise (under 8 words each)
+
+Return ONLY a JSON array of 3 question strings, no explanation.
+Example: ["How do neurons communicate?", "What causes memory loss?", "Why do we forget dreams?"]`
+    } else {
+      prompt = `Generate 3 commonly asked educational questions that spark curiosity. Questions should:
+- Cover diverse topics (science, nature, technology, etc.)
+- Be engaging and make people want to learn
+- Be concise (under 8 words each)
+
+Return ONLY a JSON array of 3 question strings, no explanation.
+Example: ["How do black holes work?", "Why do we dream?", "How does WiFi work?"]`
+    }
+
+    const response = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: prompt,
+    })
+
+    const text = response.text || ''
+    const jsonStr = extractJSON(text)
+    const questions = JSON.parse(jsonStr)
+
+    if (!Array.isArray(questions) || questions.length === 0) {
+      return { questions: [], error: 'INVALID_RESPONSE' }
+    }
+
+    // Ensure we return exactly 3 questions, cleaned up
+    const cleaned = questions
+      .slice(0, 3)
+      .map(q => q.replace(/^["']|["']$/g, '').trim())
+      .filter(q => q.length > 0)
+
+    return { questions: cleaned, error: null }
+  } catch (error) {
+    console.error('[Gemini] Suggested questions error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { questions: [], error: 'RATE_LIMITED' }
+    }
+
+    return { questions: [], error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
 export default {
   isGeminiAvailable,
   generateScript,
@@ -1258,4 +1324,5 @@ export default {
   generateSlideResponse,
   generateTopicName,
   generateTopicMetadata,
+  generateSuggestedQuestions,
 }

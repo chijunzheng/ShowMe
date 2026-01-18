@@ -43,8 +43,8 @@ const TOPIC_SLIDES_STORAGE_PREFIX = 'showme_topic_slides_'
 const TOPICS_STORAGE_VERSION = 2
 const TOPIC_SLIDES_STORAGE_VERSION = 1
 
-// Example questions for cold start
-const EXAMPLE_QUESTIONS = [
+// Default questions (fallback when API fails or rate limited)
+const DEFAULT_QUESTIONS = [
   "How do black holes work?",
   "Why do we dream?",
   "How does WiFi work?",
@@ -78,21 +78,19 @@ const AUDIO_CONFIG = {
   MAX_AUDIO_SIZE: 10 * 1024 * 1024,
 }
 
-// Voice agent greetings - randomly selected each session
-const VOICE_GREETINGS = [
-  "Hey there! What would you like to learn today?",
-  "Hi! Ready to explore something new?",
-  "Hello! What's on your curious mind?",
-  "Hey! Let's discover something together!",
-  "Hi there! What would you like to understand?",
-  "Hello! Ready for a learning adventure?",
-]
-
 // Voice agent script templates
 const VOICE_AGENT_SCRIPT = {
   GENERATION_START: "Got it. Give me a moment.",
-  SLIDES_READY: "Here we go!",
   PREPARING_FOLLOW_UP: "Preparing your follow-up now.",
+  // Dynamic slides ready message based on topic and count
+  getSlidesReadyMessage: (topicName, slideCount) => {
+    if (topicName && slideCount > 1) {
+      return `I've prepared ${slideCount} slides about ${topicName}. Let's explore!`
+    } else if (slideCount > 1) {
+      return `Your ${slideCount} slides are ready. Let's explore!`
+    }
+    return "Your explanation is ready. Let's take a look!"
+  },
 }
 
 /**
@@ -490,6 +488,10 @@ function App() {
   const [isColdStart, setIsColdStart] = useState(() => !initialData.hadPersistedData)
   // Random greeting picked once per session for variety
   const [displayGreeting] = useState(() => DISPLAY_GREETINGS[Math.floor(Math.random() * DISPLAY_GREETINGS.length)])
+  // Dynamic suggested questions - fetched from API based on topic history
+  const [suggestedQuestions, setSuggestedQuestions] = useState(DEFAULT_QUESTIONS)
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
+  const [hasDynamicSuggestions, setHasDynamicSuggestions] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [liveTranscription, setLiveTranscription] = useState('')
@@ -775,7 +777,6 @@ function App() {
   const voiceAgentBusyRef = useRef(false)
   const voiceAgentAudioRef = useRef(null)
   const voiceAgentQueueRef = useRef([])
-  const hasQueuedGreetingRef = useRef(false)
   const resumeListeningAfterVoiceAgentRef = useRef(false)
   const spokenFunFactRef = useRef(null)
 
@@ -982,13 +983,14 @@ function App() {
 
     const nextItem = voiceAgentQueue[0]
 
-    const finishItem = () => {
+    const finishItem = (success = true) => {
       setIsVoiceAgentSpeaking(false)
       voiceAgentBusyRef.current = false
       voiceAgentAudioRef.current = null
       const shouldResumeListening = resumeListeningAfterVoiceAgentRef.current
       resumeListeningAfterVoiceAgentRef.current = false
-      if (nextItem.onComplete) {
+      // Only call onComplete if playback succeeded (prevents infinite loop on 429)
+      if (success && nextItem.onComplete) {
         nextItem.onComplete()
       }
       setVoiceAgentQueue((prev) => prev.filter((item) => item.id !== nextItem.id))
@@ -1041,13 +1043,13 @@ function App() {
             logger.warn('AUDIO', 'Voice agent TTS request failed', {
               status: response.status,
             })
-            finishItem()
+            finishItem(false) // Don't trigger onComplete on failure
             return
           }
 
           const data = await response.json()
           if (!data?.audioUrl) {
-            finishItem()
+            finishItem(false) // Don't trigger onComplete on failure
             return
           }
           audioUrl = data.audioUrl
@@ -1062,15 +1064,15 @@ function App() {
         }
 
         audio.addEventListener('ended', handleDone, { once: true })
-        audio.addEventListener('error', handleDone, { once: true })
+        audio.addEventListener('error', () => finishItem(false), { once: true })
 
         audio.play().catch((error) => {
           logger.warn('AUDIO', 'Voice agent playback blocked', { error: error.message })
-          finishItem()
+          finishItem(false) // Don't trigger onComplete on failure
         })
       } catch (error) {
         logger.warn('AUDIO', 'Voice agent playback failed', { error: error.message })
-        finishItem()
+        finishItem(false) // Don't trigger onComplete on failure
       }
     }
 
@@ -1105,29 +1107,45 @@ function App() {
     saveTopicsToStorage(topics)
   }, [topics])
 
-  /**
-   * CORE010: AI greeting - plays after mic permission granted (user interaction)
-   * This avoids browser autoplay blocking which requires user interaction first
-   */
+  // Fetch suggested questions when topics change
   useEffect(() => {
-    if (hasQueuedGreetingRef.current) {
-      return
+    const fetchSuggestions = async () => {
+      setIsLoadingSuggestions(true)
+      try {
+        const topicNames = topics
+          .map(t => t.name)
+          .filter(name => name && name.trim().length > 0)
+
+        const response = await fetch('/api/topic/suggestions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ topicNames }),
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          if (data.questions && data.questions.length > 0) {
+            setSuggestedQuestions(data.questions)
+            setHasDynamicSuggestions(true)
+          } else {
+            setSuggestedQuestions(DEFAULT_QUESTIONS)
+            setHasDynamicSuggestions(false)
+          }
+        } else {
+          setSuggestedQuestions(DEFAULT_QUESTIONS)
+          setHasDynamicSuggestions(false)
+        }
+      } catch (error) {
+        logger.warn('API', 'Failed to fetch suggestions', { error: error.message })
+        setSuggestedQuestions(DEFAULT_QUESTIONS)
+        setHasDynamicSuggestions(false)
+      } finally {
+        setIsLoadingSuggestions(false)
+      }
     }
 
-    // Only greet after user has granted mic permission (requires interaction)
-    if (permissionState !== PERMISSION_STATE.GRANTED) {
-      return
-    }
-
-    hasQueuedGreetingRef.current = true
-    const randomGreeting = VOICE_GREETINGS[Math.floor(Math.random() * VOICE_GREETINGS.length)]
-
-    const timer = setTimeout(() => {
-      enqueueVoiceAgentMessage(randomGreeting, { priority: 'high' })
-    }, 500)
-
-    return () => clearTimeout(timer)
-  }, [permissionState, enqueueVoiceAgentMessage])
+    fetchSuggestions()
+  }, [topics])
 
   // Navigation helper functions with bounds checking (F044)
   const goToNextSlide = useCallback(() => {
@@ -1244,8 +1262,10 @@ function App() {
   /**
    * Transition to slideshow with "slides ready" narration.
    * Interrupts any playing fun fact audio to avoid blocking the transition.
+   * @param {string} topicName - Name of the topic for the announcement
+   * @param {number} slideCount - Number of slides generated
    */
-  const queueSlidesReadyTransition = useCallback(() => {
+  const queueSlidesReadyTransition = useCallback((topicName, slideCount) => {
     // Stop any currently playing voice agent audio (e.g., fun fact)
     if (voiceAgentAudioRef.current) {
       voiceAgentAudioRef.current.pause()
@@ -1258,7 +1278,8 @@ function App() {
     clearFunFactRefresh()
 
     setIsSlideRevealPending(true)
-    enqueueVoiceAgentMessage(VOICE_AGENT_SCRIPT.SLIDES_READY, {
+    const readyMessage = VOICE_AGENT_SCRIPT.getSlidesReadyMessage(topicName, slideCount)
+    enqueueVoiceAgentMessage(readyMessage, {
       priority: 'high',
       onComplete: () => {
         setIsSlideRevealPending(false)
@@ -2658,7 +2679,7 @@ function App() {
         setCurrentIndex(previousSlideCount + headerOffset)
         // F072: End timing for full generation pipeline
         logger.timeEnd('GENERATION', 'full-pipeline')
-        queueSlidesReadyTransition()
+        queueSlidesReadyTransition(activeTopic.name, generateData.slides.length)
 
       } else if (newTopicData && generateData.slides?.length > 0) {
         // F040: Create new topic with header card
@@ -2685,14 +2706,14 @@ function App() {
         persistTopicSlides(newTopic.id, newTopic.slides)
 
         // Add the new topic
-        setTopics((prev) => pruneSlideCache([...prev, newTopic], newTopic.id))
+        setTopics((prev) => pruneSlideCache([newTopic, ...prev], newTopic.id))
 
         // Set the new topic as active and show its header slide
         setActiveTopicId(newTopic.id)
         setCurrentIndex(0)
         // F072: End timing for full generation pipeline
         logger.timeEnd('GENERATION', 'full-pipeline')
-        queueSlidesReadyTransition()
+        queueSlidesReadyTransition(newTopic.name, generateData.slides.length)
 
       } else {
         // No slides returned - stay in generating state with a message
@@ -2993,22 +3014,28 @@ function App() {
               />
             </form>
 
-            {/* Example questions (cold start only) - F057: touch targets 44px */}
-            {isColdStart && (
-              <div className="mt-4 space-y-3 w-full max-w-md">
-                <p className="text-sm text-gray-400">Try asking:</p>
-                {EXAMPLE_QUESTIONS.map((question, i) => (
+            {/* Suggested questions - dynamic based on topic history */}
+            <div className="mt-4 space-y-3 w-full max-w-md">
+              <p className="text-sm text-gray-400">
+                {hasDynamicSuggestions ? 'Continue exploring:' : 'Try asking:'}
+              </p>
+              {isLoadingSuggestions ? (
+                <div className="flex justify-center py-4">
+                  <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : (
+                suggestedQuestions.map((question, i) => (
                   <button
-                    key={i}
+                    key={`${question}-${i}`}
                     onClick={() => handleExampleClick(question)}
-                    className="block w-full px-4 py-3 min-h-[44px] text-left bg-surface hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
-                    style={{ animationDelay: `${i * 150}ms` }}
+                    className="block w-full px-4 py-3 min-h-[44px] text-left bg-surface hover:bg-gray-100 rounded-lg transition-colors cursor-pointer animate-fade-in"
+                    style={{ animationDelay: `${i * 100}ms` }}
                   >
                     "{question}"
                   </button>
-                ))}
-              </div>
-            )}
+                ))
+              )}
+            </div>
           </div>
         )}
 
@@ -3017,50 +3044,25 @@ function App() {
             {/* Loader */}
             <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin" />
 
-            {/* F015: Status message - shows WebSocket progress or fallback messages */}
-            <p className="text-lg">
+            {/* Single clean status message */}
+            <p className="text-lg text-gray-600">
               {isStillWorking
                 ? 'Still working...'
                 : generationProgress.message || 'Creating your explanation...'}
             </p>
-            {isPreparingFollowUp && (
-              <p className="text-sm text-primary">
-                Preparing your follow-up...
-              </p>
-            )}
-            {isSlideRevealPending && (
-              <p className="text-sm text-gray-500">
-                Finishing the teacher narration...
-              </p>
-            )}
-            {/* F015: Show slides count from WebSocket progress */}
-            <p className="text-sm text-gray-500">
-              [{generationProgress.totalSlides > 0
-                ? `Generating ${generationProgress.totalSlides} slides`
-                : 'Preparing slides...'}]
-            </p>
-            {lastTranscription && (
-              <p className="text-sm text-gray-500">
-                You asked: "{lastTranscription}"
-              </p>
-            )}
 
-            {/* Cancel button - shown when taking too long (F053) - F057: 44px touch target */}
-            {isStillWorking && (
-              <button
-                onClick={cancelGeneration}
-                className="px-4 py-2 min-h-[44px] text-gray-500 hover:text-gray-700 border border-gray-300 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-            )}
+            {/* Cancel button - always visible during generation */}
+            <button
+              onClick={cancelGeneration}
+              className="px-4 py-2 min-h-[44px] text-gray-500 hover:text-gray-700 border border-gray-300 rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
 
             {/* Fun fact card - displays while slides are generating (F045) */}
             {engagement?.funFact && (
               <FunFactCard funFact={engagement.funFact} />
             )}
-
-            {/* Suggestions moved to end-of-slideshow card for better UX */}
           </div>
         )}
 

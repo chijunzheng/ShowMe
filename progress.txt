@@ -708,3 +708,87 @@ const logger = require('./utils/logger')
 - `npm run lint` (frontend) failed: ESLint reported no `.ts/.tsx` files found
 - `npm test` (frontend) failed: no test files found
 - `npm test` (backend) failed: no test files found
+
+---
+
+## Session 12: Dynamic Query Suggestions + UX Polish (2026-01-17)
+
+### Completed Features
+
+#### F090: Dynamic query suggestions based on topic history - IMPLEMENTED
+- Backend: Added `generateSuggestedQuestions()` function in `backend/src/services/gemini.js`
+  - Uses FAST_MODEL (`gemini-2.5-flash-lite`) for quick response
+  - Generates 3 personalized questions based on user's topic history
+  - Falls back to diverse educational questions when no history exists
+- Backend: Added `POST /api/topic/suggestions` endpoint in `backend/src/routes/topic.js`
+  - Accepts `topicNames` array (up to 10 topics)
+  - Returns `{ questions: [] }` array
+- Frontend: Integrated dynamic suggestions in `frontend/src/App.jsx`
+  - Fetches suggestions on mount and when topics change
+  - Added `hasDynamicSuggestions` state to control "Continue exploring:" label
+  - Only shows "Continue exploring:" when API returns personalized suggestions
+
+### Bug Fixes
+
+1. **Missing export on generateSuggestedQuestions** - Fixed
+   - Added `export` keyword to function declaration
+   - Was causing 500 errors on `/api/topic/suggestions`
+
+2. **API_URL undefined in fetch** - Fixed
+   - Changed fetch URL from `${API_URL}/api/topic/suggestions` to `/api/topic/suggestions`
+   - Vite proxy handles `/api/*` routes automatically
+
+3. **Voice agent TTS infinite retry loop on 429** - Fixed
+   - Modified `finishItem(success)` to only call `onComplete` when `success === true`
+   - Prevents infinite loop when TTS fails with rate limit
+
+4. **"Continue exploring" shown incorrectly** - Fixed
+   - Added `hasDynamicSuggestions` state that only becomes true when API returns real suggestions
+   - Default questions no longer show "Continue exploring:" label
+
+5. **Express rate limiter blocking all requests** - Identified
+   - Symptom: 429 errors with <1ms response time (before reaching Gemini)
+   - Cause: Express rate limiter (100 requests per 15 min) blocks all requests
+   - Solution: Restart backend to reset in-memory counter
+
+6. **Port 3001 in use (EADDRINUSE)** - Fixed
+   - Used `lsof -ti:3001 | xargs kill -9` to kill existing process
+
+### UX Improvements
+
+1. **Generation UI simplification** - IMPLEMENTED
+   - Reduced from 6 visual elements to 4
+   - Removed duplicate status messages
+   - Removed "You asked:" text that was redundant
+   - Cleaner layout: spinner, status, cancel button, fun fact card
+
+2. **Enhanced slides ready message** - IMPLEMENTED
+   - Changed from generic "Here we go!" to dynamic message
+   - Now says: "I've prepared X slides about [topic]. Let's explore!"
+   - Falls back to "Your explanation is ready. Let's take a look!" when topic unknown
+
+3. **New topics appear at top of sidebar** - IMPLEMENTED
+   - Changed from `[...prev, newTopic]` to `[newTopic, ...prev]`
+   - Most recent topics now appear first in the list
+
+### Files Modified
+- `backend/src/services/gemini.js` - Added generateSuggestedQuestions function
+- `backend/src/routes/topic.js` - Added /api/topic/suggestions endpoint
+- `frontend/src/App.jsx` - Dynamic suggestions, UX improvements, bug fixes
+- `features.json` - Added F090 feature definition
+
+### Files Created
+- None (all changes were to existing files)
+
+### Git Commits
+- (pending): feat: dynamic query suggestions and UX polish
+
+### Features Status
+- **Total Features**: 91 (previous 90 + F090)
+- **Completed**: F090 implemented and working
+
+### Context for Next Agent
+- Dynamic query suggestions fully operational
+- Voice agent TTS flow is resilient to 429 errors
+- Generation UI is cleaner and more focused
+- New topics correctly appear at top of sidebar list

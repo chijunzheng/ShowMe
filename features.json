@@ -3518,6 +3518,54 @@
         }
       ],
       "files_modified": []
+    },
+    {
+      "id": "F090",
+      "category": "K-engagement",
+      "name": "Dynamic query suggestions based on topic history",
+      "description": "Try asking suggestions are dynamically generated based on user's topic history. Uses gemini-2.5-flash-lite for fast response. Shows related follow-up questions if topics exist, otherwise shows commonly asked educational questions.",
+      "priority": 2,
+      "dependencies": [
+        "F087"
+      ],
+      "status": "completed",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "POST /api/topic/suggestions returns 3 questions when no topics provided",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "POST /api/topic/suggestions returns related questions when topics provided",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Frontend shows 'Continue exploring:' when topics exist",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Frontend shows 'Try asking:' when no topics exist",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Suggestions update when topics change",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Falls back to default questions on API error",
+          "status": "pending"
+        }
+      ],
+      "files_modified": [
+        "backend/src/services/gemini.js",
+        "backend/src/routes/topic.js",
+        "frontend/src/App.jsx"
+      ]
     }
   ]
 }

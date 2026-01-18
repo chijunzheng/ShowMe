@@ -8,7 +8,7 @@
 import express from 'express'
 import logger from '../utils/logger.js'
 import { sanitizeQuery } from '../utils/sanitize.js'
-import { isGeminiAvailable, generateTopicName } from '../services/gemini.js'
+import { isGeminiAvailable, generateTopicName, generateSuggestedQuestions } from '../services/gemini.js'
 
 const router = express.Router()
 
@@ -106,6 +106,84 @@ router.post('/name', async (req, res) => {
     res.status(500).json({
       error: 'Internal server error',
     })
+  }
+})
+
+/**
+ * POST /api/topic/suggestions
+ * Generate suggested questions based on topic history
+ * Uses gemini-2.5-flash-lite for fast response
+ *
+ * Request body:
+ * - topicNames (optional): Array of topic names from user's history
+ *
+ * Response:
+ * - questions: Array of 3 suggested questions
+ *
+ * Errors:
+ *   - 500: Generation failed
+ *   - 503: Gemini API not available
+ */
+router.post('/suggestions', async (req, res) => {
+  logger.time('API', 'topic-suggestions-request')
+
+  try {
+    const { topicNames = [] } = req.body
+
+    // Check if Gemini is available
+    if (!isGeminiAvailable()) {
+      logger.warn('API', '[Topic] Gemini API not available')
+      logger.timeEnd('API', 'topic-suggestions-request')
+      return res.status(503).json({
+        error: 'Suggestions service temporarily unavailable',
+        questions: [],
+      })
+    }
+
+    // Validate topicNames is an array of strings
+    const validTopicNames = Array.isArray(topicNames)
+      ? topicNames.filter(t => typeof t === 'string' && t.trim().length > 0).slice(0, 10)
+      : []
+
+    logger.info('API', '[Topic] Generating suggestions', {
+      topicCount: validTopicNames.length,
+    })
+
+    const result = await generateSuggestedQuestions(validTopicNames)
+
+    if (result.error) {
+      logger.warn('API', '[Topic] Suggestions generation failed', {
+        error: result.error,
+      })
+      logger.timeEnd('API', 'topic-suggestions-request')
+
+      if (result.error === 'RATE_LIMITED') {
+        return res.status(429)
+          .set('Retry-After', '60')
+          .json({
+            error: 'Rate limit exceeded',
+            questions: [],
+            retryAfter: 60,
+          })
+      }
+
+      // Return empty array on error - frontend will fallback to defaults
+      return res.json({ questions: [] })
+    }
+
+    logger.info('API', '[Topic] Suggestions generated', {
+      count: result.questions.length,
+    })
+    logger.timeEnd('API', 'topic-suggestions-request')
+
+    res.json({ questions: result.questions })
+  } catch (error) {
+    logger.error('API', '[Topic] Suggestions error', {
+      error: error.message,
+    })
+    logger.timeEnd('API', 'topic-suggestions-request')
+
+    res.json({ questions: [] })
   }
 })
 
