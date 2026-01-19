@@ -160,6 +160,10 @@ function generateMockSlides(query, topicId, segmentId) {
  * - topicId (optional): Existing topic ID for follow-ups
  * - conversationHistory (optional): Previous conversation context
  * - clientId (optional): WebSocket client ID for progress updates
+ * - explanationLevel (optional): Level of explanation detail - 'simple', 'standard' (default), or 'deep'
+ *   - simple: Everyday language, analogies, shorter sentences, for curious beginners
+ *   - standard: Balanced with key concepts and some technical terms
+ *   - deep: Technical depth, proper terminology, comprehensive coverage
  *
  * Response:
  * - slides: Array of slide objects with id, imageUrl, audioUrl, subtitle, duration
@@ -168,7 +172,7 @@ function generateMockSlides(query, topicId, segmentId) {
  */
 router.post('/', async (req, res) => {
   try {
-    const { query, topicId, conversationHistory = [], clientId } = req.body
+    const { query, topicId, conversationHistory = [], clientId, explanationLevel = 'standard' } = req.body
 
     // F004: Sanitize and validate query input
     const { sanitized: sanitizedQuery, error: queryError } = sanitizeQuery(query)
@@ -211,7 +215,7 @@ router.post('/', async (req, res) => {
     let slides
 
     // F016 & F017: Use real Gemini AI for generation
-    console.log(`[Generate] Using Gemini AI for query: "${sanitizedQuery.substring(0, 50)}..."`)
+    console.log(`[Generate] Using Gemini AI for query: "${sanitizedQuery.substring(0, 50)}..." (level: ${explanationLevel})`)
 
     // F015: Send 'script_ready' progress - generating script
     if (clientId) {
@@ -224,7 +228,8 @@ router.post('/', async (req, res) => {
     // Step 1: Generate the script with slide content
     const scriptResult = await generateScript(sanitizedQuery, {
       conversationHistory,
-      isFollowUp: false
+      isFollowUp: false,
+      explanationLevel,
     })
 
     if (scriptResult.error || !scriptResult.slides) {
@@ -245,6 +250,7 @@ router.post('/', async (req, res) => {
         const content = await generateSlideContent(slideScript, {
           topic: topicMetadata.name,
           generateAudio: false,
+          explanationLevel,
         })
 
         // Log any errors but continue with partial content
@@ -319,6 +325,10 @@ router.post('/', async (req, res) => {
  * - topicId (required): Existing topic ID to append to
  * - conversationHistory (optional): Previous conversation context
  * - clientId (optional): WebSocket client ID for progress updates
+ * - explanationLevel (optional): Level of explanation detail - 'simple', 'standard' (default), or 'deep'
+ *   - simple: Everyday language, analogies, shorter sentences, for curious beginners
+ *   - standard: Balanced with key concepts and some technical terms
+ *   - deep: Technical depth, proper terminology, comprehensive coverage
  *
  * Response:
  * - slides: Array of new slide objects
@@ -326,7 +336,7 @@ router.post('/', async (req, res) => {
  */
 router.post('/follow-up', async (req, res) => {
   try {
-    const { query, topicId, conversationHistory = [], clientId } = req.body
+    const { query, topicId, conversationHistory = [], clientId, explanationLevel = 'standard' } = req.body
 
     // F004: Sanitize and validate query input
     const { sanitized: sanitizedQuery, error: queryError } = sanitizeQuery(query)
@@ -370,12 +380,13 @@ router.post('/follow-up', async (req, res) => {
 
     if (useRealAI) {
       // F016 & F017: Use real Gemini AI for follow-up generation
-      console.log(`[Generate] Using Gemini AI for follow-up: "${sanitizedQuery.substring(0, 50)}..."`)
+      console.log(`[Generate] Using Gemini AI for follow-up: "${sanitizedQuery.substring(0, 50)}..." (level: ${explanationLevel})`)
 
       // Generate script with conversation context for better follow-up
       const scriptResult = await generateScript(sanitizedQuery, {
         conversationHistory,
-        isFollowUp: true
+        isFollowUp: true,
+        explanationLevel,
       })
 
       if (scriptResult.error || !scriptResult.slides) {
@@ -395,6 +406,7 @@ router.post('/follow-up', async (req, res) => {
           const content = await generateSlideContent(slideScript, {
             topic: conversationHistory[0]?.topic || '',
             generateAudio: false,
+            explanationLevel,
           })
 
           if (content.errors.length > 0) {
@@ -478,7 +490,7 @@ router.post('/follow-up', async (req, res) => {
  */
 router.post('/engagement', async (req, res) => {
   try {
-    const { query } = req.body
+    const { query, explanationLevel = 'standard' } = req.body
 
     // F004: Sanitize and validate query input
     const { sanitized: sanitizedQuery, error: queryError } = sanitizeQuery(query)
@@ -489,7 +501,7 @@ router.post('/engagement', async (req, res) => {
       })
     }
 
-    const aiEngagement = await geminiGenerateEngagement(sanitizedQuery)
+    const aiEngagement = await geminiGenerateEngagement(sanitizedQuery, explanationLevel)
     const fallbackTopic = buildFallbackTopicName(sanitizedQuery)
 
     if (aiEngagement.error ||

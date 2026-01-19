@@ -797,6 +797,7 @@ function App() {
   const isMicEnabledRef = useRef(true)
   const allowAutoListenRef = useRef(true)
   const isRaiseHandPendingRef = useRef(false)
+  const selectedLevelRef = useRef(EXPLANATION_LEVEL.STANDARD)
 
   useEffect(() => {
     isListeningRef.current = isListening
@@ -813,6 +814,10 @@ function App() {
   useEffect(() => {
     isRaiseHandPendingRef.current = isRaiseHandPending
   }, [isRaiseHandPending])
+
+  useEffect(() => {
+    selectedLevelRef.current = selectedLevel
+  }, [selectedLevel])
 
   // Audio refs - these persist across renders without causing re-renders
   const audioContextRef = useRef(null)
@@ -1372,7 +1377,7 @@ function App() {
     fetch('/api/generate/engagement', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, explanationLevel: selectedLevelRef.current }),
       signal,
     })
       .then((res) => {
@@ -2672,7 +2677,7 @@ function App() {
       const engagementPromise = fetch('/api/generate/engagement', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: trimmedQuery }),
+        body: JSON.stringify({ query: trimmedQuery, explanationLevel: selectedLevelRef.current }),
         signal,
       })
         .then((res) => {
@@ -2734,7 +2739,7 @@ function App() {
             topicId: activeTopic.id,
             conversationHistory: [],
             clientId: wsClientId,
-            explanationLevel: activeTopic.explanationLevel || selectedLevel,
+            explanationLevel: activeTopic.explanationLevel || selectedLevelRef.current,
           }),
           signal,
         })
@@ -2771,7 +2776,7 @@ function App() {
             topicId: null,
             conversationHistory: [],
             clientId: wsClientId,
-            explanationLevel: selectedLevel,
+            explanationLevel: selectedLevelRef.current,
           }),
           signal,
         })
@@ -2857,7 +2862,7 @@ function App() {
           headerSlide: createHeaderSlide(newTopicData),
           slides: generateData.slides,
           suggestedQuestions, // Add suggestions for end-of-slideshow card
-          explanationLevel: selectedLevel, // Store the level used for this topic
+          explanationLevel: selectedLevelRef.current, // Store the level used for this topic
           createdAt: now,
           lastAccessedAt: now,
         }
@@ -3441,7 +3446,7 @@ function App() {
                         </span>
                       </div>
                     )}
-                    <p className="text-lg text-center max-h-20 overflow-hidden">
+                    <p className="text-base text-center line-clamp-5">
                       {visibleSlides[currentIndex]?.subtitle}
                     </p>
                   </div>
@@ -3567,7 +3572,7 @@ function App() {
 
             {/* Level indicator - shows current topic level, click to change for future questions */}
             {activeTopic && (
-              <div className="flex items-center gap-2 mt-4">
+              <div className="flex items-center gap-2 mt-4 mb-16">
                 <span className="text-xs text-gray-400">Level:</span>
                 <div className="flex gap-1">
                   {Object.entries(LEVEL_CONFIG).map(([level, config]) => {

@@ -263,3 +263,137 @@ subtitle: (slide.subtitle || '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([
 | `backend/src/index.js` | Server entry point |
 | `backend/src/routes/generate.js` | Generation API endpoints |
 | `backend/src/services/gemini.js` | Gemini AI integration |
+
+---
+
+## Session 4: 2026-01-19
+
+### Issue 1: Last Topic Auto-Selected on Refresh
+
+**Symptoms:**
+- When refreshing the app, the most bottom topic was always selected
+- Expected behavior: Start on HOME screen with no topic selected
+- This bypassed the new HOME screen with level selection
+
+**Root Cause:** Two problems in `frontend/src/App.jsx`:
+1. `activeTopicId` was initialized to the last topic's ID from localStorage
+2. A `useEffect` hook auto-selected a fallback topic when `activeTopicId` was null
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// BEFORE (broken):
+const [activeTopicId, setActiveTopicId] = useState(() => {
+  const storedTopics = localStorage.getItem('showme_topics')
+  if (storedTopics) {
+    const parsed = JSON.parse(storedTopics)
+    return parsed[parsed.length - 1]?.id || null  // Auto-selected last topic
+  }
+  return null
+})
+
+// AFTER (fixed):
+const [activeTopicId, setActiveTopicId] = useState(() => {
+  // Start with no active topic - user begins on HOME screen
+  return null
+})
+
+// Also fixed the useEffect that auto-selected fallback:
+useEffect(() => {
+  if (topics.length === 0) {
+    if (activeTopicId !== null) {
+      setActiveTopicId(null)
+      setCurrentIndex(0)
+    }
+    return
+  }
+  // Only check for stale topic ID if one was actually set
+  if (activeTopicId !== null) {  // Added this guard
+    const hasActive = topics.some((topic) => topic.id === activeTopicId)
+    if (!hasActive) {
+      const fallbackId = topics[topics.length - 1].id
+      setActiveTopicId(fallbackId)
+      setCurrentIndex(0)
+    }
+  }
+}, [topics, activeTopicId])
+```
+
+---
+
+### Issue 2: Level Selection Not Working (Stale Closure Bug)
+
+**Symptoms:**
+- User selected "Simple" level on HOME screen
+- After asking a question, content was generated at "Standard" level instead
+- Level indicator showed "Standard" during generation despite selecting "Simple"
+
+**Root Cause:** Classic React stale closure problem
+- `handleQuestion` was memoized with `useCallback` and captured `selectedLevel` at creation time
+- `handleVoiceComplete` called `handleQuestion` but still had the initial `selectedLevel` value ('standard')
+- Even though state updated, the closure never saw the new value
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// Added a ref to always have current value:
+const selectedLevelRef = useRef(EXPLANATION_LEVEL.STANDARD)
+
+useEffect(() => {
+  selectedLevelRef.current = selectedLevel
+}, [selectedLevel])
+
+// In handleQuestion and API calls, use the ref:
+explanationLevel: selectedLevelRef.current,  // Always current value
+
+// Instead of:
+explanationLevel: selectedLevel,  // Stale closure value
+```
+
+**Why refs work:** Refs are mutable objects that persist across renders. When you read `selectedLevelRef.current`, you always get the latest value, regardless of when the callback was created.
+
+---
+
+### Issue 3: Raise Hand Button Overlapping Level Selector
+
+**Symptoms:**
+- In SLIDESHOW state, the raise hand button overlapped with the level selector buttons
+- Level selector appeared at bottom of slideshow area
+- Raise hand button position conflicted with it
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// Added bottom margin to level indicator to create space:
+<div className="flex items-center gap-2 mt-4 mb-16">
+  {/* Level selector with icons */}
+</div>
+```
+
+The `mb-16` (4rem / 64px) provides clearance for the fixed-position raise hand button.
+
+---
+
+### Issue 4: Deep Mode Subtitles Overflow
+
+**Symptoms:**
+- In "Deep" explanation level, subtitles were longer and more detailed
+- Long subtitles overflowed the subtitle container area
+- Text got cut off without visual indication
+
+**Root Cause:**
+- Deep mode intentionally generates more comprehensive content
+- Original CSS used `max-h-20 overflow-hidden` which just cut off text
+- No ellipsis or indication that content was truncated
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// BEFORE (hard cutoff):
+<p className="text-base text-center max-h-20 overflow-hidden">
+  {visibleSlides[currentIndex]?.subtitle}
+</p>
+
+// AFTER (graceful truncation with ellipsis):
+<p className="text-base text-center line-clamp-5">
+  {visibleSlides[currentIndex]?.subtitle}
+</p>
+```
+
+Using `line-clamp-5` (Tailwind utility) limits to 5 lines with ellipsis indication when content is truncated. This preserves readability while handling Deep mode's longer explanations.

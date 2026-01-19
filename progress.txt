@@ -873,3 +873,118 @@ const logger = require('./utils/logger')
 - Fun facts refresh every 60 seconds during generation
 - Raise hand button uses emoji and stays centered on viewport changes
 - Slide persistence is more robust with fallbacks
+
+---
+
+## Session 14: Home Screen + Explanation Levels (2026-01-19)
+
+### Completed Features
+
+#### Home Screen with Level Selection - IMPLEMENTED
+- **New HOME UI state** as the app landing screen
+  - Replaces auto-listen behavior with intentional level selection
+  - Headline: "What do you want me to show you?" (ties into ShowMe brand)
+  - Subtext: "Tap a level and start talking"
+
+- **Three explanation levels**: Simple, Standard, Deep
+  - Simple 🌱: Everyday language, no jargon, analogies
+  - Standard 📚: Balanced with key concepts (default)
+  - Deep 🔬: Technical depth and nuance
+
+- **LevelCard component** (`frontend/src/components/LevelCard.jsx`)
+  - Voice-activated doorways - tap card to select level AND start listening
+  - Shows mic icon to indicate voice trigger
+  - Highlights selected level
+
+- **Text fallback** for non-voice users
+  - "can't talk? type here" link expands to text input
+  - Compact level toggle + text input + send button
+  - "Use voice instead" to return to voice mode
+
+#### Simplified LISTENING State - IMPLEMENTED
+- Removed redundant elements (greeting, examples, text box)
+- Now shows: level indicator, waveform, transcription status, cancel button
+- Clean, focused UI for voice input
+
+#### Level Storage Per-Topic - IMPLEMENTED
+- `explanationLevel` stored in topic object when created
+- Follow-up questions use topic's stored level
+- Level indicator in slideshow shows current topic's level
+- Clicking level buttons updates topic for future follow-ups
+
+#### Backend Level-Aware Prompts - IMPLEMENTED
+- **Simple level prompts**:
+  - "Use everyday language, no jargon"
+  - Analogies and relatable comparisons
+  - Fewer slides (3-4), simpler diagrams
+
+- **Standard level prompts**:
+  - Existing balanced behavior
+  - 3-5 slides based on complexity
+
+- **Deep level prompts**:
+  - Technical depth with proper terminology
+  - Comprehensive coverage, 4-6 slides
+  - Detailed diagrams with annotations
+
+#### Tangential Fun Facts - IMPLEMENTED
+- Fun facts now avoid spoiling main content
+- Generate historical origins, surprising applications, trivia instead
+- Level-aware complexity (simple facts for Simple mode)
+- Examples:
+  - Query: "How does WiFi work?"
+  - Old: "WiFi uses 2.4GHz frequencies..." (spoiler)
+  - New: "WiFi was partly invented by actress Hedy Lamarr" (tangential)
+
+### Bug Fixes
+
+1. **Last topic auto-selected on refresh** - Fixed
+   - Root cause: `activeTopicId` initialized to last topic, useEffect auto-selected fallback
+   - Fix: Initialize to `null`, treat `null` as valid HOME state
+
+2. **Stale closure with selectedLevel** - Fixed
+   - Root cause: `handleQuestion` captured initial `selectedLevel = 'standard'`
+   - Fix: Added `selectedLevelRef` to always read current value
+
+3. **Raise hand button overlapping level selector** - Fixed
+   - Added `mb-16` margin below level indicator
+
+4. **Subtitle overflow in Deep mode** - Fixed
+   - Changed from `max-h-20 overflow-hidden` to `line-clamp-5`
+   - Allows 5 lines of text for detailed explanations
+
+### Files Created
+- `frontend/src/components/LevelCard.jsx` - Level selection card component
+
+### Files Modified
+- `frontend/src/App.jsx`:
+  - Added HOME UI state and level selection
+  - Added `selectedLevel` state and `selectedLevelRef`
+  - Simplified LISTENING state
+  - Level indicator in slideshow
+  - Fixed activeTopicId initialization and useEffect
+
+- `backend/src/services/gemini.js`:
+  - Added `EXPLANATION_LEVEL_INSTRUCTIONS` constants
+  - Added `IMAGE_LEVEL_INSTRUCTIONS` constants
+  - Updated `generateScript` to accept and use `explanationLevel`
+  - Updated `generateEducationalImage` for level-specific diagrams
+  - Updated `generateEngagement` for tangential, level-aware fun facts
+
+- `backend/src/routes/generate.js`:
+  - Extract `explanationLevel` from request body
+  - Pass level to generation functions
+  - Updated `/api/generate/engagement` endpoint
+
+### Git Commits
+- 011591f: feat: add HOME screen with explanation level selection
+
+### Features Status
+- **Total Features**: 93 (previous 92 + level selection)
+- **Completed**: All level-related features implemented
+
+### Context for Next Agent
+- App now starts at HOME screen instead of auto-listening
+- Three explanation levels fully functional end-to-end
+- Fun facts are tangential (no spoilers) and level-aware
+- Level stored per-topic for consistent follow-ups

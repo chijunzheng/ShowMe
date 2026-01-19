@@ -342,12 +342,71 @@ export function isGeminiAvailable() {
 }
 
 /**
+ * Explanation level definitions for adjusting content complexity
+ * - simple: Everyday language, analogies, shorter sentences, for curious beginners
+ * - standard: Balanced with key concepts and some technical terms (default)
+ * - deep: Technical depth, proper terminology, comprehensive coverage
+ */
+const EXPLANATION_LEVEL_INSTRUCTIONS = {
+  simple: `
+EXPLANATION LEVEL: SIMPLE
+- Use everyday language that anyone can understand - avoid jargon completely
+- Explain concepts using analogies and relatable comparisons (e.g., "Think of it like...")
+- Keep sentences short and ideas simple
+- Like explaining to a curious friend or a younger person
+- Focus on the core "what" and "why" without technical details
+- Use concrete, familiar examples from daily life`,
+
+  standard: `
+EXPLANATION LEVEL: STANDARD
+- Use balanced language with key concepts and some technical terms
+- Include proper terminology but explain it when introduced
+- Suitable for general audiences (ages 10+)
+- Provide context and examples to support understanding`,
+
+  deep: `
+EXPLANATION LEVEL: DEEP
+- Provide technical depth and nuanced explanations
+- Use proper terminology throughout, with brief explanations for specialized terms
+- Include more detailed, comprehensive coverage of the topic
+- Cover underlying mechanisms, exceptions, and edge cases
+- For users who want thorough, expert-level understanding
+- Include relevant scientific or technical context where appropriate`,
+}
+
+/**
+ * Image style instructions for different explanation levels
+ */
+const IMAGE_LEVEL_INSTRUCTIONS = {
+  simple: `
+- Keep visuals very simple and uncluttered
+- Use fewer elements and larger text labels
+- Emphasize key concepts with simple icons or symbols
+- Avoid complex diagrams - prefer single-concept illustrations
+- Use bright, friendly colors`,
+
+  standard: `
+- Clean, professional educational illustration style
+- Moderate level of detail with clear labels
+- Use multiple elements if needed to explain the concept
+- Balance visual complexity with clarity`,
+
+  deep: `
+- Include more detailed and comprehensive diagrams
+- Show multiple components, relationships, or steps
+- Include technical labels and annotations
+- Can use more sophisticated visualization types (flowcharts, system diagrams)
+- Show interconnections and dependencies between elements`,
+}
+
+/**
  * Generate an educational script with slides based on a user query
  *
  * @param {string} query - The user's question or topic
  * @param {Object} options - Generation options
  * @param {Array} options.conversationHistory - Previous conversation context
  * @param {boolean} options.isFollowUp - Whether this is a follow-up question
+ * @param {string} options.explanationLevel - Level of explanation: 'simple', 'standard', or 'deep'
  * @returns {Promise<{slides: Array<{subtitle: string, imagePrompt: string}>, error: string|null}>}
  */
 async function generateScriptWithModel(ai, prompt, model, fallbackTopic) {
@@ -403,21 +462,39 @@ export async function generateScript(query, options = {}) {
     return { slides: null, error: 'API_NOT_AVAILABLE' }
   }
 
-  const { conversationHistory = [], isFollowUp = false } = options
+  const { conversationHistory = [], isFollowUp = false, explanationLevel = 'standard' } = options
+
+  // Validate and normalize explanation level
+  const validLevels = ['simple', 'standard', 'deep']
+  const normalizedLevel = validLevels.includes(explanationLevel) ? explanationLevel : 'standard'
+
+  // Get level-specific instructions
+  const levelInstructions = EXPLANATION_LEVEL_INSTRUCTIONS[normalizedLevel]
+  const imageLevelInstructions = IMAGE_LEVEL_INSTRUCTIONS[normalizedLevel]
+
+  // Adjust slide count guidance based on level
+  const slideCountGuidance = normalizedLevel === 'simple'
+    ? `- Create 3-4 content slides (keep it concise and digestible)`
+    : normalizedLevel === 'deep'
+    ? `- Create 4-6 content slides to cover the topic thoroughly:
+  - More slides allow for deeper exploration of each aspect`
+    : `- Create 3-5 content slides based on topic complexity:
+  - Simple concepts (definitions, basic facts): 3 slides
+  - Moderate topics (processes, comparisons): 4 slides
+  - Complex topics (multi-step systems, deep explanations): 5 slides`
 
   const systemPrompt = `You are an expert educational content creator for a visual learning app.
 Your task is to create a script for an educational slideshow that explains topics clearly.
+${levelInstructions}
 
 Guidelines:
-- Create 3-5 content slides based on topic complexity:
-  - Simple concepts (definitions, basic facts): 3 slides
-  - Moderate topics (processes, comparisons): 4 slides
-  - Complex topics (multi-step systems, deep explanations): 5 slides
+${slideCountGuidance}
 - Each slide should have a clear, concise explanation (2-3 sentences max)
 - Include an image prompt describing what educational diagram/visual should accompany each slide
-- Make content accessible for general audiences (ages 10+)
-- Use analogies and relatable examples when possible
 - For follow-up questions, build on previous context without repeating it
+
+IMAGE PROMPT STYLE:
+${imageLevelInstructions}
 
 IMPORTANT: Always end with a CONCLUSION slide that:
 - Summarizes 2-3 key takeaways from the explanation
@@ -473,6 +550,7 @@ Important: Image prompts should describe detailed educational diagrams with labe
  * @param {string} imagePrompt - Description of the image to generate
  * @param {Object} options - Generation options
  * @param {string} options.topic - The overall topic for context
+ * @param {string} options.explanationLevel - Level of visual complexity: 'simple', 'standard', or 'deep'
  * @returns {Promise<{imageUrl: string|null, error: string|null}>}
  */
 export async function generateEducationalImage(imagePrompt, options = {}) {
@@ -481,16 +559,20 @@ export async function generateEducationalImage(imagePrompt, options = {}) {
     return { imageUrl: null, error: 'API_NOT_AVAILABLE' }
   }
 
-  const { topic = '' } = options
+  const { topic = '', explanationLevel = 'standard' } = options
+
+  // Validate and normalize explanation level
+  const validLevels = ['simple', 'standard', 'deep']
+  const normalizedLevel = validLevels.includes(explanationLevel) ? explanationLevel : 'standard'
+
+  // Get level-specific image style instructions
+  const levelStyleInstructions = IMAGE_LEVEL_INSTRUCTIONS[normalizedLevel]
 
   // Enhance the prompt for better educational diagrams
   const enhancedPrompt = `Create an educational diagram illustration: ${imagePrompt}
 
 Style requirements:
-- Clean, professional educational illustration style
-- Bright, engaging colors suitable for learning
-- Clear labels and annotations where appropriate
-- Simple, uncluttered composition
+${levelStyleInstructions}
 - No photorealistic elements - use illustrated/diagrammatic style
 - White or light colored background for clarity
 ${topic ? `- Topic context: ${topic}` : ''}`
@@ -784,6 +866,9 @@ function pcmToWav(pcmData, sampleRate = 24000, numChannels = 1, bitsPerSample = 
  * @param {string} slideScript.subtitle - Text to be spoken
  * @param {string} slideScript.imagePrompt - Description for image generation
  * @param {Object} options - Generation options
+ * @param {boolean} options.generateAudio - Whether to generate TTS audio (default: true)
+ * @param {string} options.topic - The overall topic for context
+ * @param {string} options.explanationLevel - Level of visual complexity: 'simple', 'standard', or 'deep'
  * @returns {Promise<{imageUrl: string|null, audioUrl: string|null, duration: number, errors: Array}>}
  */
 export async function generateSlideContent(slideScript, options = {}) {
@@ -821,25 +906,47 @@ export async function generateSlideContent(slideScript, options = {}) {
  * Uses the text model to create relevant engagement content
  *
  * @param {string} query - The user's question
+ * @param {string} explanationLevel - The explanation level: 'simple', 'standard', or 'deep'
  * @returns {Promise<{funFact: Object|null, suggestedQuestions: Array|null, error: string|null}>}
  */
-export async function generateEngagement(query) {
+export async function generateEngagement(query, explanationLevel = 'standard') {
   const ai = getAIClient()
   if (!ai) {
     return { funFact: null, suggestedQuestions: null, error: 'API_NOT_AVAILABLE' }
   }
 
+  // Normalize level
+  const normalizedLevel = ['simple', 'standard', 'deep'].includes(explanationLevel)
+    ? explanationLevel
+    : 'standard'
+
+  // Level-specific instructions for fun facts
+  const levelInstructions = {
+    simple: `Use simple, everyday language. The fun fact should be easy to understand for anyone, like explaining to a curious friend. Avoid technical terms.`,
+    standard: `Use balanced language suitable for general audiences. Some terminology is okay if it's commonly known.`,
+    deep: `You can include technical details and precise terminology. The audience wants depth and nuance.`,
+  }
+
   const prompt = `Based on the user's question "${query}", provide:
-1. One surprising, fascinating fun fact that would engage learners
+1. One surprising, fascinating fun fact
 2. Three follow-up questions that would help deepen understanding
 
-The fun fact and questions MUST be directly related to the question. Avoid generic facts.
+IMPORTANT FOR FUN FACT:
+- Do NOT explain the core concept of the question - that will be covered in the main content
+- Instead, provide a TANGENTIAL fun fact: historical origin, surprising application, unusual connection, or interesting trivia
+- The fact should be related to the topic but reveal something unexpected, not explain the basics
+- Examples of good tangential facts:
+  * For "How does WiFi work?" → "WiFi was partly invented by actress Hedy Lamarr during WWII" (history, not how it works)
+  * For "What is DNA?" → "If you uncoiled all the DNA in your body, it would stretch to Pluto and back" (surprising scale, not what DNA does)
+  * For "How do airplanes fly?" → "The Wright brothers' first flight was shorter than a Boeing 747's wingspan" (comparison, not lift physics)
+
+${levelInstructions[normalizedLevel]}
 
 Output Format (JSON):
 {
   "funFact": {
     "emoji": "single relevant emoji",
-    "text": "The fun fact text (1-2 sentences)"
+    "text": "The tangential fun fact (1-2 sentences)"
   },
   "suggestedQuestions": [
     "Question 1?",
