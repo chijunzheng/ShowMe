@@ -805,6 +805,8 @@ function App() {
   const voiceAgentQueueRef = useRef([])
   const resumeListeningAfterVoiceAgentRef = useRef(false)
   const spokenFunFactRef = useRef(null)
+  // JIT TTS: Pre-fetched audio URLs keyed by queue item id
+  const prefetchedTtsRef = useRef(new Map())
   // Track which suggestions slide we've already spoken for (to avoid repeating)
   const spokenSuggestionsSlideRef = useRef(null)
 
@@ -1002,26 +1004,111 @@ function App() {
   }, [])
 
   /**
-   * Process queued voice-agent messages sequentially.
+   * Helper to fetch TTS audio for a queue item.
+   * Returns the audioUrl on success, or null on failure.
+   */
+  const fetchTtsForItem = useCallback(async (item) => {
+    // If item already has audio, return it
+    if (item.audioUrl) {
+      return item.audioUrl
+    }
+
+    // Check if we already pre-fetched for this item
+    const prefetched = prefetchedTtsRef.current.get(item.id)
+    if (prefetched) {
+      return prefetched
+    }
+
+    try {
+      const response = await fetch('/api/voice/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: item.text }),
+      })
+
+      if (!response.ok) {
+        logger.warn('AUDIO', 'Voice agent TTS request failed', {
+          status: response.status,
+          itemId: item.id,
+        })
+        return null
+      }
+
+      const data = await response.json()
+      if (!data?.audioUrl) {
+        return null
+      }
+
+      return data.audioUrl
+    } catch (error) {
+      logger.warn('AUDIO', 'Voice agent TTS fetch failed', {
+        error: error.message,
+        itemId: item.id,
+      })
+      return null
+    }
+  }, [])
+
+  /**
+   * JIT TTS: Pre-fetch audio for the next item in queue.
+   * Called when starting to play the current item.
+   */
+  const prefetchNextItemTts = useCallback(async (currentItemId) => {
+    const queue = voiceAgentQueueRef.current
+    const currentIndex = queue.findIndex((item) => item.id === currentItemId)
+    const nextItem = queue[currentIndex + 1]
+
+    if (!nextItem) {
+      return // No next item to prefetch
+    }
+
+    // Skip if next item already has audio or is already being prefetched
+    if (nextItem.audioUrl || prefetchedTtsRef.current.has(nextItem.id)) {
+      return
+    }
+
+    logger.info('AUDIO', 'JIT TTS: Pre-fetching audio for next item', {
+      nextItemId: nextItem.id,
+    })
+
+    const audioUrl = await fetchTtsForItem(nextItem)
+    if (audioUrl) {
+      // Store in prefetch cache - will be used when this item's turn comes
+      prefetchedTtsRef.current.set(nextItem.id, audioUrl)
+      logger.info('AUDIO', 'JIT TTS: Pre-fetch complete', {
+        nextItemId: nextItem.id,
+      })
+    }
+  }, [fetchTtsForItem])
+
+  /**
+   * Process queued voice-agent messages sequentially with JIT TTS.
+   * TTS is fetched for the NEXT item while the CURRENT item is playing,
+   * naturally staggering requests to avoid rate limits.
    */
   useEffect(() => {
     if (voiceAgentBusyRef.current || voiceAgentQueue.length === 0) {
       return
     }
 
-    const nextItem = voiceAgentQueue[0]
+    const currentItem = voiceAgentQueue[0]
 
     const finishItem = (success = true) => {
       setIsVoiceAgentSpeaking(false)
       voiceAgentBusyRef.current = false
       voiceAgentAudioRef.current = null
+
+      // Clean up prefetch cache for this item
+      prefetchedTtsRef.current.delete(currentItem.id)
+
       const shouldResumeListening = resumeListeningAfterVoiceAgentRef.current
       resumeListeningAfterVoiceAgentRef.current = false
+
       // Only call onComplete if playback succeeded (prevents infinite loop on 429)
-      if (success && nextItem.onComplete) {
-        nextItem.onComplete()
+      if (success && currentItem.onComplete) {
+        currentItem.onComplete()
       }
-      setVoiceAgentQueue((prev) => prev.filter((item) => item.id !== nextItem.id))
+      setVoiceAgentQueue((prev) => prev.filter((item) => item.id !== currentItem.id))
 
       if (
         shouldResumeListening &&
@@ -1047,45 +1134,41 @@ function App() {
         stopListeningRef.current?.()
       }
 
-      if (nextItem.waitForAudio) {
+      if (currentItem.waitForAudio) {
         await waitForActiveAudioToEnd()
       }
 
-      if (!voiceAgentQueueRef.current.some((item) => item.id === nextItem.id)) {
+      // Re-check that item is still in queue after waiting
+      if (!voiceAgentQueueRef.current.some((item) => item.id === currentItem.id)) {
         voiceAgentBusyRef.current = false
         return
       }
 
       try {
-        let audioUrl = nextItem.audioUrl
+        // Get audio URL: check prefetch cache first, then item's audioUrl, then fetch
+        let audioUrl = prefetchedTtsRef.current.get(currentItem.id)
+          || currentItem.audioUrl
 
-        // If no pre-generated audio, fetch from TTS endpoint
         if (!audioUrl) {
-          const response = await fetch('/api/voice/speak', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: nextItem.text }),
-          })
-
-          if (!response.ok) {
-            logger.warn('AUDIO', 'Voice agent TTS request failed', {
-              status: response.status,
-            })
-            finishItem(false) // Don't trigger onComplete on failure
-            return
-          }
-
-          const data = await response.json()
-          if (!data?.audioUrl) {
-            finishItem(false) // Don't trigger onComplete on failure
-            return
-          }
-          audioUrl = data.audioUrl
+          // Need to fetch TTS for current item (first item or prefetch failed)
+          audioUrl = await fetchTtsForItem(currentItem)
         }
+
+        if (!audioUrl) {
+          // TTS failed - skip this item
+          finishItem(false)
+          return
+        }
+
+        // Clean up prefetch cache entry now that we're using it
+        prefetchedTtsRef.current.delete(currentItem.id)
 
         const audio = new Audio(audioUrl)
         voiceAgentAudioRef.current = audio
         setIsVoiceAgentSpeaking(true)
+
+        // JIT TTS: Start pre-fetching the NEXT item's audio while this one plays
+        prefetchNextItemTts(currentItem.id)
 
         const handleDone = () => {
           finishItem()
@@ -1096,11 +1179,11 @@ function App() {
 
         audio.play().catch((error) => {
           logger.warn('AUDIO', 'Voice agent playback blocked', { error: error.message })
-          finishItem(false) // Don't trigger onComplete on failure
+          finishItem(false)
         })
       } catch (error) {
         logger.warn('AUDIO', 'Voice agent playback failed', { error: error.message })
-        finishItem(false) // Don't trigger onComplete on failure
+        finishItem(false)
       }
     }
 
@@ -1115,6 +1198,8 @@ function App() {
     allowAutoListen,
     isRaiseHandPending,
     isSlideNarrationPlaying,
+    fetchTtsForItem,
+    prefetchNextItemTts,
   ])
 
   /**

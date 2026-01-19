@@ -47,8 +47,8 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       // Allow scripts from self only
       scriptSrc: ["'self'"],
-      // Allow inline styles for Tailwind CSS (required for dynamic styles)
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      // Allow inline styles for Tailwind CSS and Google Fonts
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       // Allow images from self, data URIs (for base64), and placehold.co
       imgSrc: ["'self'", "data:", "https://placehold.co"],
       // Allow fonts from self and common CDNs
@@ -57,6 +57,8 @@ app.use(helmet({
       connectSrc: isProduction
         ? ["'self'", "wss://*.run.app"]
         : ["'self'", "ws://localhost:3002", "wss://localhost:3002"],
+      // Allow audio/video from self and data URIs (for base64 TTS audio)
+      mediaSrc: ["'self'", "data:", "blob:"],
       // Disallow object/embed/applet
       objectSrc: ["'none'"],
       // Only allow HTTPS for upgrades in production
