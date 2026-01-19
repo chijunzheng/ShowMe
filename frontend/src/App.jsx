@@ -6,6 +6,7 @@ import TopicHeader from './components/TopicHeader'
 import TopicSidebar from './components/TopicSidebar'
 import HighlightOverlay from './components/HighlightOverlay'
 import LevelCard from './components/LevelCard'
+import RegenerateDropdown from './components/RegenerateDropdown'
 import { useWebSocket, PROGRESS_TYPES } from './hooks/useWebSocket'
 import logger from './utils/logger'
 
@@ -64,13 +65,17 @@ const PERMISSION_STATE = {
 // Maximum number of topics with slides cached in memory (LRU eviction beyond this)
 const MAX_CACHED_TOPICS = 12
 
+// Maximum number of versions per topic to prevent unbounded storage growth
+const MAX_VERSIONS_PER_TOPIC = 5
+
 // CORE027: localStorage key for persisting topics across page refresh
 const TOPICS_STORAGE_KEY = 'showme_topics'
 // CORE027: localStorage key prefix for per-topic slide storage
 const TOPIC_SLIDES_STORAGE_PREFIX = 'showme_topic_slides_'
 
 // CORE027: Storage version for schema migration
-const TOPICS_STORAGE_VERSION = 2
+// Version 3 adds versions array support for regeneration feature
+const TOPICS_STORAGE_VERSION = 3
 const TOPIC_SLIDES_STORAGE_VERSION = 1
 
 // Default questions (fallback when API fails or rate limited)
@@ -136,9 +141,13 @@ const VOICE_AGENT_SCRIPT = {
 /**
  * Build a localStorage key for a topic's slide archive.
  * @param {string} topicId - Topic ID
+ * @param {string} [versionId] - Optional version ID for per-version storage
  * @returns {string} Storage key for topic slides
  */
-function getTopicSlidesStorageKey(topicId) {
+function getTopicSlidesStorageKey(topicId, versionId) {
+  if (versionId) {
+    return `${TOPIC_SLIDES_STORAGE_PREFIX}${topicId}_${versionId}`
+  }
   return `${TOPIC_SLIDES_STORAGE_PREFIX}${topicId}`
 }
 
@@ -172,8 +181,9 @@ function sanitizeSlidesForStorage(slides, topicId) {
  * Persist slides for a topic into localStorage.
  * @param {string} topicId - Topic ID
  * @param {Array} slides - Slide objects to store
+ * @param {string} [versionId] - Optional version ID for per-version storage
  */
-function persistTopicSlides(topicId, slides) {
+function persistTopicSlides(topicId, slides, versionId) {
   if (!topicId || !Array.isArray(slides)) {
     logger.warn('STORAGE', 'Cannot persist slides: invalid input', { topicId, slidesType: typeof slides })
     return false
@@ -195,9 +205,10 @@ function persistTopicSlides(topicId, slides) {
   }
 
   try {
-    localStorage.setItem(getTopicSlidesStorageKey(topicId), JSON.stringify(payload))
+    localStorage.setItem(getTopicSlidesStorageKey(topicId, versionId), JSON.stringify(payload))
     logger.debug('STORAGE', 'Slides persisted successfully', {
       topicId,
+      versionId,
       slidesCount: sanitizedSlides.length,
     })
     return true
@@ -205,11 +216,13 @@ function persistTopicSlides(topicId, slides) {
     if (error.name === 'QuotaExceededError') {
       logger.warn('STORAGE', 'Slides archive quota exceeded, skipping storage', {
         topicId,
+        versionId,
         slidesCount: sanitizedSlides.length,
       })
     } else {
       logger.error('STORAGE', 'Failed to persist topic slides', {
         topicId,
+        versionId,
         error: error.message,
       })
     }
@@ -220,13 +233,14 @@ function persistTopicSlides(topicId, slides) {
 /**
  * Load cached slides for a topic from localStorage.
  * @param {string} topicId - Topic ID
+ * @param {string} [versionId] - Optional version ID for per-version storage
  * @returns {Array|null} Slides array or null when unavailable
  */
-function loadTopicSlidesFromStorage(topicId) {
+function loadTopicSlidesFromStorage(topicId, versionId) {
   if (!topicId) return null
 
   try {
-    const stored = localStorage.getItem(getTopicSlidesStorageKey(topicId))
+    const stored = localStorage.getItem(getTopicSlidesStorageKey(topicId, versionId))
     if (!stored) return null
 
     const parsed = JSON.parse(stored)
@@ -250,6 +264,7 @@ function loadTopicSlidesFromStorage(topicId) {
   } catch (error) {
     logger.warn('STORAGE', 'Failed to load topic slides', {
       topicId,
+      versionId,
       error: error.message,
     })
     return null
@@ -346,6 +361,7 @@ function loadPersistedTopics() {
 
     const now = Date.now()
     const normalizedTopics = validTopics.map((topic) => {
+      // Handle legacy slides migration (v1->v2)
       if (Array.isArray(topic.slides) && topic.slides.length > 0) {
         // Legacy schema migration: move slides to per-topic storage
         persistTopicSlides(topic.id, topic.slides)
@@ -356,12 +372,34 @@ function loadPersistedTopics() {
         ? topic.lastAccessedAt
         : createdAt
 
+      // Migration to v3: Add versions array support
+      // If topic already has versions array, preserve it; otherwise create one
+      let versions = topic.versions
+      let currentVersionIndex = topic.currentVersionIndex ?? 0
+      const query = topic.query || topic.name // Use name as fallback query
+
+      if (!Array.isArray(versions) || versions.length === 0) {
+        // Migrate from non-versioned to versioned format
+        // Create initial version from existing data
+        versions = [{
+          id: `v_${topic.id}_${now}`,
+          explanationLevel: topic.explanationLevel || EXPLANATION_LEVEL.STANDARD,
+          slides: null, // Will be loaded from storage
+          createdAt: createdAt,
+        }]
+        currentVersionIndex = 0
+      }
+
       return {
         id: topic.id,
         name: topic.name,
         icon: topic.icon,
+        query, // Store original query for regeneration
         createdAt,
         lastAccessedAt,
+        versions,
+        currentVersionIndex,
+        // Keep slides at topic level for backward compatibility during transition
         slides: null,
         headerSlide: createHeaderSlide({
           id: topic.id,
@@ -380,8 +418,29 @@ function loadPersistedTopics() {
 
     const restoredTopics = normalizedTopics.map((topic) => {
       if (!cachedTopicIds.has(topic.id)) return topic
-      const cachedSlides = loadTopicSlidesFromStorage(topic.id)
-      return cachedSlides ? { ...topic, slides: cachedSlides } : topic
+
+      // Try to load slides for the current version first
+      const currentVersion = topic.versions?.[topic.currentVersionIndex]
+      let cachedSlides = null
+
+      if (currentVersion?.id) {
+        cachedSlides = loadTopicSlidesFromStorage(topic.id, currentVersion.id)
+      }
+
+      // Fall back to legacy topic-level storage if version-specific not found
+      if (!cachedSlides) {
+        cachedSlides = loadTopicSlidesFromStorage(topic.id)
+      }
+
+      if (cachedSlides) {
+        // Update the current version with loaded slides
+        const updatedVersions = topic.versions.map((v, idx) =>
+          idx === topic.currentVersionIndex ? { ...v, slides: cachedSlides } : v
+        )
+        return { ...topic, slides: cachedSlides, versions: updatedVersions }
+      }
+
+      return topic
     })
 
     if (restoredTopics.length > 0) {
@@ -423,8 +482,17 @@ function saveTopicsToStorage(topics) {
       id: topic.id,
       name: topic.name,
       icon: topic.icon,
+      query: topic.query, // Preserve original query for regeneration
       createdAt: topic.createdAt,
       lastAccessedAt: topic.lastAccessedAt,
+      // Store versions metadata (slides are persisted separately per version)
+      versions: (topic.versions || []).map((v) => ({
+        id: v.id,
+        explanationLevel: v.explanationLevel,
+        createdAt: v.createdAt,
+        // slides are loaded separately from per-topic storage
+      })),
+      currentVersionIndex: topic.currentVersionIndex ?? 0,
       // headerSlide and slides are reconstructed or loaded separately
     }))
 
@@ -464,8 +532,15 @@ function saveTopicsToStorage(topics) {
             id: topic.id,
             name: topic.name,
             icon: topic.icon,
+            query: topic.query,
             createdAt: topic.createdAt,
             lastAccessedAt: topic.lastAccessedAt,
+            versions: (topic.versions || []).map((v) => ({
+              id: v.id,
+              explanationLevel: v.explanationLevel,
+              createdAt: v.createdAt,
+            })),
+            currentVersionIndex: topic.currentVersionIndex ?? 0,
           })),
           savedAt: Date.now(),
         }
@@ -506,8 +581,53 @@ function createHeaderSlide(topic) {
 }
 
 /**
+ * Get slides from the current version of a topic.
+ * Falls back to topic.slides for backward compatibility.
+ * @param {Object|null} topic - Topic object with versions array
+ * @returns {Array} Slides for the current version
+ */
+function getCurrentVersionSlides(topic) {
+  if (!topic) return []
+
+  // Check if topic has versions array
+  if (topic.versions && topic.versions.length > 0) {
+    const versionIndex = topic.currentVersionIndex ?? 0
+    const currentVersion = topic.versions[versionIndex]
+    if (currentVersion && currentVersion.slides && currentVersion.slides.length > 0) {
+      return currentVersion.slides
+    }
+  }
+
+  // Fallback to topic-level slides for backward compatibility
+  return topic.slides || []
+}
+
+/**
+ * Get the current version's explanation level.
+ * Falls back to topic.explanationLevel or standard for backward compatibility.
+ * @param {Object|null} topic - Topic object with versions array
+ * @returns {string} Current explanation level
+ */
+function getCurrentVersionLevel(topic) {
+  if (!topic) return EXPLANATION_LEVEL.STANDARD
+
+  // Check if topic has versions array
+  if (topic.versions && topic.versions.length > 0) {
+    const versionIndex = topic.currentVersionIndex ?? 0
+    const currentVersion = topic.versions[versionIndex]
+    if (currentVersion && currentVersion.explanationLevel) {
+      return currentVersion.explanationLevel
+    }
+  }
+
+  // Fallback to topic-level explanationLevel
+  return topic.explanationLevel || EXPLANATION_LEVEL.STANDARD
+}
+
+/**
  * Build the slide list for a topic, including its header divider.
- * @param {Object|null} topic - Topic object with headerSlide and slides
+ * Uses the current version's slides if versions are available.
+ * @param {Object|null} topic - Topic object with headerSlide and versions
  * @returns {Array} Slides for the topic in display order
  */
 function buildTopicSlides(topic) {
@@ -517,9 +637,13 @@ function buildTopicSlides(topic) {
   if (headerSlide) {
     slides.push(headerSlide)
   }
-  if (topic.slides && topic.slides.length > 0) {
-    slides.push(...topic.slides)
+
+  // Get slides from current version (or fallback to topic.slides)
+  const versionSlides = getCurrentVersionSlides(topic)
+  if (versionSlides.length > 0) {
+    slides.push(...versionSlides)
   }
+
   // Add suggestions slide at the end if questions exist
   if (topic.suggestedQuestions && topic.suggestedQuestions.length > 0) {
     slides.push({
@@ -561,6 +685,10 @@ function App() {
   // Error handling state (F052)
   const [errorMessage, setErrorMessage] = useState('')
   const [lastFailedQuery, setLastFailedQuery] = useState('')
+
+  // Regeneration state - tracks if we're regenerating a topic at a different level
+  const [isRegenerating, setIsRegenerating] = useState(false)
+  const regeneratingTopicIdRef = useRef(null)
 
   // Generation timeout state (F053)
   const [isStillWorking, setIsStillWorking] = useState(false)
@@ -2855,16 +2983,26 @@ function App() {
       } else if (newTopicData && generateData.slides?.length > 0) {
         // F040: Create new topic with header card
         const now = Date.now()
+        const initialLevel = selectedLevelRef.current
         const newTopic = {
           id: newTopicData.id,
           name: newTopicData.name,
           icon: newTopicData.icon,
+          query: trimmedQuery, // Store original query for regeneration feature
           headerSlide: createHeaderSlide(newTopicData),
           slides: generateData.slides,
           suggestedQuestions, // Add suggestions for end-of-slideshow card
-          explanationLevel: selectedLevelRef.current, // Store the level used for this topic
+          explanationLevel: initialLevel, // Store the level used for this topic
           createdAt: now,
           lastAccessedAt: now,
+          // Initialize versions array with the first version
+          versions: [{
+            id: `v_${newTopicData.id}_${now}`,
+            explanationLevel: initialLevel,
+            slides: generateData.slides,
+            createdAt: now,
+          }],
+          currentVersionIndex: 0,
         }
 
         // F073: Log new topic creation
@@ -2875,7 +3013,9 @@ function App() {
           slidesCount: generateData.slides.length,
         })
 
-        persistTopicSlides(newTopic.id, newTopic.slides)
+        // Persist slides with the initial version ID
+        const initialVersionId = newTopic.versions[0].id
+        persistTopicSlides(newTopic.id, newTopic.slides, initialVersionId)
 
         // Add the new topic
         setTopics((prev) => pruneSlideCache([newTopic, ...prev], newTopic.id))
@@ -3045,6 +3185,245 @@ function App() {
 
     logger.info('STATE', 'Topic deleted', { topicId })
   }, [activeTopicId, topics])
+
+  /**
+   * Handle regeneration of a topic at a different explanation level.
+   * Creates a new version with the regenerated slides while preserving previous versions.
+   * @param {string} level - The explanation level to regenerate at
+   */
+  const handleRegenerate = useCallback(async (level) => {
+    if (!activeTopic || !activeTopic.query || isRegenerating) {
+      logger.warn('REGENERATE', 'Cannot regenerate: missing topic, query, or already regenerating')
+      return
+    }
+
+    const topicId = activeTopic.id
+    const query = activeTopic.query
+
+    logger.info('REGENERATE', 'Starting regeneration', {
+      topicId,
+      query,
+      newLevel: level,
+      currentLevel: getCurrentVersionLevel(activeTopic),
+    })
+
+    setIsRegenerating(true)
+    regeneratingTopicIdRef.current = topicId
+
+    // Create abort controller for this request
+    const abortController = new AbortController()
+    const signal = abortController.signal
+
+    try {
+      // Call the generate API with the new level
+      logger.time('API', 'regenerate-request')
+      logger.info('API', 'POST /api/generate (regenerate)', {
+        endpoint: '/api/generate',
+        method: 'POST',
+        topicId,
+        level,
+      })
+
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          topicId: null, // Treat as new generation for the topic
+          conversationHistory: [],
+          clientId: wsClientId,
+          explanationLevel: level,
+        }),
+        signal,
+      })
+
+      logger.timeEnd('API', 'regenerate-request')
+      logger.info('API', 'Regenerate response received', {
+        status: response.status,
+      })
+
+      if (!response.ok) {
+        throw new Error(`Regenerate API failed: ${response.status}`)
+      }
+
+      const generateData = await response.json()
+
+      // Verify the topic hasn't changed during regeneration
+      if (regeneratingTopicIdRef.current !== topicId) {
+        logger.warn('REGENERATE', 'Topic changed during regeneration, discarding results')
+        return
+      }
+
+      if (!generateData.slides || generateData.slides.length === 0) {
+        logger.warn('REGENERATE', 'No slides returned from regeneration')
+        setIsRegenerating(false)
+        regeneratingTopicIdRef.current = null
+        return
+      }
+
+      // Create new version with the regenerated slides
+      const now = Date.now()
+      const newVersion = {
+        id: `v_${topicId}_${now}`,
+        explanationLevel: level,
+        slides: generateData.slides,
+        createdAt: now,
+      }
+
+      // Update the topic with the new version
+      setTopics((prev) => {
+        return prev.map((topic) => {
+          if (topic.id !== topicId) return topic
+
+          // Get existing versions or create array with current slides as v1
+          let versions = topic.versions ? [...topic.versions] : []
+
+          // If no versions exist, create initial version from current slides
+          if (versions.length === 0 && topic.slides && topic.slides.length > 0) {
+            versions.push({
+              id: `v_${topicId}_initial`,
+              explanationLevel: topic.explanationLevel || EXPLANATION_LEVEL.STANDARD,
+              slides: topic.slides,
+              createdAt: topic.createdAt || now,
+            })
+          }
+
+          // Add the new version
+          versions.push(newVersion)
+
+          // Enforce max versions limit (remove oldest, keeping most recent)
+          if (versions.length > MAX_VERSIONS_PER_TOPIC) {
+            versions = versions.slice(-MAX_VERSIONS_PER_TOPIC)
+          }
+
+          // Set the new version as current (last index)
+          const newVersionIndex = versions.length - 1
+
+          logger.info('REGENERATE', 'Created new version', {
+            topicId,
+            versionId: newVersion.id,
+            level,
+            totalVersions: versions.length,
+            newVersionIndex,
+          })
+
+          return {
+            ...topic,
+            versions,
+            currentVersionIndex: newVersionIndex,
+            // Also update topic-level slides for backward compatibility
+            slides: generateData.slides,
+            explanationLevel: level,
+            lastAccessedAt: now,
+          }
+        })
+      })
+
+      // Persist the new slides with version ID for version-specific storage
+      persistTopicSlides(topicId, generateData.slides, newVersion.id)
+
+      // Reset to first slide (header) to show the new version
+      setCurrentIndex(0)
+
+      // Show success toast
+      setToast({
+        visible: true,
+        message: `Regenerated as ${LEVEL_CONFIG[level]?.title || level}`,
+      })
+
+      logger.info('REGENERATE', 'Regeneration complete', {
+        topicId,
+        newSlidesCount: generateData.slides.length,
+      })
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        logger.debug('REGENERATE', 'Regeneration aborted')
+      } else {
+        logger.error('REGENERATE', 'Regeneration failed', {
+          error: error.message,
+        })
+        setToast({
+          visible: true,
+          message: 'Failed to regenerate. Please try again.',
+        })
+      }
+    } finally {
+      setIsRegenerating(false)
+      regeneratingTopicIdRef.current = null
+    }
+  }, [activeTopic, isRegenerating, wsClientId])
+
+  /**
+   * Handle switching to a different version of the current topic.
+   * Loads slides from storage if not available in memory.
+   * @param {number} versionIndex - Index of the version to switch to
+   */
+  const handleVersionSwitch = useCallback((versionIndex) => {
+    if (!activeTopic) return
+
+    const versions = activeTopic.versions || []
+    if (versionIndex < 0 || versionIndex >= versions.length) {
+      logger.warn('VERSION', 'Invalid version index', { versionIndex, totalVersions: versions.length })
+      return
+    }
+
+    const targetVersion = versions[versionIndex]
+    logger.info('VERSION', 'Switching version', {
+      topicId: activeTopic.id,
+      fromIndex: activeTopic.currentVersionIndex,
+      toIndex: versionIndex,
+      level: targetVersion.explanationLevel,
+    })
+
+    // Load slides from storage if not available in memory
+    let slides = targetVersion.slides
+    if (!slides || slides.length === 0) {
+      const cachedSlides = loadTopicSlidesFromStorage(activeTopic.id, targetVersion.id)
+      if (cachedSlides) {
+        slides = cachedSlides
+        logger.debug('VERSION', 'Loaded slides from storage', {
+          topicId: activeTopic.id,
+          versionId: targetVersion.id,
+          slidesCount: slides.length,
+        })
+      } else {
+        logger.warn('VERSION', 'No slides found for version', {
+          topicId: activeTopic.id,
+          versionId: targetVersion.id,
+        })
+        // Show toast to inform user
+        setToast({
+          visible: true,
+          message: 'Version slides not available. Try regenerating.',
+        })
+        return
+      }
+    }
+
+    setTopics((prev) => {
+      return prev.map((topic) => {
+        if (topic.id !== activeTopic.id) return topic
+
+        // Update the version's slides in memory if we loaded from storage
+        const updatedVersions = topic.versions.map((v, idx) =>
+          idx === versionIndex ? { ...v, slides } : v
+        )
+
+        return {
+          ...topic,
+          versions: updatedVersions,
+          currentVersionIndex: versionIndex,
+          // Update topic-level fields for backward compatibility
+          slides,
+          explanationLevel: targetVersion.explanationLevel,
+          lastAccessedAt: Date.now(),
+        }
+      })
+    })
+
+    // Reset to first slide when switching versions
+    setCurrentIndex(0)
+  }, [activeTopic])
 
   /**
    * CORE022: Handle resuming from an interrupt point
@@ -3570,39 +3949,83 @@ function App() {
               </p>
             )}
 
-            {/* Level indicator - shows current topic level, click to change for future questions */}
+            {/* Level indicator with regenerate button and version switcher */}
             {activeTopic && (
-              <div className="flex items-center gap-2 mt-4 mb-16">
-                <span className="text-xs text-gray-400">Level:</span>
-                <div className="flex gap-1">
-                  {Object.entries(LEVEL_CONFIG).map(([level, config]) => {
-                    const isCurrentLevel = (activeTopic.explanationLevel || EXPLANATION_LEVEL.STANDARD) === level
-                    return (
-                      <button
-                        key={level}
-                        onClick={() => {
-                          // Update the topic's level for future follow-ups
-                          setTopics(prev => prev.map(t =>
-                            t.id === activeTopic.id
-                              ? { ...t, explanationLevel: level }
-                              : t
-                          ))
-                          setSelectedLevel(level)
-                        }}
-                        className={`
-                          px-2 py-1 text-xs rounded-full transition-all
-                          ${isCurrentLevel
-                            ? 'bg-primary text-white'
-                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                          }
-                        `}
-                        title={config.description}
-                      >
-                        {config.icon} {config.title}
-                      </button>
-                    )
-                  })}
+              <div className="flex flex-col items-center gap-3 mt-4 mb-16">
+                {/* Current level indicator with regenerate dropdown */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400">Level:</span>
+                  <span className={`
+                    px-2 py-1 text-xs rounded-full bg-primary text-white
+                  `}>
+                    {LEVEL_CONFIG[getCurrentVersionLevel(activeTopic)]?.icon}{' '}
+                    {LEVEL_CONFIG[getCurrentVersionLevel(activeTopic)]?.title}
+                  </span>
+                  {/* Regenerate dropdown */}
+                  <RegenerateDropdown
+                    levelConfig={LEVEL_CONFIG}
+                    currentLevel={getCurrentVersionLevel(activeTopic)}
+                    onRegenerate={handleRegenerate}
+                    isRegenerating={isRegenerating}
+                    disabled={!activeTopic.query}
+                  />
                 </div>
+
+                {/* Version switcher - only shown when multiple versions exist */}
+                {activeTopic.versions && activeTopic.versions.length > 1 && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-gray-400 mr-1">Versions:</span>
+                    {activeTopic.versions.map((version, index) => {
+                      const isActive = (activeTopic.currentVersionIndex ?? 0) === index
+                      const levelConfig = LEVEL_CONFIG[version.explanationLevel] || LEVEL_CONFIG[EXPLANATION_LEVEL.STANDARD]
+                      return (
+                        <button
+                          key={version.id}
+                          onClick={() => handleVersionSwitch(index)}
+                          className={`
+                            px-2 py-1 text-xs rounded-md transition-all
+                            flex items-center gap-1
+                            ${isActive
+                              ? 'bg-primary/10 text-primary border border-primary/30'
+                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200 border border-transparent'
+                            }
+                          `}
+                          title={`${levelConfig.title} - ${new Date(version.createdAt).toLocaleString()}`}
+                        >
+                          <span>{levelConfig.icon}</span>
+                          <span className="hidden sm:inline">{levelConfig.title}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* Regenerating indicator */}
+                {isRegenerating && (
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <svg
+                      className="w-3 h-3 animate-spin"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                    <span>Regenerating slides...</span>
+                  </div>
+                )}
               </div>
             )}
           </div>

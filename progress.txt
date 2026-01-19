@@ -988,3 +988,99 @@ const logger = require('./utils/logger')
 - Three explanation levels fully functional end-to-end
 - Fun facts are tangential (no spoilers) and level-aware
 - Level stored per-topic for consistent follow-ups
+
+---
+
+## Session 15: Regenerate with Versions (2026-01-19)
+
+### Feature: Regenerate Slides at Different Levels with Version History
+
+Implemented a Git-like version branching system for slide regeneration:
+
+#### UI Components
+
+1. **RegenerateDropdown** (`frontend/src/components/RegenerateDropdown.jsx`)
+   - Circular arrow (↻) icon button next to level indicator
+   - Dropdown menu with "Regenerate as" header
+   - Shows all 3 levels (Simple/Standard/Deep) with icons
+   - Current level marked with "current" badge and checkmark
+   - Loading spinner during regeneration
+   - Opens upward and centered to avoid page overflow
+
+2. **Version Switcher**
+   - Horizontal pills below level indicator (only shown when >1 version exists)
+   - Each pill shows level icon + title (e.g., `🌱 Simple`)
+   - Active version highlighted with primary color border
+   - Tooltip shows level name and creation timestamp
+
+#### Data Model Changes
+
+Updated topic structure to support versions:
+```javascript
+{
+  id: 'topic_xxx',
+  name: 'How does WiFi work?',
+  query: 'How does WiFi work?',  // Original query for regeneration
+  currentVersionIndex: 0,
+  versions: [
+    {
+      id: 'v_xxx',
+      explanationLevel: 'standard',
+      slides: [...],
+      createdAt: Date.now()
+    }
+  ]
+}
+```
+
+#### Key Implementation Details
+
+- **MAX_VERSIONS_PER_TOPIC = 5**: Prevents unbounded storage growth
+- **Per-version slide storage**: Each version's slides stored separately in localStorage
+- **Version switching**: Loads slides from storage, updates currentVersionIndex
+- **Legacy migration**: Existing topics automatically converted to version format
+
+#### Handlers Added
+
+1. `handleRegenerate(newLevel)`:
+   - Calls `/api/generate` with original query + new level
+   - Creates new version with regenerated slides
+   - Enforces max versions limit (removes oldest)
+   - Persists slides with version-specific storage key
+   - Shows toast notification on success/error
+
+2. `handleVersionSwitch(versionIndex)`:
+   - Validates version index
+   - Loads slides from storage if not in memory
+   - Updates currentVersionIndex and topic-level slides
+   - Falls back gracefully if slides unavailable
+
+3. `getCurrentVersionSlides(topic)` / `getCurrentVersionLevel(topic)`:
+   - Helper functions to read from current version
+
+### Files Created
+- `frontend/src/components/RegenerateDropdown.jsx` - Dropdown component for level selection
+
+### Files Modified
+- `frontend/src/App.jsx`:
+  - Added `MAX_VERSIONS_PER_TOPIC` constant
+  - Updated topic creation to include `query` and `versions` array
+  - Added `handleRegenerate` and `handleVersionSwitch` functions
+  - Added `getCurrentVersionSlides` and `getCurrentVersionLevel` helpers
+  - Updated `visibleSlides` to read from current version
+  - Added version switcher UI in SLIDESHOW state
+  - Updated storage functions for per-version persistence
+  - Bumped `TOPICS_STORAGE_VERSION` to 3 for schema migration
+
+### Bug Fixes
+- **Dropdown overflow**: Fixed dropdown opening off-page by changing to upward + centered positioning
+
+### Features Status
+- **Total Features**: 94 (previous 93 + regenerate with versions)
+- **Completed**: Regenerate dropdown, version history, version switching
+
+### Context for Next Agent
+- Users can regenerate any topic at a different explanation level
+- Previous versions are preserved (up to 5 per topic)
+- Version switcher appears automatically when multiple versions exist
+- Original query stored in topic for regeneration

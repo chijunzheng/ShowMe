@@ -397,3 +397,32 @@ The `mb-16` (4rem / 64px) provides clearance for the fixed-position raise hand b
 ```
 
 Using `line-clamp-5` (Tailwind utility) limits to 5 lines with ellipsis indication when content is truncated. This preserves readability while handling Deep mode's longer explanations.
+
+---
+
+### Issue 5: RegenerateDropdown Overflows Page
+
+**Symptoms:**
+- Clicking the regenerate (↻) button opened a dropdown that went off the right edge of the page
+- Dropdown also extended below the visible area
+- Content was cut off and inaccessible
+
+**Root Cause:**
+- Dropdown positioned with `right-0 mt-2` (align right, open downward)
+- At the bottom-center of the screen, this caused overflow in both directions
+- No consideration for viewport boundaries
+
+**Fix Applied:** `frontend/src/components/RegenerateDropdown.jsx`
+```javascript
+// BEFORE (overflows page):
+className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg..."
+
+// AFTER (centered and opens upward):
+className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-white rounded-lg shadow-lg..."
+```
+
+**Key Changes:**
+- `right-0` → `left-1/2 -translate-x-1/2`: Centers dropdown horizontally relative to button
+- `mt-2` → `bottom-full mb-2`: Opens upward instead of downward
+
+This positioning ensures the dropdown stays within viewport bounds when the button is near the bottom of the screen.
