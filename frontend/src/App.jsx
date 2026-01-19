@@ -5,15 +5,43 @@ import Toast from './components/Toast'
 import TopicHeader from './components/TopicHeader'
 import TopicSidebar from './components/TopicSidebar'
 import HighlightOverlay from './components/HighlightOverlay'
+import LevelCard from './components/LevelCard'
 import { useWebSocket, PROGRESS_TYPES } from './hooks/useWebSocket'
 import logger from './utils/logger'
 
 // App states
 const UI_STATE = {
+  HOME: 'home',
   LISTENING: 'listening',
   GENERATING: 'generating',
   SLIDESHOW: 'slideshow',
   ERROR: 'error',
+}
+
+// Explanation level options
+const EXPLANATION_LEVEL = {
+  SIMPLE: 'simple',
+  STANDARD: 'standard',
+  DEEP: 'deep',
+}
+
+// Level card configuration
+const LEVEL_CONFIG = {
+  [EXPLANATION_LEVEL.SIMPLE]: {
+    icon: '🌱',
+    title: 'Simple',
+    description: 'Everyday language, no jargon',
+  },
+  [EXPLANATION_LEVEL.STANDARD]: {
+    icon: '📚',
+    title: 'Standard',
+    description: 'Balanced with key concepts',
+  },
+  [EXPLANATION_LEVEL.DEEP]: {
+    icon: '🔬',
+    title: 'Deep',
+    description: 'Technical depth and nuance',
+  },
 }
 
 // Generation timeout configuration (F053)
@@ -509,11 +537,15 @@ function App() {
   // This uses a lazy initializer to only run once on mount
   const [initialData] = useState(() => loadPersistedTopics())
 
-  const [uiState, setUiState] = useState(UI_STATE.LISTENING)
+  const [uiState, setUiState] = useState(UI_STATE.HOME)
   // CORE027: isColdStart is false if we restored topics from localStorage
   const [isColdStart, setIsColdStart] = useState(() => !initialData.hadPersistedData)
   // Random greeting picked once per session for variety
   const [displayGreeting] = useState(() => DISPLAY_GREETINGS[Math.floor(Math.random() * DISPLAY_GREETINGS.length)])
+  // Selected explanation level (session default, also stored per-topic)
+  const [selectedLevel, setSelectedLevel] = useState(EXPLANATION_LEVEL.STANDARD)
+  // Show text input fallback on home screen
+  const [showTextFallback, setShowTextFallback] = useState(false)
   // Dynamic suggested questions - fetched from API based on topic history
   const [suggestedQuestions, setSuggestedQuestions] = useState(DEFAULT_QUESTIONS)
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
@@ -628,21 +660,18 @@ function App() {
    */
   const [topics, setTopics] = useState(() => initialData.topics)
   const [activeTopicId, setActiveTopicId] = useState(() => {
-    if (initialData.topics.length === 0) return null
-    return initialData.topics[initialData.topics.length - 1].id
+    // Start with no active topic - user begins on HOME screen
+    // Topic becomes active when user views its slides or creates new content
+    return null
   })
 
   /**
    * Get the currently active topic (selected for viewing/follow-ups)
-   * Defaults to the most recently added topic when no selection exists.
+   * Returns null when no topic is selected (e.g., on HOME screen)
    */
   const activeTopic = useMemo(() => {
-    if (topics.length === 0) return null
-    if (activeTopicId) {
-      const match = topics.find((topic) => topic.id === activeTopicId)
-      if (match) return match
-    }
-    return topics[topics.length - 1]
+    if (topics.length === 0 || !activeTopicId) return null
+    return topics.find((topic) => topic.id === activeTopicId) || null
   }, [topics, activeTopicId])
 
   /**
@@ -690,6 +719,8 @@ function App() {
 
   /**
    * Keep the active topic aligned when topics change.
+   * Only auto-select fallback if activeTopicId was set to a value that no longer exists.
+   * Do NOT auto-select if activeTopicId is intentionally null (HOME screen).
    */
   useEffect(() => {
     if (topics.length === 0) {
@@ -700,10 +731,13 @@ function App() {
       return
     }
 
-    const hasActive = activeTopicId && topics.some((topic) => topic.id === activeTopicId)
-    if (!hasActive) {
-      const fallbackId = topics[topics.length - 1].id
-      if (fallbackId !== activeTopicId) {
+    // Only check for stale topic ID if one was actually set
+    // null is a valid state meaning "no topic selected" (HOME screen)
+    if (activeTopicId !== null) {
+      const hasActive = topics.some((topic) => topic.id === activeTopicId)
+      if (!hasActive) {
+        // The active topic was deleted - fall back to most recent
+        const fallbackId = topics[topics.length - 1].id
         setActiveTopicId(fallbackId)
         setCurrentIndex(0)
       }
@@ -2014,6 +2048,7 @@ function App() {
 
   /**
    * Auto-start listening when enabled and no narration is playing.
+   * Skip auto-listen on HOME screen - user must explicitly select a level.
    */
   useEffect(() => {
     if (!allowAutoListen || !isMicEnabled) return
@@ -2021,7 +2056,7 @@ function App() {
     if (isListening || isRaiseHandPending || isVoiceAgentSpeaking || isSlideNarrationPlaying) return
     if (voiceAgentQueue.length > 0) return
     if (isProcessingRecordingRef.current) return
-    if (uiState === UI_STATE.ERROR) return
+    if (uiState === UI_STATE.ERROR || uiState === UI_STATE.HOME) return
 
     startListening()
   }, [
@@ -2699,6 +2734,7 @@ function App() {
             topicId: activeTopic.id,
             conversationHistory: [],
             clientId: wsClientId,
+            explanationLevel: activeTopic.explanationLevel || selectedLevel,
           }),
           signal,
         })
@@ -2735,6 +2771,7 @@ function App() {
             topicId: null,
             conversationHistory: [],
             clientId: wsClientId,
+            explanationLevel: selectedLevel,
           }),
           signal,
         })
@@ -2820,6 +2857,7 @@ function App() {
           headerSlide: createHeaderSlide(newTopicData),
           slides: generateData.slides,
           suggestedQuestions, // Add suggestions for end-of-slideshow card
+          explanationLevel: selectedLevel, // Store the level used for this topic
           createdAt: now,
           lastAccessedAt: now,
         }
@@ -2888,14 +2926,16 @@ function App() {
 
   /**
    * Handle "New Topic" button click from sidebar (CORE017)
-   * Returns to listening state to start a fresh topic
+   * Returns to home state to select level and start fresh topic
    */
   const handleNewTopic = useCallback(() => {
-    // Transition to listening state to start fresh
-    setUiState(UI_STATE.LISTENING)
+    // Transition to home state to select level
+    setUiState(UI_STATE.HOME)
+    setActiveTopicId(null) // Clear selection - no topic active on HOME
     setLiveTranscription('')
     setTextInput('')
     setEngagement(null)
+    setShowTextFallback(false)
     // Don't reset cold start flag - that's for first-time users only
   }, [])
 
@@ -2991,9 +3031,9 @@ function App() {
         setActiveTopicId(sortedByAccess[0].id)
         setCurrentIndex(0)
       } else {
-        // No topics left, go to listening state
+        // No topics left, go to home state
         setActiveTopicId(null)
-        setUiState(UI_STATE.LISTENING)
+        setUiState(UI_STATE.HOME)
         setIsColdStart(true)
       }
     }
@@ -3081,13 +3121,135 @@ function App() {
       `}>
         {/* F055: max-width 800px centered on desktop, F056: full-width on mobile */}
         <main className="w-full max-w-4xl mx-auto">
+        {/* HOME screen - level selection + voice trigger */}
+        {uiState === UI_STATE.HOME && (
+          <div className="flex flex-col items-center gap-8 px-4 md:px-0 animate-fade-in">
+            {/* Headline */}
+            <div className="text-center">
+              <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
+                What do you want me to show you?
+              </h1>
+              <p className="text-gray-500">
+                Tap a level and start talking
+              </p>
+            </div>
+
+            {/* Level cards */}
+            <div className="w-full max-w-md space-y-3">
+              {Object.entries(LEVEL_CONFIG).map(([level, config], index) => (
+                <div
+                  key={level}
+                  className="animate-fade-in"
+                  style={{ animationDelay: `${index * 80}ms` }}
+                >
+                  <LevelCard
+                    level={level}
+                    icon={config.icon}
+                    title={config.title}
+                    description={config.description}
+                    isSelected={selectedLevel === level}
+                    onClick={() => {
+                      setSelectedLevel(level)
+                      setShowTextFallback(false)
+                      setUiState(UI_STATE.LISTENING)
+                      // startListening will be triggered by auto-listen effect
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* Text fallback */}
+            {!showTextFallback ? (
+              <button
+                onClick={() => setShowTextFallback(true)}
+                className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                can't talk? type here
+              </button>
+            ) : (
+              <div className="w-full max-w-md space-y-3 animate-fade-in">
+                {/* Compact level toggle for text mode */}
+                <div className="flex justify-center gap-2">
+                  {Object.entries(LEVEL_CONFIG).map(([level, config]) => (
+                    <button
+                      key={level}
+                      onClick={() => setSelectedLevel(level)}
+                      className={`
+                        px-3 py-1.5 text-sm rounded-full transition-all
+                        ${selectedLevel === level
+                          ? 'bg-primary text-white'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }
+                      `}
+                    >
+                      {config.icon} {config.title}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Text input with send button */}
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    if (textInput.trim()) {
+                      handleQuestion(textInput.trim())
+                      setTextInput('')
+                      setShowTextFallback(false)
+                    }
+                  }}
+                  className="flex gap-2"
+                >
+                  <input
+                    type="text"
+                    value={textInput}
+                    onChange={(e) => setTextInput(e.target.value)}
+                    placeholder="Type your question..."
+                    className="flex-1 px-4 py-3 min-h-[48px] border border-gray-200 rounded-xl focus:border-primary focus:outline-none"
+                    autoFocus
+                  />
+                  <button
+                    type="submit"
+                    disabled={!textInput.trim()}
+                    className={`
+                      px-4 py-3 rounded-xl transition-all
+                      ${textInput.trim()
+                        ? 'bg-primary text-white hover:bg-primary/90'
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      }
+                    `}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
+                  </button>
+                </form>
+
+                {/* Back to voice */}
+                <button
+                  onClick={() => setShowTextFallback(false)}
+                  className="w-full text-sm text-primary hover:text-primary/80 transition-colors"
+                >
+                  🎤 Use voice instead
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {uiState === UI_STATE.LISTENING && (
           <div className="flex flex-col items-center gap-6 px-4 md:px-0 animate-fade-in">
+            {/* Level indicator - shows what mode they're in */}
+            <div className="flex items-center gap-2 text-sm text-gray-500">
+              <span>{LEVEL_CONFIG[selectedLevel]?.icon}</span>
+              <span>{LEVEL_CONFIG[selectedLevel]?.title} mode</span>
+            </div>
+
             {/* Waveform visualization - responds to audio input when listening */}
-            <div className="flex items-center justify-center gap-1 h-16">
+            <div className="flex items-center justify-center gap-1 h-24">
               {[...Array(AUDIO_CONFIG.WAVEFORM_BARS)].map((_, i) => {
-                const baseHeight = 10
-                const maxAdditionalHeight = 50
+                const baseHeight = 12
+                const maxAdditionalHeight = 60
                 const middleIndex = AUDIO_CONFIG.WAVEFORM_BARS / 2
                 const distanceFromMiddle = Math.abs(i - middleIndex)
                 const positionFactor = 1 - (distanceFromMiddle / middleIndex) * 0.5
@@ -3103,68 +3265,47 @@ function App() {
                 return (
                   <div
                     key={i}
-                    className={`w-1 rounded-full transition-all duration-75 ${
+                    className={`w-1.5 rounded-full transition-all duration-75 ${
                       isListening ? 'bg-primary' : 'bg-primary/50'
                     }`}
-                    style={{ height: `${Math.max(baseHeight, Math.min(60, height))}px` }}
+                    style={{ height: `${Math.max(baseHeight, Math.min(80, height))}px` }}
                   />
                 )
               })}
             </div>
 
-            {/* Greeting or live transcription */}
-            <p className={`text-xl text-center max-w-md transition-all duration-300 ${
-              isListening ? 'text-primary font-medium' : 'text-gray-600'
+            {/* Live transcription or listening status */}
+            <p className={`text-xl text-center max-w-md transition-all duration-300 min-h-[2rem] ${
+              liveTranscription ? 'text-primary font-medium' : 'text-gray-400'
             }`}>
-              {liveTranscription || displayGreeting}
+              {liveTranscription || (isListening ? 'Listening...' : 'Starting mic...')}
             </p>
 
-
-            {/* Permission denied message (F054) - directs user to text input */}
+            {/* Permission denied message */}
             {permissionState === PERMISSION_STATE.DENIED && (
               <div className="text-center">
                 <p className="text-sm text-red-500 mb-2">
                   Microphone access denied. Please enable it in your browser settings.
                 </p>
-                <p className="text-sm text-gray-500">
-                  You can still use the text input below to ask questions.
-                </p>
+                <button
+                  onClick={() => setUiState(UI_STATE.HOME)}
+                  className="text-sm text-primary hover:underline"
+                >
+                  Go back and type instead
+                </button>
               </div>
             )}
 
-            {/* Text input fallback - secondary, smaller */}
-            <form onSubmit={handleTextSubmit} className="w-full max-w-sm">
-              <input
-                type="text"
-                value={textInput}
-                onChange={(e) => setTextInput(e.target.value)}
-                placeholder="or type here..."
-                className="w-full px-4 py-2 min-h-[44px] text-sm border border-gray-200 rounded-lg focus:border-primary focus:outline-none text-center"
-              />
-            </form>
-
-            {/* Suggested questions - dynamic based on topic history */}
-            <div className="mt-4 space-y-3 w-full max-w-md">
-              <p className="text-sm text-gray-400">
-                {hasDynamicSuggestions ? 'Continue exploring:' : 'Try asking:'}
-              </p>
-              {isLoadingSuggestions ? (
-                <div className="flex justify-center py-4">
-                  <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                </div>
-              ) : (
-                suggestedQuestions.map((question, i) => (
-                  <button
-                    key={`${question}-${i}`}
-                    onClick={() => handleExampleClick(question)}
-                    className="block w-full px-4 py-3 min-h-[44px] text-left bg-surface hover:bg-gray-100 rounded-lg transition-colors cursor-pointer animate-fade-in"
-                    style={{ animationDelay: `${i * 100}ms` }}
-                  >
-                    "{question}"
-                  </button>
-                ))
-              )}
-            </div>
+            {/* Cancel button */}
+            <button
+              onClick={() => {
+                stopListening()
+                setUiState(UI_STATE.HOME)
+              }}
+              className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              Cancel
+            </button>
           </div>
         )}
 
@@ -3226,9 +3367,9 @@ function App() {
               Try Again
             </button>
 
-            {/* Option to go back to listening state */}
+            {/* Option to go back to home state */}
             <button
-              onClick={() => setUiState(UI_STATE.LISTENING)}
+              onClick={() => setUiState(UI_STATE.HOME)}
               className="px-4 py-2 min-h-[44px] text-gray-500 hover:text-gray-700 transition-colors"
             >
               Ask a different question
@@ -3422,6 +3563,42 @@ function App() {
               <p className="text-sm text-gray-400 mt-2">
                 {questionQueue.length} question{questionQueue.length > 1 ? 's' : ''} queued
               </p>
+            )}
+
+            {/* Level indicator - shows current topic level, click to change for future questions */}
+            {activeTopic && (
+              <div className="flex items-center gap-2 mt-4">
+                <span className="text-xs text-gray-400">Level:</span>
+                <div className="flex gap-1">
+                  {Object.entries(LEVEL_CONFIG).map(([level, config]) => {
+                    const isCurrentLevel = (activeTopic.explanationLevel || EXPLANATION_LEVEL.STANDARD) === level
+                    return (
+                      <button
+                        key={level}
+                        onClick={() => {
+                          // Update the topic's level for future follow-ups
+                          setTopics(prev => prev.map(t =>
+                            t.id === activeTopic.id
+                              ? { ...t, explanationLevel: level }
+                              : t
+                          ))
+                          setSelectedLevel(level)
+                        }}
+                        className={`
+                          px-2 py-1 text-xs rounded-full transition-all
+                          ${isCurrentLevel
+                            ? 'bg-primary text-white'
+                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                          }
+                        `}
+                        title={config.description}
+                      >
+                        {config.icon} {config.title}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             )}
           </div>
         )}
