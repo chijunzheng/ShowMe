@@ -95,6 +95,16 @@ const DISPLAY_GREETINGS = [
   "Ready for a learning adventure?",
 ]
 
+// Home screen headlines - randomly selected on each visit
+const HOME_HEADLINES = [
+  "What do you want me to show you?",
+  "What would you like to learn?",
+  "What are you curious about?",
+  "What should we explore today?",
+  "What do you want to understand?",
+  "What can I explain for you?",
+]
+
 // Pause duration between slide transitions (ms)
 // This gives users a brief mental break between concepts
 const SLIDE_TRANSITION_PAUSE_MS = 400
@@ -670,6 +680,8 @@ function App() {
   const [isColdStart, setIsColdStart] = useState(() => !initialData.hadPersistedData)
   // Random greeting picked once per session for variety
   const [displayGreeting] = useState(() => DISPLAY_GREETINGS[Math.floor(Math.random() * DISPLAY_GREETINGS.length)])
+  // Random home headline picked once per session
+  const [homeHeadline] = useState(() => HOME_HEADLINES[Math.floor(Math.random() * HOME_HEADLINES.length)])
   // Selected explanation level (session default, also stored per-topic)
   const [selectedLevel, setSelectedLevel] = useState(EXPLANATION_LEVEL.STANDARD)
   // Show text input fallback on home screen
@@ -3572,7 +3584,7 @@ function App() {
             {/* Headline */}
             <div className="text-center">
               <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
-                What do you want me to show you?
+                {homeHeadline}
               </h1>
               <p className="text-gray-500">
                 Tap a level and start talking
