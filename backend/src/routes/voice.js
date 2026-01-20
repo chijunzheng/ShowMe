@@ -1,5 +1,5 @@
 import express from 'express'
-import { generateTTS, isGeminiAvailable } from '../services/gemini.js'
+import { generateTTS, isGeminiAvailable, detectLanguage } from '../services/gemini.js'
 import { sanitizeQuery } from '../utils/sanitize.js'
 
 const router = express.Router()
@@ -39,8 +39,12 @@ router.post('/speak', async (req, res) => {
       })
     }
 
+    // Detect language from text for multi-language TTS support
+    const language = detectLanguage(sanitized)
+
     const ttsResult = await generateTTS(sanitized, {
       ...(typeof voice === 'string' && voice.trim() ? { voice: voice.trim() } : {}),
+      language,
     })
 
     if (ttsResult.error) {

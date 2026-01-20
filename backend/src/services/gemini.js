@@ -24,6 +24,23 @@ const TTS_FALLBACK_MODEL = 'gemini-2.5-pro-preview-tts'
 const DEFAULT_VOICE = 'Kore'
 
 /**
+ * Detect the primary language of a text based on character analysis.
+ * Used to generate content in the same language as the user's query.
+ * @param {string} text - The text to analyze
+ * @returns {string} Language code: 'zh' for Chinese, 'en' for English (default)
+ */
+export function detectLanguage(text) {
+  if (!text) return 'en'
+
+  // Chinese character range (CJK Unified Ideographs)
+  const chineseRegex = /[\u4e00-\u9fff]/
+  const hasChineseChars = chineseRegex.test(text)
+
+  if (hasChineseChars) return 'zh'
+  return 'en'
+}
+
+/**
  * Extract JSON from text that may be wrapped in markdown code blocks
  * Handles various formats returned by different Gemini models
  * @param {string} text - Raw text response from Gemini
@@ -462,7 +479,7 @@ export async function generateScript(query, options = {}) {
     return { slides: null, error: 'API_NOT_AVAILABLE' }
   }
 
-  const { conversationHistory = [], isFollowUp = false, explanationLevel = 'standard' } = options
+  const { conversationHistory = [], isFollowUp = false, explanationLevel = 'standard', language = 'en' } = options
 
   // Validate and normalize explanation level
   const validLevels = ['simple', 'standard', 'deep']
@@ -483,10 +500,18 @@ export async function generateScript(query, options = {}) {
   - Moderate topics (processes, comparisons): 4 slides
   - Complex topics (multi-step systems, deep explanations): 5 slides`
 
+  // Language instruction for non-English queries
+  const languageInstruction = language === 'zh'
+    ? `\nLANGUAGE REQUIREMENT: The user asked their question in Chinese. You MUST generate ALL content in Simplified Chinese (简体中文):
+- All subtitles must be written in Chinese
+- All image prompts must describe diagrams with Chinese text labels
+- Maintain natural, educational Chinese suitable for learning\n`
+    : ''
+
   const systemPrompt = `You are an expert educational content creator for a visual learning app.
 Your task is to create a script for an educational slideshow that explains topics clearly.
 ${levelInstructions}
-
+${languageInstruction}
 Guidelines:
 ${slideCountGuidance}
 - Each slide should have a clear, concise explanation (2-3 sentences max)
@@ -551,6 +576,7 @@ Important: Image prompts should describe detailed educational diagrams with labe
  * @param {Object} options - Generation options
  * @param {string} options.topic - The overall topic for context
  * @param {string} options.explanationLevel - Level of visual complexity: 'simple', 'standard', or 'deep'
+ * @param {string} options.language - Language code for text labels: 'en' or 'zh'
  * @returns {Promise<{imageUrl: string|null, error: string|null}>}
  */
 export async function generateEducationalImage(imagePrompt, options = {}) {
@@ -559,7 +585,7 @@ export async function generateEducationalImage(imagePrompt, options = {}) {
     return { imageUrl: null, error: 'API_NOT_AVAILABLE' }
   }
 
-  const { topic = '', explanationLevel = 'standard' } = options
+  const { topic = '', explanationLevel = 'standard', language = 'en' } = options
 
   // Validate and normalize explanation level
   const validLevels = ['simple', 'standard', 'deep']
@@ -568,6 +594,11 @@ export async function generateEducationalImage(imagePrompt, options = {}) {
   // Get level-specific image style instructions
   const levelStyleInstructions = IMAGE_LEVEL_INSTRUCTIONS[normalizedLevel]
 
+  // Language-specific instruction for text labels
+  const languageInstruction = language === 'zh'
+    ? '- IMPORTANT: All text labels, annotations, and captions on the diagram must be in Simplified Chinese (简体中文)'
+    : ''
+
   // Enhance the prompt for better educational diagrams
   const enhancedPrompt = `Create an educational diagram illustration: ${imagePrompt}
 
@@ -575,6 +606,7 @@ Style requirements:
 ${levelStyleInstructions}
 - No photorealistic elements - use illustrated/diagrammatic style
 - White or light colored background for clarity
+${languageInstruction}
 ${topic ? `- Topic context: ${topic}` : ''}`
 
   try {
@@ -771,13 +803,17 @@ async function generateTtsWithGenerativeAI(client, model, prompt, voice) {
  * @param {string} text - The text to convert to speech
  * @param {Object} options - TTS options
  * @param {string} options.voice - Voice name to use (default: Kore)
+ * @param {string} options.language - Language code: 'en' or 'zh' (affects speaking prompt)
  * @returns {Promise<{audioUrl: string|null, duration: number, error: string|null}>}
  */
 export async function generateTTS(text, options = {}) {
-  const { voice = DEFAULT_VOICE } = options
+  const { voice = DEFAULT_VOICE, language = 'en' } = options
 
   // Prepare text with speaking instructions for natural delivery
-  const speakingPrompt = `Speak clearly and engagingly, as if teaching a curious student: ${text}`
+  // Use language-appropriate prompt for better TTS quality
+  const speakingPrompt = language === 'zh'
+    ? `用清晰、生动的方式朗读以下内容，就像在教导一个好奇的学生: ${text}`
+    : `Speak clearly and engagingly, as if teaching a curious student: ${text}`
 
   const ttsClient = await getTtsClient()
   if (ttsClient) {
@@ -869,6 +905,7 @@ function pcmToWav(pcmData, sampleRate = 24000, numChannels = 1, bitsPerSample = 
  * @param {boolean} options.generateAudio - Whether to generate TTS audio (default: true)
  * @param {string} options.topic - The overall topic for context
  * @param {string} options.explanationLevel - Level of visual complexity: 'simple', 'standard', or 'deep'
+ * @param {string} options.language - Language code for content: 'en' or 'zh'
  * @returns {Promise<{imageUrl: string|null, audioUrl: string|null, duration: number, errors: Array}>}
  */
 export async function generateSlideContent(slideScript, options = {}) {

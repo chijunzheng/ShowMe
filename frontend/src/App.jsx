@@ -95,6 +95,10 @@ const DISPLAY_GREETINGS = [
   "Ready for a learning adventure?",
 ]
 
+// Pause duration between slide transitions (ms)
+// This gives users a brief mental break between concepts
+const SLIDE_TRANSITION_PAUSE_MS = 400
+
 // Audio configuration constants
 const AUDIO_CONFIG = {
   // Number of bars in the waveform visualization
@@ -926,6 +930,7 @@ function App() {
   const allowAutoListenRef = useRef(true)
   const isRaiseHandPendingRef = useRef(false)
   const selectedLevelRef = useRef(EXPLANATION_LEVEL.STANDARD)
+  const isPlayingRef = useRef(false)
 
   useEffect(() => {
     isListeningRef.current = isListening
@@ -946,6 +951,10 @@ function App() {
   useEffect(() => {
     selectedLevelRef.current = selectedLevel
   }, [selectedLevel])
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying
+  }, [isPlaying])
 
   // Audio refs - these persist across renders without causing re-renders
   const audioContextRef = useRef(null)
@@ -991,6 +1000,8 @@ function App() {
 
   // Track if we should pause after the current slide (raise-hand flow)
   const pauseAfterCurrentSlideRef = useRef(false)
+  // Track the transition timeout for cleanup when slide changes or unmounts
+  const slideTransitionTimeoutRef = useRef(null)
 
   const raiseHandRequestRef = useRef(false)
 
@@ -1634,9 +1645,11 @@ function App() {
     // race condition where suggestions narrate after slides are ready
   }, [engagement, enqueueVoiceAgentMessage, refreshFunFact])
 
-  // Auto-advance slideshow when playing (F044)
-  // Uses slide.duration if available, otherwise falls back to DEFAULT_SLIDE_DURATION
-  // Header slides advance faster since they're just dividers
+  // Auto-advance slideshow for non-audio slides (F044)
+  // - Header slides: advance after 2 seconds (no audio)
+  // - Suggestions slides: advance after duration (voice agent handles audio separately)
+  // - Regular slides with audio: handled by audio onended, NOT this timer
+  // - Regular slides with failed audio: fallback timer advancement
   useEffect(() => {
     // Only run auto-advance when in slideshow state, playing, and slides exist
     if (uiState !== UI_STATE.SLIDESHOW || !isPlaying || isVoiceAgentSpeaking || visibleSlides.length === 0) {
@@ -1645,24 +1658,35 @@ function App() {
 
     const currentSlide = visibleSlides[currentIndex]
 
-    if (currentSlide?.type !== 'header' && !isSlideNarrationReady) {
+    // Wait for narration to be ready (header slides are always "ready")
+    if (currentSlide?.type !== 'header' && currentSlide?.type !== 'suggestions' && !isSlideNarrationReady) {
+      return
+    }
+
+    // For regular slides with audio playing, let audio onended handle advancement
+    // This timer only handles: headers, suggestions, and audio failure fallback
+    if (currentSlide?.type !== 'header' && currentSlide?.type !== 'suggestions' && isSlideNarrationPlaying) {
       return
     }
 
     // Get duration for current slide (in milliseconds)
-    // Header slides should advance faster since they're just dividers (2 seconds)
-    const duration = currentSlide?.type === 'header'
+    // Header slides advance faster since they're just dividers (2 seconds)
+    // Add transition pause for non-header slides
+    const baseDuration = currentSlide?.type === 'header'
       ? 2000
       : getSlideDuration(currentSlide)
+    const duration = currentSlide?.type === 'header'
+      ? baseDuration
+      : baseDuration + SLIDE_TRANSITION_PAUSE_MS
 
-    const intervalId = setInterval(() => {
+    const timeoutId = setTimeout(() => {
+      if (pauseAfterCurrentSlideRef.current) {
+        pauseAfterCurrentSlideRef.current = false
+        setIsPlaying(false)
+        return
+      }
+
       setCurrentIndex((prev) => {
-        if (pauseAfterCurrentSlideRef.current) {
-          pauseAfterCurrentSlideRef.current = false
-          setIsPlaying(false)
-          return prev
-        }
-
         const nextIndex = prev + 1
         // If we reach the end, stop playing and mark slideshow as finished (F048)
         if (nextIndex >= visibleSlides.length) {
@@ -1674,13 +1698,14 @@ function App() {
       })
     }, duration)
 
-    // Cleanup interval on unmount or when dependencies change
-    return () => clearInterval(intervalId)
+    // Cleanup timeout on unmount or when dependencies change
+    return () => clearTimeout(timeoutId)
   }, [
     uiState,
     isPlaying,
     isVoiceAgentSpeaking,
     isSlideNarrationReady,
+    isSlideNarrationPlaying,
     currentIndex,
     visibleSlides,
     getSlideDuration,
@@ -1849,6 +1874,8 @@ function App() {
       audio.currentTime = 0
       audio.onended = () => {
         setIsSlideNarrationPlaying(false)
+
+        // Resume listening if conditions are met
         if (
           resumeListeningAfterSlideRef.current &&
           isMicEnabledRef.current &&
@@ -1859,6 +1886,35 @@ function App() {
           startListeningRef.current?.()
         }
         resumeListeningAfterSlideRef.current = false
+
+        // Audio-driven slide advancement: advance after narration completes with a brief pause
+        // Clear any existing transition timeout first
+        if (slideTransitionTimeoutRef.current) {
+          clearTimeout(slideTransitionTimeoutRef.current)
+        }
+
+        // Handle pause-after-slide for raise-hand flow
+        if (pauseAfterCurrentSlideRef.current) {
+          pauseAfterCurrentSlideRef.current = false
+          setIsPlaying(false)
+          return
+        }
+
+        // Only advance if still playing
+        if (isPlayingRef.current) {
+          slideTransitionTimeoutRef.current = setTimeout(() => {
+            setCurrentIndex((prev) => {
+              const nextIndex = prev + 1
+              // If we reach the end, stop playing and mark slideshow as finished
+              if (nextIndex >= visibleSlides.length) {
+                setIsPlaying(false)
+                hasFinishedSlideshowRef.current = true
+                return prev
+              }
+              return nextIndex
+            })
+          }, SLIDE_TRANSITION_PAUSE_MS)
+        }
       }
       audio.onerror = () => {
         setIsSlideNarrationPlaying(false)
@@ -1884,6 +1940,11 @@ function App() {
       cancelled = true
       if (slideAudioRef.current) {
         slideAudioRef.current.pause()
+      }
+      // Clear any pending transition timeout
+      if (slideTransitionTimeoutRef.current) {
+        clearTimeout(slideTransitionTimeoutRef.current)
+        slideTransitionTimeoutRef.current = null
       }
     }
   }, [

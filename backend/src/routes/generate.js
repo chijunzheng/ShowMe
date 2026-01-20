@@ -9,6 +9,7 @@ import {
   generateSlideResponse,
   generateTopicMetadata,
   generateTTS,
+  detectLanguage,
 } from '../services/gemini.js'
 
 const router = express.Router()
@@ -187,6 +188,12 @@ router.post('/', async (req, res) => {
       })
     }
 
+    // Detect language from query for multi-language support
+    const language = detectLanguage(sanitizedQuery)
+    if (language !== 'en') {
+      console.log(`[Generate] Detected language: ${language} for query: "${sanitizedQuery.substring(0, 30)}..."`)
+    }
+
     // F015: Send 'start' progress to WebSocket client
     if (clientId) {
       sendProgress(clientId, PROGRESS_TYPES.START, {
@@ -230,6 +237,7 @@ router.post('/', async (req, res) => {
       conversationHistory,
       isFollowUp: false,
       explanationLevel,
+      language,
     })
 
     if (scriptResult.error || !scriptResult.slides) {
@@ -251,6 +259,7 @@ router.post('/', async (req, res) => {
           topic: topicMetadata.name,
           generateAudio: false,
           explanationLevel,
+          language,
         })
 
         // Log any errors but continue with partial content
@@ -361,6 +370,12 @@ router.post('/follow-up', async (req, res) => {
       })
     }
 
+    // Detect language from query for multi-language support
+    const language = detectLanguage(sanitizedQuery)
+    if (language !== 'en') {
+      console.log(`[Generate] Follow-up detected language: ${language}`)
+    }
+
     // F015: Send 'start' progress for follow-up generation
     if (clientId) {
       sendProgress(clientId, PROGRESS_TYPES.START, {
@@ -387,6 +402,7 @@ router.post('/follow-up', async (req, res) => {
         conversationHistory,
         isFollowUp: true,
         explanationLevel,
+        language,
       })
 
       if (scriptResult.error || !scriptResult.slides) {
@@ -407,6 +423,7 @@ router.post('/follow-up', async (req, res) => {
             topic: conversationHistory[0]?.topic || '',
             generateAudio: false,
             explanationLevel,
+            language,
           })
 
           if (content.errors.length > 0) {

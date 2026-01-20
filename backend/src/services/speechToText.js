@@ -103,8 +103,8 @@ export async function transcribeWithChirp3(audioBuffer, mimeType) {
         model: MODEL,
         // Auto-detect language (Chirp 3 feature)
         autoDecodingConfig: {},
-        // Language codes - primary English, but Chirp 3 can auto-detect
-        languageCodes: ['en-US', 'en-GB'],
+        // Language codes - English and Chinese, Chirp 3 auto-detects the spoken language
+        languageCodes: ['en-US', 'en-GB', 'cmn-Hans-CN', 'cmn-Hant-TW'],
         // Features
         features: {
           // Enable automatic punctuation
