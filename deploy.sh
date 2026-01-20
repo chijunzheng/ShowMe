@@ -8,7 +8,8 @@ set -e
 PROJECT_ID="project-a23ec95e-0a5a-443a-a7a"
 REGION="us-central1"
 SERVICE_NAME="showme"
-IMAGE_NAME="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
+REPO_NAME="showme-repo"
+IMAGE_NAME="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${SERVICE_NAME}"
 
 echo "=== ShowMe Cloud Run Deployment ==="
 echo "Project: ${PROJECT_ID}"
@@ -35,7 +36,7 @@ gcloud config set project ${PROJECT_ID}
 
 # Enable required APIs (if not already enabled)
 echo "Enabling required APIs..."
-gcloud services enable cloudbuild.googleapis.com run.googleapis.com containerregistry.googleapis.com --quiet
+gcloud services enable cloudbuild.googleapis.com run.googleapis.com artifactregistry.googleapis.com --quiet
 
 # Build and push container using Cloud Build
 echo ""

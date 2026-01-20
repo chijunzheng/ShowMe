@@ -1,7 +1,7 @@
 {
   "category": "core",
   "description": "Core MVP Features - Voice-first educational slideshow app",
-  "feature_count": 27,
+  "feature_count": 30,
   "features": [
     {
       "id": "CORE001",
@@ -917,6 +917,118 @@
         {
           "id": "T004",
           "description": "Verify slides still accessible",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE028",
+      "name": "Audio-driven slide transitions",
+      "description": "Slides wait for audio narration to complete before advancing, with a brief pause between transitions",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Start slideshow with multiple slides",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify slide does not advance until audio finishes",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify brief pause (400ms) occurs after audio ends before next slide",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify next slide audio starts after pause",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify slideshow stops at last slide without looping",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE029",
+      "name": "Multi-language support (Chinese)",
+      "description": "Auto-detect query language and generate content (subtitles, image labels, TTS) in the same language",
+      "priority": 2,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Ask question in Chinese: '什么是光合作用?'",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify STT transcribes Chinese correctly",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify generated subtitles are in Chinese",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify TTS speaks in Chinese",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify image labels/annotations are in Chinese",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Ask question in English",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify English query produces English content (no regression)",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE030",
+      "name": "Randomized home screen headlines",
+      "description": "Home screen displays varied welcome messages instead of static text",
+      "priority": 3,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Open app to home screen",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify headline text is displayed",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Refresh page multiple times",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify different headlines appear across refreshes",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify all headlines convey similar meaning (asking what to learn/show)",
           "status": "pending"
         }
       ]

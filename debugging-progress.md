@@ -426,3 +426,59 @@ className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-white rou
 - `mt-2` → `bottom-full mb-2`: Opens upward instead of downward
 
 This positioning ensures the dropdown stays within viewport bounds when the button is near the bottom of the screen.
+
+---
+
+## Session 5: 2026-01-19
+
+### Issue 1: Suggested Follow-ups Stuck on "Complete"
+
+**Symptoms:**
+- Clicking a suggested follow-up showed "Complete!" in generating state
+- Slideshow never transitioned to slides
+- Progress indicated completion, but UI stayed on the loader
+
+**Root Cause:**
+- Slide-ready transition relied on voice-agent `onComplete` to switch to slideshow
+- Voice-agent only called `onComplete` on successful audio playback
+- If TTS failed (Gemini unavailable/429) or autoplay blocked, the transition never fired
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// Add option to allow completion even when audio fails
+completeOnError: options.completeOnError === true
+
+// Allow slide-ready message to advance even if TTS fails
+enqueueVoiceAgentMessage(readyMessage, {
+  priority: 'high',
+  completeOnError: true,
+  onComplete: () => {
+    setIsSlideRevealPending(false)
+    setUiState(UI_STATE.SLIDESHOW)
+  },
+})
+```
+
+---
+
+### Issue 2: Suggested Follow-ups Always Queued
+
+**Symptoms:**
+- Clicking suggested questions showed "Question queued"
+- Queue count increased, but no new generation started
+- Repeated clicks stacked the queue instead of triggering follow-ups
+
+**Root Cause:**
+- `handleQuestion` queued any request when `isSlideRevealPending` was true
+- That flag could remain true even while in slideshow (e.g., after a stuck transition)
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// Only queue while actually generating or pending outside slideshow
+if (uiState === UI_STATE.GENERATING || (isSlideRevealPending && uiState !== UI_STATE.SLIDESHOW)) {
+  setQuestionQueue((prev) => [trimmedQuery, ...prev])
+  showToast('Question queued')
+  enqueueVoiceAgentMessage('Got it. I will answer that right after this.')
+  return
+}
+```

@@ -172,7 +172,11 @@ function getTopicSlidesStorageKey(topicId, versionId) {
  * @returns {Array} Sanitized slides for storage
  */
 function sanitizeSlidesForStorage(slides, topicId) {
-  if (!Array.isArray(slides)) return []
+  if (!Array.isArray(slides)) {
+    console.log('[DEBUG SANITIZE] Input not array:', { topicId, slides })
+    return []
+  }
+  console.log('[DEBUG SANITIZE] Processing slides:', { topicId, inputCount: slides.length })
   return slides
     .filter((slide) => slide && typeof slide === 'object')
     .map((slide, index) => ({
@@ -198,6 +202,8 @@ function sanitizeSlidesForStorage(slides, topicId) {
  * @param {string} [versionId] - Optional version ID for per-version storage
  */
 function persistTopicSlides(topicId, slides, versionId) {
+  const storageKey = getTopicSlidesStorageKey(topicId, versionId)
+  console.log('[DEBUG PERSIST] Saving slides:', { topicId, versionId, storageKey, slidesCount: slides?.length })
   if (!topicId || !Array.isArray(slides)) {
     logger.warn('STORAGE', 'Cannot persist slides: invalid input', { topicId, slidesType: typeof slides })
     return false
@@ -219,7 +225,15 @@ function persistTopicSlides(topicId, slides, versionId) {
   }
 
   try {
-    localStorage.setItem(getTopicSlidesStorageKey(topicId, versionId), JSON.stringify(payload))
+    const key = getTopicSlidesStorageKey(topicId, versionId)
+    localStorage.setItem(key, JSON.stringify(payload))
+    // Verify the save worked
+    const verification = localStorage.getItem(key)
+    console.log('[DEBUG PERSIST] Saved and verified:', {
+      key,
+      savedSuccessfully: !!verification,
+      payloadSize: JSON.stringify(payload).length
+    })
     logger.debug('STORAGE', 'Slides persisted successfully', {
       topicId,
       versionId,
@@ -245,6 +259,31 @@ function persistTopicSlides(topicId, slides, versionId) {
 }
 
 /**
+ * Validate and normalize slide payloads loaded from storage.
+ * @param {Object} parsed - Parsed storage payload
+ * @returns {Array|null} Valid slides or null
+ */
+function extractValidSlidesFromPayload(parsed) {
+  if (!parsed || typeof parsed !== 'object') return null
+
+  const version = parsed.version || 0
+  if (version > TOPIC_SLIDES_STORAGE_VERSION) return null
+
+  const slides = Array.isArray(parsed.slides) ? parsed.slides : null
+  if (!slides) return null
+
+  // Lenient validation - only require slide to have id and some content
+  const validSlides = slides.filter((slide) =>
+    slide &&
+    typeof slide === 'object' &&
+    slide.id &&
+    (slide.subtitle || slide.imageUrl)
+  )
+
+  return validSlides.length > 0 ? validSlides : null
+}
+
+/**
  * Load cached slides for a topic from localStorage.
  * @param {string} topicId - Topic ID
  * @param {string} [versionId] - Optional version ID for per-version storage
@@ -254,27 +293,17 @@ function loadTopicSlidesFromStorage(topicId, versionId) {
   if (!topicId) return null
 
   try {
-    const stored = localStorage.getItem(getTopicSlidesStorageKey(topicId, versionId))
-    if (!stored) return null
+    const storageKey = getTopicSlidesStorageKey(topicId, versionId)
+    console.log('[DEBUG LOAD] Looking for slides:', { topicId, versionId, storageKey })
+    const stored = localStorage.getItem(storageKey)
+    if (!stored) {
+      console.log('[DEBUG LOAD] NOT FOUND:', storageKey)
+      return null
+    }
+    console.log('[DEBUG LOAD] FOUND:', { storageKey, size: stored.length })
 
     const parsed = JSON.parse(stored)
-    if (!parsed || typeof parsed !== 'object') return null
-
-    const version = parsed.version || 0
-    if (version > TOPIC_SLIDES_STORAGE_VERSION) return null
-
-    const slides = Array.isArray(parsed.slides) ? parsed.slides : null
-    if (!slides) return null
-
-    // Lenient validation - only require slide to have id and some content
-    const validSlides = slides.filter((slide) =>
-      slide &&
-      typeof slide === 'object' &&
-      slide.id &&
-      (slide.subtitle || slide.imageUrl)
-    )
-
-    return validSlides.length > 0 ? validSlides : null
+    return extractValidSlidesFromPayload(parsed)
   } catch (error) {
     logger.warn('STORAGE', 'Failed to load topic slides', {
       topicId,
@@ -286,15 +315,140 @@ function loadTopicSlidesFromStorage(topicId, versionId) {
 }
 
 /**
+ * Find the most recent versioned slide archive for a topic.
+ * @param {string} topicId - Topic ID
+ * @returns {Object|null} { slides, key, savedAt } or null
+ */
+function loadLatestVersionedSlides(topicId) {
+  if (!topicId) return null
+
+  try {
+    const prefix = `${TOPIC_SLIDES_STORAGE_PREFIX}${topicId}_`
+    const keys = Object.keys(localStorage)
+    let latest = null
+
+    keys.forEach((key) => {
+      if (!key.startsWith(prefix)) return
+      const stored = localStorage.getItem(key)
+      if (!stored) return
+
+      let parsed
+      try {
+        parsed = JSON.parse(stored)
+      } catch {
+        return
+      }
+
+      const slides = extractValidSlidesFromPayload(parsed)
+      if (!slides) return
+
+      const savedAt = typeof parsed.savedAt === 'number' ? parsed.savedAt : 0
+      if (!latest || savedAt > latest.savedAt) {
+        latest = { slides, key, savedAt }
+      }
+    })
+
+    return latest
+  } catch (error) {
+    logger.warn('STORAGE', 'Failed to scan versioned slides', {
+      topicId,
+      error: error.message,
+    })
+    return null
+  }
+}
+
+/**
+ * Load slides for a topic, trying version-specific storage first, then legacy.
+ * This is the canonical way to load slides for a topic - use this instead of
+ * calling loadTopicSlidesFromStorage directly.
+ * @param {Object} topic - Topic object with id, versions, and currentVersionIndex
+ * @returns {Array|null} Slides array or null when unavailable
+ */
+function loadSlidesForTopic(topic) {
+  if (!topic?.id) return null
+
+  // Try version-specific storage first
+  const currentVersion = topic.versions?.[topic.currentVersionIndex ?? 0]
+  if (currentVersion?.id) {
+    const versionedSlides = loadTopicSlidesFromStorage(topic.id, currentVersion.id)
+    if (versionedSlides) {
+      logger.debug('STORAGE', 'Loaded slides from versioned storage', {
+        topicId: topic.id,
+        versionId: currentVersion.id,
+        slidesCount: versionedSlides.length,
+      })
+      return versionedSlides
+    }
+  }
+
+  // If current version is missing, try any other known versions
+  if (Array.isArray(topic.versions)) {
+    for (const version of topic.versions) {
+      if (!version?.id || version.id === currentVersion?.id) continue
+      const otherSlides = loadTopicSlidesFromStorage(topic.id, version.id)
+      if (otherSlides) {
+        logger.debug('STORAGE', 'Loaded slides from alternate version', {
+          topicId: topic.id,
+          versionId: version.id,
+          slidesCount: otherSlides.length,
+        })
+        return otherSlides
+      }
+    }
+  }
+
+  // Fall back to legacy (non-versioned) storage
+  const legacySlides = loadTopicSlidesFromStorage(topic.id)
+  if (legacySlides) {
+    logger.debug('STORAGE', 'Loaded slides from legacy storage', {
+      topicId: topic.id,
+      slidesCount: legacySlides.length,
+    })
+    return legacySlides
+  }
+
+  // Last resort: scan versioned keys for this topic (handles mismatched metadata)
+  const fallback = loadLatestVersionedSlides(topic.id)
+  if (fallback?.slides) {
+    logger.debug('STORAGE', 'Loaded slides from version scan fallback', {
+      topicId: topic.id,
+      storageKey: fallback.key,
+      slidesCount: fallback.slides.length,
+    })
+    return fallback.slides
+  }
+
+  logger.debug('STORAGE', 'No slides found in storage', {
+    topicId: topic.id,
+    versionId: currentVersion?.id,
+    hasVersions: !!topic.versions?.length,
+  })
+
+  return null
+}
+
+/**
  * Remove slide archives for topics that no longer exist.
  * @param {Set<string>} validTopicIds - Active topic IDs
  */
 function removeStaleTopicSlides(validTopicIds) {
+  console.log('[DEBUG CLEANUP] Valid topic IDs:', Array.from(validTopicIds))
   try {
     const keys = Object.keys(localStorage)
     keys.forEach((key) => {
       if (!key.startsWith(TOPIC_SLIDES_STORAGE_PREFIX)) return
-      const topicId = key.slice(TOPIC_SLIDES_STORAGE_PREFIX.length)
+      // Extract topicId from key, handling both legacy and versioned formats:
+      // - Legacy: showme_topic_slides_{topicId}
+      // - Versioned: showme_topic_slides_{topicId}_{versionId} where versionId starts with "v_"
+      const afterPrefix = key.slice(TOPIC_SLIDES_STORAGE_PREFIX.length)
+      // Find the first occurrence of "_v_" which marks the start of a versionId
+      const versionSeparatorIndex = afterPrefix.indexOf('_v_')
+      const topicId = versionSeparatorIndex !== -1
+        ? afterPrefix.slice(0, versionSeparatorIndex)
+        : afterPrefix
+      const isValid = validTopicIds.has(topicId)
+      console.log('[DEBUG CLEANUP] Checking key:', { key, extractedTopicId: topicId, isValid, willRemove: !isValid })
       if (!validTopicIds.has(topicId)) {
         localStorage.removeItem(key)
       }
@@ -307,13 +461,29 @@ function removeStaleTopicSlides(validTopicIds) {
 }
 
 /**
- * Remove cached slides for a specific topic.
+ * Remove cached slides for a specific topic, including all versioned storage keys.
  * @param {string} topicId - Topic ID to remove slides for
  */
 function removeTopicSlides(topicId) {
   try {
-    const key = getTopicSlidesStorageKey(topicId)
-    localStorage.removeItem(key)
+    // Remove legacy (non-versioned) key
+    const legacyKey = getTopicSlidesStorageKey(topicId)
+    localStorage.removeItem(legacyKey)
+
+    // Also remove any versioned keys for this topic
+    const keys = Object.keys(localStorage)
+    keys.forEach((key) => {
+      if (!key.startsWith(TOPIC_SLIDES_STORAGE_PREFIX)) return
+      // Check if this key belongs to the target topicId
+      const afterPrefix = key.slice(TOPIC_SLIDES_STORAGE_PREFIX.length)
+      const versionSeparatorIndex = afterPrefix.indexOf('_v_')
+      const extractedTopicId = versionSeparatorIndex !== -1
+        ? afterPrefix.slice(0, versionSeparatorIndex)
+        : afterPrefix
+      if (extractedTopicId === topicId) {
+        localStorage.removeItem(key)
+      }
+    })
   } catch (error) {
     logger.warn('STORAGE', 'Failed to remove topic slides', {
       topicId,
@@ -328,6 +498,11 @@ function removeTopicSlides(topicId) {
  * @returns {Object} { topics: Array, hadPersistedData: boolean }
  */
 function loadPersistedTopics() {
+  // Debug: list all slide-related keys in localStorage
+  const allKeys = Object.keys(localStorage)
+  const slideKeys = allKeys.filter(k => k.startsWith(TOPIC_SLIDES_STORAGE_PREFIX))
+  console.log('[DEBUG STARTUP] All slide keys in localStorage:', slideKeys)
+
   try {
     const stored = localStorage.getItem(TOPICS_STORAGE_KEY)
     if (!stored) {
@@ -392,6 +567,11 @@ function loadPersistedTopics() {
       let currentVersionIndex = topic.currentVersionIndex ?? 0
       const query = topic.query || topic.name // Use name as fallback query
 
+      // Validate versions array - filter out any without valid IDs
+      if (Array.isArray(versions)) {
+        versions = versions.filter((v) => v && typeof v.id === 'string' && v.id.length > 0)
+      }
+
       if (!Array.isArray(versions) || versions.length === 0) {
         // Migrate from non-versioned to versioned format
         // Create initial version from existing data
@@ -402,6 +582,11 @@ function loadPersistedTopics() {
           createdAt: createdAt,
         }]
         currentVersionIndex = 0
+      }
+
+      // Ensure currentVersionIndex is within bounds
+      if (currentVersionIndex >= versions.length) {
+        currentVersionIndex = versions.length - 1
       }
 
       return {
@@ -431,20 +616,16 @@ function loadPersistedTopics() {
     )
 
     const restoredTopics = normalizedTopics.map((topic) => {
+      console.log('[DEBUG RESTORE] Topic:', {
+        id: topic.id,
+        name: topic.name,
+        versions: topic.versions?.map(v => ({ id: v.id, level: v.explanationLevel })),
+        currentVersionIndex: topic.currentVersionIndex
+      })
       if (!cachedTopicIds.has(topic.id)) return topic
 
-      // Try to load slides for the current version first
-      const currentVersion = topic.versions?.[topic.currentVersionIndex]
-      let cachedSlides = null
-
-      if (currentVersion?.id) {
-        cachedSlides = loadTopicSlidesFromStorage(topic.id, currentVersion.id)
-      }
-
-      // Fall back to legacy topic-level storage if version-specific not found
-      if (!cachedSlides) {
-        cachedSlides = loadTopicSlidesFromStorage(topic.id)
-      }
+      // Load slides using the canonical helper that tries versioned storage first
+      const cachedSlides = loadSlidesForTopic(topic)
 
       if (cachedSlides) {
         // Update the current version with loaded slides
@@ -500,12 +681,15 @@ function saveTopicsToStorage(topics) {
       createdAt: topic.createdAt,
       lastAccessedAt: topic.lastAccessedAt,
       // Store versions metadata (slides are persisted separately per version)
-      versions: (topic.versions || []).map((v) => ({
-        id: v.id,
-        explanationLevel: v.explanationLevel,
-        createdAt: v.createdAt,
-        // slides are loaded separately from per-topic storage
-      })),
+      // Filter out any versions without a valid id to prevent load issues
+      versions: (topic.versions || [])
+        .filter((v) => v && typeof v.id === 'string' && v.id.length > 0)
+        .map((v) => ({
+          id: v.id,
+          explanationLevel: v.explanationLevel,
+          createdAt: v.createdAt,
+          // slides are loaded separately from per-topic storage
+        })),
       currentVersionIndex: topic.currentVersionIndex ?? 0,
       // headerSlide and slides are reconstructed or loaded separately
     }))
@@ -901,7 +1085,8 @@ function App() {
 
     const needsSlides = !active.slides || active.slides.length === 0
     const isNewActive = lastActiveTopicIdRef.current !== activeTopicId
-    const cachedSlides = needsSlides ? loadTopicSlidesFromStorage(activeTopicId) : null
+    // Use loadSlidesForTopic to try version-specific storage first, then legacy
+    const cachedSlides = needsSlides ? loadSlidesForTopic(active) : null
 
     if (!isNewActive && !cachedSlides) return
     const now = Date.now()
@@ -909,9 +1094,16 @@ function App() {
     setTopics((prev) => {
       const updated = prev.map((topic) => {
         if (topic.id !== activeTopicId) return topic
+        const versionIndex = topic.currentVersionIndex ?? 0
+        const updatedVersions = cachedSlides && Array.isArray(topic.versions)
+          ? topic.versions.map((v, idx) => (
+              idx === versionIndex ? { ...v, slides: cachedSlides } : v
+            ))
+          : topic.versions
         return {
           ...topic,
           slides: cachedSlides || topic.slides,
+          versions: updatedVersions,
           lastAccessedAt: now,
         }
       })
@@ -928,9 +1120,9 @@ function App() {
   const [isListening, setIsListening] = useState(false)
   const [audioLevel, setAudioLevel] = useState(0)
   const [permissionState, setPermissionState] = useState(PERMISSION_STATE.PROMPT)
-  // Mic enabled by default - voice-first experience
-  const [isMicEnabled, setIsMicEnabled] = useState(true)
-  // Auto-listen enabled by default - mic starts listening on app load
+  // Mic starts disabled; enabled on level selection or raise-hand
+  const [isMicEnabled, setIsMicEnabled] = useState(false)
+  // Auto-listen enabled by default; starts in LISTENING state when mic is enabled
   const [allowAutoListen, setAllowAutoListen] = useState(true)
   const [isSlideNarrationPlaying, setIsSlideNarrationPlaying] = useState(false)
   const [isSlideNarrationReady, setIsSlideNarrationReady] = useState(false)
@@ -938,7 +1130,7 @@ function App() {
   // Raise-hand state for gated listening
   const [isRaiseHandPending, setIsRaiseHandPending] = useState(false)
   const isListeningRef = useRef(false)
-  const isMicEnabledRef = useRef(true)
+  const isMicEnabledRef = useRef(false)
   const allowAutoListenRef = useRef(true)
   const isRaiseHandPendingRef = useRef(false)
   const selectedLevelRef = useRef(EXPLANATION_LEVEL.STANDARD)
@@ -1182,6 +1374,7 @@ function App() {
       priority: options.priority || 'normal',
       waitForAudio: options.waitForAudio !== false,
       onComplete: typeof options.onComplete === 'function' ? options.onComplete : null,
+      completeOnError: options.completeOnError === true,
       audioUrl: options.audioUrl || null, // Pre-generated audio URL (skips /api/voice/speak)
     }
 
@@ -1294,8 +1487,9 @@ function App() {
       const shouldResumeListening = resumeListeningAfterVoiceAgentRef.current
       resumeListeningAfterVoiceAgentRef.current = false
 
-      // Only call onComplete if playback succeeded (prevents infinite loop on 429)
-      if (success && currentItem.onComplete) {
+      // Default: only call onComplete when playback succeeded (avoids loops on 429),
+      // unless the item explicitly allows completion on error.
+      if ((success || currentItem.completeOnError) && currentItem.onComplete) {
         currentItem.onComplete()
       }
       setVoiceAgentQueue((prev) => prev.filter((item) => item.id !== currentItem.id))
@@ -1584,6 +1778,7 @@ function App() {
     const readyMessage = VOICE_AGENT_SCRIPT.getSlidesReadyMessage(topicName, slideCount)
     enqueueVoiceAgentMessage(readyMessage, {
       priority: 'high',
+      completeOnError: true,
       onComplete: () => {
         setIsSlideRevealPending(false)
         setUiState(UI_STATE.SLIDESHOW)
@@ -2254,7 +2449,7 @@ function App() {
 
   /**
    * Auto-start listening when enabled and no narration is playing.
-   * Skip auto-listen on HOME screen - user must explicitly select a level.
+   * Only auto-listen in LISTENING state to avoid background recording.
    */
   useEffect(() => {
     if (!allowAutoListen || !isMicEnabled) return
@@ -2262,7 +2457,7 @@ function App() {
     if (isListening || isRaiseHandPending || isVoiceAgentSpeaking || isSlideNarrationPlaying) return
     if (voiceAgentQueue.length > 0) return
     if (isProcessingRecordingRef.current) return
-    if (uiState === UI_STATE.ERROR || uiState === UI_STATE.HOME) return
+    if (uiState !== UI_STATE.LISTENING) return
 
     startListening()
   }, [
@@ -2668,7 +2863,7 @@ function App() {
       stopListening()
     }
 
-    if (uiState === UI_STATE.GENERATING || isSlideRevealPending) {
+    if (uiState === UI_STATE.GENERATING || (isSlideRevealPending && uiState !== UI_STATE.SLIDESHOW)) {
       setQuestionQueue((prev) => [trimmedQuery, ...prev])
       showToast('Question queued')
       enqueueVoiceAgentMessage('Got it. I will answer that right after this.')
@@ -3035,7 +3230,9 @@ function App() {
           previousSlidesCount: previousSlideCount,
         })
 
-        persistTopicSlides(activeTopic.id, nextSlides)
+        // Get current version ID for persistence
+        const currentVersion = activeTopic.versions?.[activeTopic.currentVersionIndex ?? 0]
+        persistTopicSlides(activeTopic.id, nextSlides, currentVersion?.id)
 
         setTopics((prev) => {
           const updated = prev.map((topic) =>
@@ -3176,15 +3373,23 @@ function App() {
     if (!topicId) return
     const targetTopic = topics.find((topic) => topic.id === topicId)
     const needsSlides = !targetTopic?.slides || targetTopic.slides.length === 0
-    const cachedSlides = needsSlides ? loadTopicSlidesFromStorage(topicId) : null
+    // Use loadSlidesForTopic to try version-specific storage first, then legacy
+    const cachedSlides = needsSlides ? loadSlidesForTopic(targetTopic) : null
     const now = Date.now()
 
     setTopics((prev) => {
       const updated = prev.map((topic) => {
         if (topic.id !== topicId) return topic
+        const versionIndex = topic.currentVersionIndex ?? 0
+        const updatedVersions = cachedSlides && Array.isArray(topic.versions)
+          ? topic.versions.map((v, idx) => (
+              idx === versionIndex ? { ...v, slides: cachedSlides } : v
+            ))
+          : topic.versions
         return {
           ...topic,
           slides: needsSlides ? (cachedSlides || topic.slides) : topic.slides,
+          versions: updatedVersions,
           lastAccessedAt: now,
           headerSlide: topic.headerSlide || createHeaderSlide(topic),
         }
@@ -3508,8 +3713,9 @@ function App() {
     const { topicId, slideIndex } = interruptResumePoint
     const resumeTopic = topics.find((topic) => topic.id === topicId)
     const hasCachedSlides = resumeTopic?.slides && resumeTopic.slides.length > 0
-    const cachedSlides = !hasCachedSlides && resumeTopic?.id
-      ? loadTopicSlidesFromStorage(resumeTopic.id)
+    // Use loadSlidesForTopic to try version-specific storage first, then legacy
+    const cachedSlides = !hasCachedSlides && resumeTopic
+      ? loadSlidesForTopic(resumeTopic)
       : null
     const resumeSlides = cachedSlides
       ? [createHeaderSlide(resumeTopic), ...cachedSlides]
@@ -3608,6 +3814,8 @@ function App() {
                     onClick={() => {
                       setSelectedLevel(level)
                       setShowTextFallback(false)
+                      setIsMicEnabled(true)
+                      setAllowAutoListen(true)
                       setUiState(UI_STATE.LISTENING)
                       // startListening will be triggered by auto-listen effect
                     }}
