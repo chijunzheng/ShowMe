@@ -9,6 +9,7 @@ import LevelCard from './components/LevelCard'
 import RegenerateDropdown from './components/RegenerateDropdown'
 import { useWebSocket, PROGRESS_TYPES } from './hooks/useWebSocket'
 import logger from './utils/logger'
+import { playMicOnSound, playRecordingCompleteSound } from './utils/soundEffects'
 
 // App states
 const UI_STATE = {
@@ -2506,6 +2507,9 @@ function App() {
       // Clean up audio resources (this also tries to stop, but recorder is already stopped)
       stopListening()
 
+      // Play confirmation sound to indicate recording complete
+      playRecordingCompleteSound()
+
       // F027: Validate audio was captured
       if (chunks.length === 0) {
         logger.warn('AUDIO', 'No audio chunks captured, cannot transcribe')
@@ -2680,6 +2684,7 @@ function App() {
       setIsPlaying(false)
     }
 
+    playMicOnSound()
     startListening()
   }, [
     isMicEnabled,
@@ -3812,6 +3817,7 @@ function App() {
                     description={config.description}
                     isSelected={selectedLevel === level}
                     onClick={() => {
+                      playMicOnSound()
                       setSelectedLevel(level)
                       setShowTextFallback(false)
                       setIsMicEnabled(true)

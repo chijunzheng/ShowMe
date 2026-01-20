@@ -1,7 +1,7 @@
 {
   "category": "core",
   "description": "Core MVP Features - Voice-first educational slideshow app",
-  "feature_count": 30,
+  "feature_count": 31,
   "features": [
     {
       "id": "CORE001",
@@ -1029,6 +1029,50 @@
         {
           "id": "T005",
           "description": "Verify all headlines convey similar meaning (asking what to learn/show)",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE031",
+      "name": "Voice interaction sound effects",
+      "description": "Gentle audio feedback for voice interactions: mic-on chime when starting to listen, confirmation tone when recording completes",
+      "priority": 2,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Click level card on HOME screen to start listening",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify gentle mic-on sound plays (rising chime)",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Click raise hand button during slideshow",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify same mic-on sound plays for raise hand",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Speak a question and finish recording",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify recording-complete sound plays (ascending arpeggio)",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify sounds are synthesized (no external audio files)",
           "status": "pending"
         }
       ]
