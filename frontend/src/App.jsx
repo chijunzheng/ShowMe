@@ -56,6 +56,15 @@ const GENERATION_TIMEOUT = {
   FUN_FACT_REFRESH_DELAY_MS: 60000,
 }
 
+const GENERATION_PROGRESS_PERCENT = {
+  [PROGRESS_TYPES.START]: 10,
+  [PROGRESS_TYPES.SCRIPT_READY]: 35,
+  [PROGRESS_TYPES.IMAGES_GENERATING]: 65,
+  [PROGRESS_TYPES.AUDIO_GENERATING]: 85,
+  [PROGRESS_TYPES.COMPLETE]: 100,
+  [PROGRESS_TYPES.ERROR]: 100,
+}
+
 // Microphone permission states
 const PERMISSION_STATE = {
   PROMPT: 'prompt',
@@ -73,6 +82,10 @@ const MAX_VERSIONS_PER_TOPIC = 5
 const TOPICS_STORAGE_KEY = 'showme_topics'
 // CORE027: localStorage key prefix for per-topic slide storage
 const TOPIC_SLIDES_STORAGE_PREFIX = 'showme_topic_slides_'
+// CORE027: localStorage key for stable client ID (server-side slide storage)
+const CLIENT_ID_STORAGE_KEY = 'showme_client_id'
+
+const SLIDES_API_BASE = '/api/slides'
 
 // CORE027: Storage version for schema migration
 // Version 3 adds versions array support for regeneration feature
@@ -130,16 +143,16 @@ const AUDIO_CONFIG = {
 
 // Voice agent script templates
 const VOICE_AGENT_SCRIPT = {
-  GENERATION_START: "Got it. Give me a moment.",
+  GENERATION_START: "",
   PREPARING_FOLLOW_UP: "Preparing your follow-up now.",
   // Dynamic slides ready message based on topic and count
   getSlidesReadyMessage: (topicName, slideCount) => {
     if (topicName && slideCount > 1) {
-      return `I've prepared ${slideCount} slides about ${topicName}. Let's explore!`
+      return `Slides about ${topicName} are ready.`
     } else if (slideCount > 1) {
-      return `Your ${slideCount} slides are ready. Let's explore!`
+      return "Your slides are ready."
     }
-    return "Your explanation is ready. Let's take a look!"
+    return "Your explanation is ready."
   },
   // Suggestions slide messages - randomly selected for variety
   SUGGESTIONS_MESSAGES: [
@@ -164,6 +177,28 @@ function getTopicSlidesStorageKey(topicId, versionId) {
     return `${TOPIC_SLIDES_STORAGE_PREFIX}${topicId}_${versionId}`
   }
   return `${TOPIC_SLIDES_STORAGE_PREFIX}${topicId}`
+}
+
+/**
+ * Get or create a stable client ID for server-side slide storage.
+ * @returns {string|null} Stable client ID or null when unavailable
+ */
+function getStoredClientId() {
+  if (typeof window === 'undefined') return null
+  try {
+    const existing = localStorage.getItem(CLIENT_ID_STORAGE_KEY)
+    if (existing) return existing
+
+    const fallback = `client_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+    const generated = window.crypto?.randomUUID ? window.crypto.randomUUID() : fallback
+    localStorage.setItem(CLIENT_ID_STORAGE_KEY, generated)
+    return generated
+  } catch (error) {
+    logger.warn('STORAGE', 'Failed to access client ID storage', {
+      error: error.message,
+    })
+    return null
+  }
 }
 
 /**
@@ -197,12 +232,58 @@ function sanitizeSlidesForStorage(slides, topicId) {
 }
 
 /**
+ * Persist slides to the backend for durable storage.
+ * @param {string} topicId - Topic ID
+ * @param {Array} slides - Sanitized slides
+ * @param {string} [versionId] - Optional version ID
+ * @param {Object} [options] - Persistence options
+ */
+async function persistSlidesToServer(topicId, slides, versionId, options = {}) {
+  const clientId = getStoredClientId()
+  if (!clientId || !topicId || !Array.isArray(slides) || slides.length === 0) {
+    return
+  }
+
+  if (options.skipRemote) {
+    return
+  }
+
+  try {
+    const response = await fetch(`${SLIDES_API_BASE}/save`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientId,
+        topicId,
+        versionId,
+        slides,
+      }),
+    })
+
+    if (!response.ok) {
+      logger.warn('STORAGE', 'Failed to persist slides to server', {
+        status: response.status,
+        topicId,
+        versionId,
+      })
+    }
+  } catch (error) {
+    logger.warn('STORAGE', 'Slides server persistence failed', {
+      error: error.message,
+      topicId,
+      versionId,
+    })
+  }
+}
+
+/**
  * Persist slides for a topic into localStorage.
  * @param {string} topicId - Topic ID
  * @param {Array} slides - Slide objects to store
  * @param {string} [versionId] - Optional version ID for per-version storage
+ * @param {Object} [options] - Persistence options
  */
-function persistTopicSlides(topicId, slides, versionId) {
+function persistTopicSlides(topicId, slides, versionId, options = {}) {
   const storageKey = getTopicSlidesStorageKey(topicId, versionId)
   console.log('[DEBUG PERSIST] Saving slides:', { topicId, versionId, storageKey, slidesCount: slides?.length })
   if (!topicId || !Array.isArray(slides)) {
@@ -218,6 +299,8 @@ function persistTopicSlides(topicId, slides, versionId) {
     })
     return false
   }
+
+  void persistSlidesToServer(topicId, sanitizedSlides, versionId, options)
 
   const payload = {
     version: TOPIC_SLIDES_STORAGE_VERSION,
@@ -907,6 +990,11 @@ function App() {
     totalSlides: 0,  // Total number of slides being generated
   })
 
+  const generationProgressPercent = useMemo(() => {
+    if (!generationProgress.stage) return 0
+    return GENERATION_PROGRESS_PERCENT[generationProgress.stage] ?? 0
+  }, [generationProgress.stage])
+
   /**
    * F015: Handle WebSocket progress messages
    * Updates the generation progress state based on incoming messages
@@ -1047,6 +1135,86 @@ function App() {
   }, [])
 
   /**
+   * Fetch slides for a topic/version from the backend and hydrate local state.
+   * @param {string} topicId - Topic ID
+   * @param {string} [versionId] - Version ID to load
+   * @param {number} [versionIndex] - Version index to hydrate
+   * @returns {Promise<Array|null>} Loaded slides or null
+   */
+  const fetchSlidesFromServer = useCallback(async (topicId, versionId, versionIndex) => {
+    if (!topicId) return null
+    const clientId = getStoredClientId()
+    if (!clientId) return null
+
+    const key = `${topicId}_${versionId || 'current'}`
+    const inFlight = slideServerFetchRef.current.get(key)
+    if (inFlight) return inFlight
+
+    const requestPromise = (async () => {
+      try {
+        const response = await fetch(`${SLIDES_API_BASE}/load`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clientId, topicId, versionId }),
+        })
+
+        if (!response.ok) {
+          logger.warn('STORAGE', 'Slide load from server failed', {
+            status: response.status,
+            topicId,
+            versionId,
+          })
+          return null
+        }
+
+        const data = await response.json()
+        const slides = Array.isArray(data.slides) ? data.slides : null
+        if (!slides || slides.length === 0) {
+          return null
+        }
+
+        const now = Date.now()
+        setTopics((prev) => {
+          const updated = prev.map((topic) => {
+            if (topic.id !== topicId) return topic
+            const targetIndex = Number.isInteger(versionIndex)
+              ? versionIndex
+              : (topic.currentVersionIndex ?? 0)
+            const updatedVersions = Array.isArray(topic.versions)
+              ? topic.versions.map((v, idx) =>
+                  idx === targetIndex ? { ...v, slides } : v
+                )
+              : topic.versions
+            return {
+              ...topic,
+              slides,
+              versions: updatedVersions,
+              lastAccessedAt: now,
+            }
+          })
+          return pruneSlideCache(updated, topicId)
+        })
+
+        // Cache locally to avoid repeated server fetches
+        persistTopicSlides(topicId, slides, versionId, { skipRemote: true })
+        return slides
+      } catch (error) {
+        logger.warn('STORAGE', 'Slide load from server failed', {
+          error: error.message,
+          topicId,
+          versionId,
+        })
+        return null
+      } finally {
+        slideServerFetchRef.current.delete(key)
+      }
+    })()
+
+    slideServerFetchRef.current.set(key, requestPromise)
+    return requestPromise
+  }, [pruneSlideCache])
+
+  /**
    * Keep the active topic aligned when topics change.
    * Only auto-select fallback if activeTopicId was set to a value that no longer exists.
    * Do NOT auto-select if activeTopicId is intentionally null (HOME screen).
@@ -1088,6 +1256,11 @@ function App() {
     const isNewActive = lastActiveTopicIdRef.current !== activeTopicId
     // Use loadSlidesForTopic to try version-specific storage first, then legacy
     const cachedSlides = needsSlides ? loadSlidesForTopic(active) : null
+    const currentVersionId = active.versions?.[active.currentVersionIndex ?? 0]?.id
+
+    if (needsSlides && !cachedSlides) {
+      void fetchSlidesFromServer(activeTopicId, currentVersionId)
+    }
 
     if (!isNewActive && !cachedSlides) return
     const now = Date.now()
@@ -1112,7 +1285,7 @@ function App() {
     })
 
     lastActiveTopicIdRef.current = activeTopicId
-  }, [activeTopicId, topics, pruneSlideCache])
+  }, [activeTopicId, topics, pruneSlideCache, fetchSlidesFromServer])
 
   // Toast notification state for queue feedback (F047)
   const [toast, setToast] = useState({ visible: false, message: '' })
@@ -1209,6 +1382,9 @@ function App() {
   const slideTransitionTimeoutRef = useRef(null)
 
   const raiseHandRequestRef = useRef(false)
+
+  // Track in-flight slide fetches from the server to avoid duplicate requests
+  const slideServerFetchRef = useRef(new Map())
 
   // CORE022: Interrupt resume point - stores position when user interrupts slideshow
   // Format: { topicId: string, slideIndex: number } or null when no interrupt occurred
@@ -1763,7 +1939,7 @@ function App() {
    * @param {string} topicName - Name of the topic for the announcement
    * @param {number} slideCount - Number of slides generated
    */
-  const queueSlidesReadyTransition = useCallback((topicName, slideCount) => {
+  const queueSlidesReadyTransition = useCallback(() => {
     // Stop any currently playing voice agent audio (e.g., fun fact)
     if (voiceAgentAudioRef.current) {
       voiceAgentAudioRef.current.pause()
@@ -1775,17 +1951,9 @@ function App() {
     voiceAgentBusyRef.current = false
     clearFunFactRefresh()
 
-    setIsSlideRevealPending(true)
-    const readyMessage = VOICE_AGENT_SCRIPT.getSlidesReadyMessage(topicName, slideCount)
-    enqueueVoiceAgentMessage(readyMessage, {
-      priority: 'high',
-      completeOnError: true,
-      onComplete: () => {
-        setIsSlideRevealPending(false)
-        setUiState(UI_STATE.SLIDESHOW)
-      },
-    })
-  }, [enqueueVoiceAgentMessage, clearFunFactRefresh])
+    setIsSlideRevealPending(false)
+    setUiState(UI_STATE.SLIDESHOW)
+  }, [clearFunFactRefresh])
 
   /**
    * Cancel ongoing generation request (F053)
@@ -3382,6 +3550,11 @@ function App() {
     const cachedSlides = needsSlides ? loadSlidesForTopic(targetTopic) : null
     const now = Date.now()
 
+    if (needsSlides && !cachedSlides) {
+      const currentVersionId = targetTopic?.versions?.[targetTopic.currentVersionIndex ?? 0]?.id
+      void fetchSlidesFromServer(topicId, currentVersionId)
+    }
+
     setTopics((prev) => {
       const updated = prev.map((topic) => {
         if (topic.id !== topicId) return topic
@@ -3408,7 +3581,7 @@ function App() {
     if (uiState !== UI_STATE.SLIDESHOW && topics.length > 0) {
       setUiState(UI_STATE.SLIDESHOW)
     }
-  }, [uiState, topics, pruneSlideCache])
+  }, [uiState, topics, pruneSlideCache, fetchSlidesFromServer])
 
   /**
    * Handle topic rename from sidebar
@@ -3641,7 +3814,7 @@ function App() {
    * Loads slides from storage if not available in memory.
    * @param {number} versionIndex - Index of the version to switch to
    */
-  const handleVersionSwitch = useCallback((versionIndex) => {
+  const handleVersionSwitch = useCallback(async (versionIndex) => {
     if (!activeTopic) return
 
     const versions = activeTopic.versions || []
@@ -3670,16 +3843,21 @@ function App() {
           slidesCount: slides.length,
         })
       } else {
-        logger.warn('VERSION', 'No slides found for version', {
-          topicId: activeTopic.id,
-          versionId: targetVersion.id,
-        })
-        // Show toast to inform user
-        setToast({
-          visible: true,
-          message: 'Version slides not available. Try regenerating.',
-        })
-        return
+        const remoteSlides = await fetchSlidesFromServer(activeTopic.id, targetVersion.id, versionIndex)
+        if (remoteSlides) {
+          slides = remoteSlides
+        } else {
+          logger.warn('VERSION', 'No slides found for version', {
+            topicId: activeTopic.id,
+            versionId: targetVersion.id,
+          })
+          // Show toast to inform user
+          setToast({
+            visible: true,
+            message: 'Version slides not available. Try regenerating.',
+          })
+          return
+        }
       }
     }
 
@@ -3706,7 +3884,7 @@ function App() {
 
     // Reset to first slide when switching versions
     setCurrentIndex(0)
-  }, [activeTopic])
+  }, [activeTopic, fetchSlidesFromServer])
 
   /**
    * CORE022: Handle resuming from an interrupt point
@@ -3991,6 +4169,29 @@ function App() {
                 ? 'Still working...'
                 : generationProgress.message || 'Creating your explanation...'}
             </p>
+
+            {/* Progress bar */}
+            <div className="w-full max-w-md">
+              <div
+                role="progressbar"
+                aria-valuenow={generationProgressPercent}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                className="h-2 w-full bg-gray-200 rounded-full overflow-hidden"
+              >
+                <div
+                  className="h-full bg-primary transition-all duration-500 ease-out"
+                  style={{ width: `${generationProgressPercent}%` }}
+                />
+              </div>
+              {generationProgress.totalSlides > 0 && (
+                <p className="mt-2 text-xs text-gray-500 text-center">
+                  {generationProgress.slidesReady > 0
+                    ? `${generationProgress.slidesReady} of ${generationProgress.totalSlides} slides ready`
+                    : `${generationProgress.totalSlides} slides in progress`}
+                </p>
+              )}
+            </div>
 
             {/* Cancel button - always visible during generation */}
             <button
