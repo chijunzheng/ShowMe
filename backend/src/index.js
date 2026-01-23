@@ -49,8 +49,8 @@ app.use(helmet({
       scriptSrc: ["'self'"],
       // Allow inline styles for Tailwind CSS and Google Fonts
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      // Allow images from self, data URIs (for base64), and placehold.co
-      imgSrc: ["'self'", "data:", "https://placehold.co"],
+      // Allow images from self, data URIs (for base64), placehold.co, and GCS signed URLs
+      imgSrc: ["'self'", "data:", "https://placehold.co", "https://storage.googleapis.com", "https://*.storage.googleapis.com"],
       // Allow fonts from self and common CDNs
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       // Allow API connections to self and WebSocket
@@ -102,7 +102,15 @@ app.use(cors({
 }))
 
 // Parse JSON bodies with size limit (security measure)
-app.use(express.json({ limit: '10kb' }))
+// Slides payloads can be large (base64 images), so allow a larger limit on /api/slides.
+const smallJson = express.json({ limit: '10kb' })
+const largeJson = express.json({ limit: '20mb' })
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/slides')) {
+    return largeJson(req, res, next)
+  }
+  return smallJson(req, res, next)
+})
 
 // F077: Request logging middleware - logs all requests with timing
 app.use(requestLogger)
@@ -140,6 +148,7 @@ import greetingRoutes from './routes/greeting.js'
 import topicRoutes from './routes/topic.js'
 import voiceRoutes from './routes/voice.js'
 import chitchatRoutes from './routes/chitchat.js'
+import slidesRoutes from './routes/slides.js'
 
 app.use('/api/generate', generateRoutes)
 app.use('/api/classify', classifyRoutes)
@@ -148,6 +157,7 @@ app.use('/api/greeting', greetingRoutes)
 app.use('/api/topic', topicRoutes)
 app.use('/api/voice', voiceRoutes)
 app.use('/api/chitchat', chitchatRoutes)
+app.use('/api/slides', slidesRoutes)
 
 // Serve frontend static files in production
 if (process.env.NODE_ENV === 'production') {

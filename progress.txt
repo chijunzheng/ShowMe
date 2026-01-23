@@ -1096,3 +1096,50 @@ Updated topic structure to support versions:
 
 ### Files Modified
 - `frontend/src/App.jsx`
+
+---
+
+## Session 16: Adaptive Follow-up Responses & 2D Slides (2026-01-21)
+
+### Completed Features
+- **CORE032: Adaptive Follow-up Responses** - IMPLEMENTED
+  - Backend: Gemini model now determines query complexity (`trivial`, `simple`, `moderate`, `complex`).
+  - Trivial: Handled with a voice-only response.
+  - Simple/Moderate: Slide count is now determined by the LLM based on complexity guidance.
+  - Complex: Agent responds with a verbal prompt to narrow the topic.
+- **CORE032: 2D Slide Navigation** - IMPLEMENTED
+  - Backend: Follow-up slides now include a `parentId`.
+  - Frontend:
+    - Slide state refactored to support a parent-child hierarchy.
+    - UI updated with vertical navigation controls (Up/Down arrows) and indicators for nested slides.
+    - Keyboard navigation now supports 2D movement (ArrowUp, ArrowDown).
+    - Auto-advance logic correctly traverses child slides before moving to the next parent.
+
+### Files Created
+- None.
+
+### Files Modified
+- `backend/src/services/gemini.js`:
+  - Added `determineQueryComplexity` function.
+  - Updated `generateScript` to use `complexity` to guide the LLM.
+- `backend/src/routes/classify.js`:
+  - Integrated `determineQueryComplexity` to return complexity in the API response.
+- `backend/src/routes/generate.js`:
+  - Updated `/api/generate/follow-up` to handle `parentId` and `complexity`.
+- `frontend/src/App.jsx`:
+  - Refactored state and navigation logic for 2D slides.
+  - Updated `handleQuestion` to manage complexity-based responses.
+  - Updated slideshow UI to include vertical controls and indicators.
+- `.tdd/features/core-features.json`:
+  - Added and completed feature `CORE032`.
+
+### Git Commits
+- (pending): feat(slides): implement adaptive follow-up responses and 2D slide navigation
+
+### Features Status
+- **Total Features**: 95 (previous 94 + CORE032)
+- **Completed**: Feature `CORE032` implemented.
+
+### Context for Next Agent
+- The application now supports dynamic response types based on the semantic complexity of user follow-up questions.
+- The slideshow can handle nested (2D) slides, with UI controls for vertical and horizontal navigation.

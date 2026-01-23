@@ -959,6 +959,8 @@ function App() {
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
   const [hasDynamicSuggestions, setHasDynamicSuggestions] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
+  // CORE032: Vertical navigation state for 2D slides
+  const [currentChildIndex, setCurrentChildIndex] = useState(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [liveTranscription, setLiveTranscription] = useState('')
   const [lastTranscription, setLastTranscription] = useState('')
@@ -1093,8 +1095,27 @@ function App() {
 
   /**
    * Slides to display in the main content (current topic only).
+   * CORE032: Split into top-level visible slides and child slides for 2D navigation
    */
-  const visibleSlides = useMemo(() => buildTopicSlides(activeTopic), [activeTopic])
+  const allTopicSlides = useMemo(() => buildTopicSlides(activeTopic), [activeTopic])
+  
+  const visibleSlides = useMemo(() => {
+    // Only show top-level slides (no parentId) in the main horizontal flow
+    return allTopicSlides.filter(s => !s.parentId)
+  }, [allTopicSlides])
+
+  const activeChildSlides = useMemo(() => {
+    const currentParent = visibleSlides[currentIndex]
+    if (!currentParent) return []
+    return allTopicSlides.filter(s => s.parentId === currentParent.id)
+  }, [allTopicSlides, visibleSlides, currentIndex])
+
+  const displayedSlide = useMemo(() => {
+    if (currentChildIndex !== null && activeChildSlides[currentChildIndex]) {
+      return activeChildSlides[currentChildIndex]
+    }
+    return visibleSlides[currentIndex]
+  }, [visibleSlides, currentIndex, activeChildSlides, currentChildIndex])
 
   /**
    * Limit in-memory slides to a recent-access cache to avoid unbounded growth.
@@ -1822,12 +1843,40 @@ function App() {
   }, [topics])
 
   // Navigation helper functions with bounds checking (F044)
+  // CORE032: 2D Navigation Logic
   const goToNextSlide = useCallback(() => {
-    setCurrentIndex((prev) => Math.min(visibleSlides.length - 1, prev + 1))
+    setCurrentIndex((prev) => {
+      const nextIndex = Math.min(visibleSlides.length - 1, prev + 1)
+      if (nextIndex !== prev) {
+        setCurrentChildIndex(null) // Reset vertical position when moving horizontally
+      }
+      return nextIndex
+    })
   }, [visibleSlides.length])
 
   const goToPrevSlide = useCallback(() => {
-    setCurrentIndex((prev) => Math.max(0, prev - 1))
+    setCurrentIndex((prev) => {
+      const nextIndex = Math.max(0, prev - 1)
+      if (nextIndex !== prev) {
+        setCurrentChildIndex(null)
+      }
+      return nextIndex
+    })
+  }, [])
+
+  const goToChildNext = useCallback(() => {
+    if (activeChildSlides.length === 0) return
+    setCurrentChildIndex((prev) => {
+      if (prev === null) return 0
+      return Math.min(activeChildSlides.length - 1, prev + 1)
+    })
+  }, [activeChildSlides.length])
+
+  const goToChildPrev = useCallback(() => {
+    setCurrentChildIndex((prev) => {
+      if (prev === null || prev === 0) return null
+      return prev - 1
+    })
   }, [])
 
   const togglePlayPause = useCallback(() => {
@@ -2062,6 +2111,19 @@ function App() {
         return
       }
 
+      // CORE032: 2D Auto-advance Logic
+      // Try to go to next child first
+      if (activeChildSlides.length > 0) {
+        if (currentChildIndex === null) {
+          setCurrentChildIndex(0)
+          return
+        } else if (currentChildIndex < activeChildSlides.length - 1) {
+          setCurrentChildIndex(prev => prev + 1)
+          return
+        }
+      }
+
+      // If no more children, go to next parent
       setCurrentIndex((prev) => {
         const nextIndex = prev + 1
         // If we reach the end, stop playing and mark slideshow as finished (F048)
@@ -2070,6 +2132,7 @@ function App() {
           hasFinishedSlideshowRef.current = true
           return prev
         }
+        setCurrentChildIndex(null) // Reset child index when moving to next parent
         return nextIndex
       })
     }, duration)
@@ -2109,6 +2172,14 @@ function App() {
         case 'ArrowLeft':
           event.preventDefault()
           goToPrevSlide()
+          break
+        case 'ArrowDown':
+          event.preventDefault()
+          goToChildNext()
+          break
+        case 'ArrowUp':
+          event.preventDefault()
+          goToChildPrev()
           break
         case ' ':
           // Space bar toggles play/pause
@@ -3089,6 +3160,30 @@ function App() {
         }
       }
 
+      // CORE032: Handle complexity for follow-ups
+      if (classifyResult.classification === 'follow_up' && classifyResult.complexity) {
+        const complexity = classifyResult.complexity
+        logger.info('GENERATION', 'Handling follow-up with complexity', { complexity })
+
+        if (complexity === 'trivial') {
+          // Trivial: Voice only response (reuse slide_question logic or similar)
+          logger.info('GENERATION', 'Trivial complexity - using verbal response')
+          // Treat as slide_question for verbal-only flow
+          classifyResult.classification = 'slide_question' 
+          // (Fall through to slide_question handler below)
+        } else if (complexity === 'complex') {
+          // Complex: Voice choice/prompt
+          logger.info('GENERATION', 'Complex complexity - asking for clarification')
+          const complexPrompt = "That's a really big topic with many details. I can focus on the history, the mechanism, or real-world examples. Which would you like?"
+          enqueueVoiceAgentMessage(complexPrompt, { priority: 'high' })
+          setVoiceAgentQueue([])
+          setUiState(UI_STATE.SLIDESHOW) // Return to slideshow if we were there, or listening
+          logger.timeEnd('GENERATION', 'full-pipeline')
+          return
+        }
+        // Simple/Moderate: Continue to generate/follow-up with complexity param
+      }
+
       // CORE023, CORE024: Handle slide_question classification
       // This is a question about the current slide content - generate verbal response only
       if (classifyResult.classification === 'slide_question') {
@@ -3111,6 +3206,7 @@ function App() {
         }
 
         // Call the respond API for verbal-only response
+        // Use /api/generate/respond (it handles general verbal responses well)
         logger.time('API', 'respond-request')
         logger.info('API', 'POST /api/generate/respond', {
           endpoint: '/api/generate/respond',
@@ -3309,6 +3405,8 @@ function App() {
             conversationHistory: [],
             clientId: wsClientId,
             explanationLevel: activeTopic.explanationLevel || selectedLevelRef.current,
+            complexity: classifyResult.complexity, // CORE032
+            parentId: visibleSlides[currentIndex]?.id, // CORE032: Current slide is parent
           }),
           signal,
         })
@@ -4258,23 +4356,38 @@ function App() {
             )}
             {/* F050: Slide content with fade transition - key triggers animation on slide change */}
             {/* F043, F044: handles both header and content slides */}
-            <div key={visibleSlides[currentIndex]?.id || currentIndex} className="slide-fade w-full">
-              {visibleSlides[currentIndex]?.type === 'header' ? (
+            <div key={displayedSlide?.id || `slide-${currentIndex}-${currentChildIndex}`} className="slide-fade w-full relative">
+              {/* CORE032: Vertical navigation indicators (active if children exist) */}
+              {activeChildSlides.length > 0 && (
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-10">
+                  {/* Parent dot */}
+                  <div className={`w-2 h-2 rounded-full transition-all ${currentChildIndex === null ? 'bg-primary scale-125' : 'bg-gray-300'}`} />
+                  {/* Child dots */}
+                  {activeChildSlides.map((_, idx) => (
+                    <div 
+                      key={idx} 
+                      className={`w-2 h-2 rounded-full transition-all ${currentChildIndex === idx ? 'bg-primary scale-125' : 'bg-gray-300'}`}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {displayedSlide?.type === 'header' ? (
                 // F043: Render topic header card with TopicHeader component
                 <div className="w-full aspect-video bg-surface rounded-xl shadow-lg overflow-hidden">
                   <TopicHeader
-                    icon={visibleSlides[currentIndex].topicIcon}
-                    name={visibleSlides[currentIndex].topicName}
+                    icon={displayedSlide.topicIcon}
+                    name={displayedSlide.topicName}
                   />
                 </div>
-              ) : visibleSlides[currentIndex]?.type === 'suggestions' ? (
+              ) : displayedSlide?.type === 'suggestions' ? (
                 // Render suggestions slide with clickable question buttons
                 <div className="w-full aspect-video bg-gradient-to-br from-primary/5 to-primary/10 rounded-xl shadow-lg overflow-hidden flex flex-col items-center justify-center p-6 md:p-8">
                   <h3 className="text-xl md:text-2xl font-semibold text-gray-800 mb-6 text-center">
                     Want to learn more?
                   </h3>
                   <div className="flex flex-col gap-3 w-full max-w-md">
-                    {visibleSlides[currentIndex]?.questions?.map((question, idx) => (
+                    {displayedSlide?.questions?.map((question, idx) => (
                       <button
                         key={idx}
                         onClick={() => handleSuggestionClick(question)}
@@ -4291,7 +4404,7 @@ function App() {
                   {/* CORE024: Container with relative positioning for highlight overlay */}
                   <div className="relative w-full aspect-video bg-surface rounded-xl shadow-lg overflow-hidden">
                     <img
-                      src={visibleSlides[currentIndex]?.imageUrl}
+                      src={displayedSlide?.imageUrl}
                       alt="Slide diagram"
                       className="w-full h-full object-contain"
                     />
@@ -4306,7 +4419,7 @@ function App() {
                   {/* Subtitle - only shown for content slides */}
                   <div className="mt-4">
                     {/* F091: Show "Key Takeaways" badge for conclusion slides */}
-                    {visibleSlides[currentIndex]?.isConclusion && (
+                    {displayedSlide?.isConclusion && (
                       <div className="flex justify-center mb-2">
                         <span className="text-xs font-medium px-2 py-0.5 bg-primary/10 text-primary rounded-full">
                           Key Takeaways
@@ -4314,7 +4427,7 @@ function App() {
                       </div>
                     )}
                     <p className="text-base text-center line-clamp-5">
-                      {visibleSlides[currentIndex]?.subtitle}
+                      {displayedSlide?.subtitle}
                     </p>
                   </div>
                 </>
@@ -4327,10 +4440,11 @@ function App() {
                 // Use different styling for header, suggestions, and content dots
                 const isHeader = slide.type === 'header'
                 const isSuggestions = slide.type === 'suggestions'
+                const hasChildren = allTopicSlides.some(s => s.parentId === slide.id) // Check for children
                 return (
                   <button
                     key={slide.id}
-                    onClick={() => setCurrentIndex(i)}
+                    onClick={() => { setCurrentIndex(i); setCurrentChildIndex(null); }}
                     role="tab"
                     aria-selected={i === currentIndex}
                     aria-label={
@@ -4340,7 +4454,7 @@ function App() {
                         ? 'Go to suggested questions'
                         : `Go to slide ${i + 1} of ${visibleSlides.length}`
                     }
-                    className="p-2 transition-colors cursor-pointer hover:scale-125"
+                    className="p-2 transition-colors cursor-pointer hover:scale-125 relative"
                   >
                     {/* Inner dot - visual indicator, outer padding provides 44px touch target */}
                     {/* Header: rectangle, Suggestions: diamond, Content: circle */}
@@ -4353,44 +4467,76 @@ function App() {
                           : `w-3 h-3 rounded-full ${i === currentIndex ? 'bg-primary' : 'bg-gray-300'}`
                       }`}
                     />
+                    {/* Indicator for slides with children */}
+                    {hasChildren && i !== currentIndex && (
+                      <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1 h-1 bg-gray-400 rounded-full" />
+                    )}
                   </button>
                 )
               })}
             </div>
 
             {/* Controls - arrow buttons and play/pause */}
-            <div className="flex items-center gap-4">
-              <button
-                onClick={goToPrevSlide}
-                disabled={currentIndex === 0}
-                aria-label="Previous slide"
-                className={`p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${
-                  currentIndex === 0
-                    ? 'text-gray-300 cursor-not-allowed'
-                    : 'text-gray-500 hover:text-primary hover:bg-gray-100'
-                }`}
-              >
-                <span aria-hidden="true">&#9664;</span>
-              </button>
-              <button
-                onClick={togglePlayPause}
-                aria-label={isPlaying ? 'Pause slideshow' : 'Play slideshow'}
-                className="p-3 min-w-[44px] min-h-[44px] bg-primary text-white rounded-full hover:bg-primary/90 transition-colors"
-              >
-                <span aria-hidden="true">{isPlaying ? '\u275A\u275A' : '\u25B6'}</span>
-              </button>
-              <button
-                onClick={goToNextSlide}
-                disabled={currentIndex === visibleSlides.length - 1}
-                aria-label="Next slide"
-                className={`p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${
-                  currentIndex === visibleSlides.length - 1
-                    ? 'text-gray-300 cursor-not-allowed'
-                    : 'text-gray-500 hover:text-primary hover:bg-gray-100'
-                }`}
-              >
-                <span aria-hidden="true">&#9654;</span>
-              </button>
+            <div className="flex flex-col items-center gap-2">
+              {/* CORE032: Vertical controls (only visible if children exist) */}
+              {activeChildSlides.length > 0 && (
+                <button
+                  onClick={goToChildPrev}
+                  disabled={currentChildIndex === null}
+                  className={`p-2 rounded-full transition-colors ${
+                    currentChildIndex === null ? 'text-gray-200' : 'text-primary hover:bg-gray-100'
+                  }`}
+                >
+                  <span aria-hidden="true">&#9650;</span>
+                </button>
+              )}
+              
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={goToPrevSlide}
+                  disabled={currentIndex === 0}
+                  aria-label="Previous slide"
+                  className={`p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${
+                    currentIndex === 0
+                      ? 'text-gray-300 cursor-not-allowed'
+                      : 'text-gray-500 hover:text-primary hover:bg-gray-100'
+                  }`}
+                >
+                  <span aria-hidden="true">&#9664;</span>
+                </button>
+                <button
+                  onClick={togglePlayPause}
+                  aria-label={isPlaying ? 'Pause slideshow' : 'Play slideshow'}
+                  className="p-3 min-w-[44px] min-h-[44px] bg-primary text-white rounded-full hover:bg-primary/90 transition-colors"
+                >
+                  <span aria-hidden="true">{isPlaying ? '\u275A\u275A' : '\u25B6'}</span>
+                </button>
+                <button
+                  onClick={goToNextSlide}
+                  disabled={currentIndex === visibleSlides.length - 1}
+                  aria-label="Next slide"
+                  className={`p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${
+                    currentIndex === visibleSlides.length - 1
+                      ? 'text-gray-300 cursor-not-allowed'
+                      : 'text-gray-500 hover:text-primary hover:bg-gray-100'
+                  }`}
+                >
+                  <span aria-hidden="true">&#9654;</span>
+                </button>
+              </div>
+
+              {/* CORE032: Down arrow for children */}
+              {activeChildSlides.length > 0 && (
+                <button
+                  onClick={goToChildNext}
+                  disabled={currentChildIndex === activeChildSlides.length - 1}
+                  className={`p-2 rounded-full transition-colors ${
+                    currentChildIndex === activeChildSlides.length - 1 ? 'text-gray-200' : 'text-primary hover:bg-gray-100'
+                  }`}
+                >
+                  <span aria-hidden="true">&#9660;</span>
+                </button>
+              )}
             </div>
 
             {/* CORE022: Resume button - shown when user interrupted a previous slideshow */}

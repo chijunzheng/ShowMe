@@ -1,6 +1,6 @@
 import express from 'express'
 import { sanitizeQuery } from '../utils/sanitize.js'
-// import { classifyQuery } from '../services/gemini.js'
+import { determineQueryComplexity } from '../services/gemini.js'
 
 const router = express.Router()
 
@@ -536,11 +536,21 @@ router.post('/', async (req, res) => {
       currentSlide
     )
 
+    // CORE032: Determine complexity for follow_up and slide_question
+    let complexity = 'simple'
+    if (classifyResult.isFollowUp || classifyResult.classification === 'slide_question') {
+      const context = currentSlide ? `Current slide: ${currentSlide.subtitle}` : `Topic: ${activeTopic?.name}`
+      const complexityResult = await determineQueryComplexity(sanitizedQuery, context)
+      complexity = complexityResult.complexity
+      // If LLM fails or returns something unexpected, it falls back to 'simple' internally
+    }
+
     // CORE023: Handle slide_question classification
     if (classifyResult.classification === 'slide_question') {
       return res.json({
         classification: 'slide_question',
         reasoning: classifyResult.reasoning,
+        complexity, // CORE032
         shouldEvictOldest: false,
         evictTopicId: null,
       })
@@ -555,6 +565,7 @@ router.post('/', async (req, res) => {
     const response = {
       classification: isFollowUp ? 'follow_up' : 'new_topic',
       reasoning,
+      complexity: isFollowUp ? complexity : undefined, // CORE032
       shouldEvictOldest,
       evictTopicId: shouldEvictOldest ? oldestTopicId : null,
     }

@@ -328,16 +328,16 @@ router.post('/', async (req, res) => {
  * F015: Sends WebSocket progress updates during generation if clientId provided
  * F016: Real AI-generated educational diagrams (with mock fallback)
  * F017: Real TTS audio narration (with mock fallback)
+ * CORE032: Supports complexity-based generation and nested slides (parentId)
  *
  * Request body:
  * - query (required): The follow-up question
  * - topicId (required): Existing topic ID to append to
+ * - parentId (optional): ID of the parent slide for nested structure
+ * - complexity (optional): 'trivial', 'simple', 'moderate', 'complex'
  * - conversationHistory (optional): Previous conversation context
  * - clientId (optional): WebSocket client ID for progress updates
- * - explanationLevel (optional): Level of explanation detail - 'simple', 'standard' (default), or 'deep'
- *   - simple: Everyday language, analogies, shorter sentences, for curious beginners
- *   - standard: Balanced with key concepts and some technical terms
- *   - deep: Technical depth, proper terminology, comprehensive coverage
+ * - explanationLevel (optional): Level of explanation detail
  *
  * Response:
  * - slides: Array of new slide objects
@@ -345,7 +345,15 @@ router.post('/', async (req, res) => {
  */
 router.post('/follow-up', async (req, res) => {
   try {
-    const { query, topicId, conversationHistory = [], clientId, explanationLevel = 'standard' } = req.body
+    const { 
+      query, 
+      topicId, 
+      parentId, 
+      complexity = 'simple',
+      conversationHistory = [], 
+      clientId, 
+      explanationLevel = 'standard' 
+    } = req.body
 
     // F004: Sanitize and validate query input
     const { sanitized: sanitizedQuery, error: queryError } = sanitizeQuery(query)
@@ -381,6 +389,7 @@ router.post('/follow-up', async (req, res) => {
       sendProgress(clientId, PROGRESS_TYPES.START, {
         query: sanitizedQuery,
         isFollowUp: true,
+        complexity, // Inform client of complexity
         stage: 'Processing follow-up question...'
       })
     }
@@ -395,7 +404,7 @@ router.post('/follow-up', async (req, res) => {
 
     if (useRealAI) {
       // F016 & F017: Use real Gemini AI for follow-up generation
-      console.log(`[Generate] Using Gemini AI for follow-up: "${sanitizedQuery.substring(0, 50)}..." (level: ${explanationLevel})`)
+      console.log(`[Generate] Using Gemini AI for follow-up: "${sanitizedQuery.substring(0, 50)}..." (level: ${explanationLevel}, complexity: ${complexity})`)
 
       // Generate script with conversation context for better follow-up
       const scriptResult = await generateScript(sanitizedQuery, {
@@ -403,6 +412,7 @@ router.post('/follow-up', async (req, res) => {
         isFollowUp: true,
         explanationLevel,
         language,
+        complexity, // Pass complexity to script generator
       })
 
       if (scriptResult.error || !scriptResult.slides) {
@@ -438,6 +448,7 @@ router.post('/follow-up', async (req, res) => {
             duration: content.duration || 5000,
             topicId: sanitizedTopicId,
             segmentId,
+            parentId: parentId || null, // Add parentId for nested structure
             // F091: Mark conclusion slides
             ...(slideScript.isConclusion && { isConclusion: true }),
           }
@@ -465,6 +476,10 @@ router.post('/follow-up', async (req, res) => {
       }
 
       slides = generateMockSlides(sanitizedQuery, sanitizedTopicId, segmentId)
+      // Add parentId to mock slides
+      if (parentId) {
+        slides = slides.map(s => ({ ...s, parentId }))
+      }
     }
 
     // F015: Send 'complete' progress

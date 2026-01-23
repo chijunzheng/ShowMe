@@ -482,3 +482,26 @@ if (uiState === UI_STATE.GENERATING || (isSlideRevealPending && uiState !== UI_S
   return
 }
 ```
+
+---
+
+### Issue 3: Slides Empty After Refresh (Persistent Storage)
+
+**Symptoms:**
+- Topics remained in the left sidebar after refresh
+- Selecting historical topics showed only the header slide
+- Slides did not reload from localStorage
+
+**Root Cause:**
+- Slide images are stored as base64 data URIs from Gemini
+- localStorage quota (5-10MB) is exceeded as topics accumulate
+- Slide archives fail to persist or load, leaving only topic metadata
+
+**Fix Applied:** Firestore + GCS slide store + frontend hydration
+- Added Firestore-backed slide metadata storage and GCS image storage
+- New API endpoints to save/load slides by client + topic/version (signed URLs on load)
+- Frontend persists slides to backend when generated, and hydrates when local cache misses
+- Increased JSON body limit for slide payloads while keeping strict limits elsewhere
+- Allowed GCS domains in CSP for image rendering
+
+**Key Changes:** `backend/src/services/slideStore.js`, `backend/src/routes/slides.js`, `backend/src/index.js`, `frontend/src/App.jsx`

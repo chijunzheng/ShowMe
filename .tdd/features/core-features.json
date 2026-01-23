@@ -1,8 +1,52 @@
 {
   "category": "core",
   "description": "Core MVP Features - Voice-first educational slideshow app",
-  "feature_count": 31,
+  "feature_count": 32,
   "features": [
+    {
+      "id": "CORE032",
+      "name": "Adaptive Follow-up Responses",
+      "description": "Agent handles follow-up queries with varying complexity (Trivial: voice, Simple: voice+1 slide, Moderate: 2-3 slides, Complex: offer choice). Nested slides (2D) for follow-ups.",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Ask trivial follow-up (e.g., 'What color is that?')",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify only voice response (no new slides)",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Ask simple follow-up (e.g., 'Show me another example')",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify 1 new slide generated nested under current slide",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Ask moderate follow-up",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify 2-3 new slides nested",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify UI handles 2D navigation (up/down/left/right)",
+          "status": "pending"
+        }
+      ]
+    },
     {
       "id": "CORE001",
       "name": "Voice recording to transcription",

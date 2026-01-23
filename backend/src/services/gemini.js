@@ -479,7 +479,7 @@ export async function generateScript(query, options = {}) {
     return { slides: null, error: 'API_NOT_AVAILABLE' }
   }
 
-  const { conversationHistory = [], isFollowUp = false, explanationLevel = 'standard', language = 'en' } = options
+  const { conversationHistory = [], isFollowUp = false, explanationLevel = 'standard', language = 'en', complexity = 'simple' } = options
 
   // Validate and normalize explanation level
   const validLevels = ['simple', 'standard', 'deep']
@@ -489,8 +489,18 @@ export async function generateScript(query, options = {}) {
   const levelInstructions = EXPLANATION_LEVEL_INSTRUCTIONS[normalizedLevel]
   const imageLevelInstructions = IMAGE_LEVEL_INSTRUCTIONS[normalizedLevel]
 
-  // Adjust slide count guidance based on level
-  const slideCountGuidance = normalizedLevel === 'simple'
+  // Construct context-aware slide count guidance (CORE032)
+  let slideCountGuidance = ''
+  if (isFollowUp) {
+    slideCountGuidance = `
+CONTEXT: This is a follow-up request with complexity: "${complexity.toUpperCase()}".
+- Adjust the number of slides and depth of explanation based on this complexity.
+- "trivial": Just 1 very simple slide.
+- "simple": 1 slide with clear explanation.
+- "moderate": 2-3 slides to explain the concept.
+- "complex": 3-4 slides to cover the broader scope.`
+  } else {
+    slideCountGuidance = normalizedLevel === 'simple'
     ? `- Create 3-4 content slides (keep it concise and digestible)`
     : normalizedLevel === 'deep'
     ? `- Create 4-6 content slides to cover the topic thoroughly:
@@ -499,6 +509,7 @@ export async function generateScript(query, options = {}) {
   - Simple concepts (definitions, basic facts): 3 slides
   - Moderate topics (processes, comparisons): 4 slides
   - Complex topics (multi-step systems, deep explanations): 5 slides`
+  }
 
   // Language instruction for non-English queries
   const languageInstruction = language === 'zh'
@@ -1405,6 +1416,71 @@ Output Format (JSON):
 }
 
 /**
+ * Determine the complexity of a follow-up query to decide response format.
+ * CORE032: Adaptive Follow-up Responses
+ *
+ * Trivial: Voice only (fast answer, checking facts/visuals)
+ * Simple: Voice + 1 slide (standard elaboration)
+ * Moderate: 2-3 slides (deeper explanation)
+ * Complex: Offer choice (broad topic, multiple paths)
+ *
+ * @param {string} query - The user's question
+ * @param {string} context - Brief context about current topic/slide
+ * @returns {Promise<{complexity: 'trivial'|'simple'|'moderate'|'complex', reasoning: string, error: string|null}>}
+ */
+export async function determineQueryComplexity(query, context = '') {
+  const ai = getAIClient()
+  if (!ai) {
+    // Fallback if API unavailable
+    return { complexity: 'simple', reasoning: 'API unavailable', error: 'API_NOT_AVAILABLE' }
+  }
+
+  const prompt = `Analyze this follow-up question and determine the complexity of the required response.
+Context: ${context}
+Question: "${query}"
+
+Classify into exactly one category:
+- "trivial": Quick fact check, visual question ("what color is that"), or yes/no. Needs voice answer only.
+- "simple": Standard follow-up asking for an example or basic clarification. Needs 1 new slide.
+- "moderate": Deeper explanation, asking "how" or "why" about a process. Needs 2-3 new slides.
+- "complex": Very broad request ("tell me everything", "how does it compare to X") or completely new angle. Needs user choice/menu.
+
+Return ONLY a JSON object:
+{
+  "complexity": "trivial" | "simple" | "moderate" | "complex",
+  "reasoning": "Brief explanation why"
+}`
+
+  try {
+    const response = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.1,
+        maxOutputTokens: 128,
+        responseMimeType: 'application/json',
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    const validComplexities = ['trivial', 'simple', 'moderate', 'complex']
+    const complexity = validComplexities.includes(parsed.complexity) ? parsed.complexity : 'simple'
+
+    return { 
+      complexity, 
+      reasoning: parsed.reasoning || 'AI determination',
+      error: null 
+    }
+  } catch (error) {
+    console.error('[Gemini] Complexity determination error:', error.message)
+    return { complexity: 'simple', reasoning: 'Error fallback', error: error.message }
+  }
+}
+
+/**
  * Generate suggested questions based on topic history or default commonly asked questions
  * Uses FAST_MODEL (gemini-2.5-flash-lite) for quick response
  * @param {Array<string>} topicNames - Array of topic names from user's history
@@ -1483,4 +1559,5 @@ export default {
   generateTopicName,
   generateTopicMetadata,
   generateSuggestedQuestions,
+  determineQueryComplexity,
 }
