@@ -87,6 +87,9 @@ const CLIENT_ID_STORAGE_KEY = 'showme_client_id'
 
 const SLIDES_API_BASE = '/api/slides'
 
+const FALLBACK_SLIDE_IMAGE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect fill="#f0f0f0" width="400" height="300"/><text x="200" y="150" text-anchor="middle" fill="#999">Image unavailable</text></svg>'
+const FALLBACK_SLIDE_IMAGE_URL = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(FALLBACK_SLIDE_IMAGE_SVG)}`
+
 // CORE027: Storage version for schema migration
 // Version 3 adds versions array support for regeneration feature
 const TOPICS_STORAGE_VERSION = 3
@@ -219,7 +222,7 @@ function sanitizeSlidesForStorage(slides, topicId) {
       // Use fallback ID if missing to ensure slide is always persisted
       id: slide.id || `slide_${topicId}_${index}_${Date.now()}`,
       // Use placeholder image if missing - slide content is more important than image
-      imageUrl: slide.imageUrl || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect fill="%23f0f0f0" width="400" height="300"/><text x="200" y="150" text-anchor="middle" fill="%23999">Image unavailable</text></svg>',
+      imageUrl: slide.imageUrl || FALLBACK_SLIDE_IMAGE_URL,
       subtitle: slide.subtitle || '',
       duration: slide.duration || 5000,
       topicId: slide.topicId || topicId,
@@ -1330,6 +1333,7 @@ function App() {
   const isRaiseHandPendingRef = useRef(false)
   const selectedLevelRef = useRef(EXPLANATION_LEVEL.STANDARD)
   const isPlayingRef = useRef(false)
+  const handleQuestionRef = useRef(null)
 
   useEffect(() => {
     isListeningRef.current = isListening
@@ -1556,6 +1560,35 @@ function App() {
     const cached = getCachedSlideAudio(slide.id)
     return cached?.duration || slide.duration || DEFAULT_SLIDE_DURATION
   }, [DEFAULT_SLIDE_DURATION, getCachedSlideAudio])
+
+  const interruptActiveAudio = useCallback(() => {
+    if (voiceAgentAudioRef.current) {
+      voiceAgentAudioRef.current.pause()
+      voiceAgentAudioRef.current = null
+    }
+    if (slideAudioRef.current) {
+      slideAudioRef.current.pause()
+      slideAudioRef.current = null
+    }
+    if (slideResponseAudioRef.current) {
+      slideResponseAudioRef.current.pause()
+      slideResponseAudioRef.current = null
+    }
+
+    voiceAgentBusyRef.current = false
+    resumeListeningAfterVoiceAgentRef.current = false
+    resumeListeningAfterSlideRef.current = false
+    setIsVoiceAgentSpeaking(false)
+    setIsSlideNarrationPlaying(false)
+    setIsSlideNarrationLoading(false)
+    setIsSlideNarrationReady(true)
+    setHighlightPosition(null)
+
+    if (slideTransitionTimeoutRef.current) {
+      clearTimeout(slideTransitionTimeoutRef.current)
+      slideTransitionTimeoutRef.current = null
+    }
+  }, [])
 
   /**
    * Queue a voice-agent line to be spoken via Gemini TTS.
@@ -2035,7 +2068,10 @@ function App() {
       setUiState(UI_STATE.LISTENING)
       // Use setTimeout to ensure state is updated before calling handleQuestion
       setTimeout(() => {
-        handleQuestion(lastFailedQuery)
+        const runHandleQuestion = handleQuestionRef.current
+        if (runHandleQuestion) {
+          runHandleQuestion(lastFailedQuery)
+        }
       }, 0)
     }
   }, [lastFailedQuery])
@@ -2238,6 +2274,13 @@ function App() {
     setIsSlideNarrationReady(false)
     setIsSlideNarrationLoading(false)
 
+    if (!currentSlide) {
+      setIsSlideNarrationPlaying(false)
+      setIsSlideNarrationReady(false)
+      setIsSlideNarrationLoading(false)
+      return
+    }
+
     // Stop previous audio if playing
     if (slideAudioRef.current) {
       slideAudioRef.current.pause()
@@ -2427,7 +2470,10 @@ function App() {
       hasFinishedSlideshowRef.current = false
 
       // Trigger the question
-      handleQuestion(nextQuestion)
+      const runHandleQuestion = handleQuestionRef.current
+      if (runHandleQuestion) {
+        runHandleQuestion(nextQuestion)
+      }
     }, 1500) // 1.5 second delay for natural transition
 
     return () => clearTimeout(timer)
@@ -2848,9 +2894,9 @@ function App() {
       })
 
       // F030: Trigger generation with the actual transcribed text
-      // Note: handleQuestion is intentionally not in deps to avoid re-renders;
-      // it uses current state at call time which is the desired behavior
-      handleQuestion(transcription, { source: 'voice' })
+      // Use a ref to avoid stale closures while keeping this callback stable.
+      const runHandleQuestion = handleQuestionRef.current || handleQuestion
+      runHandleQuestion(transcription, { source: 'voice' })
     } catch (error) {
       // Handle network errors
       logger.error('API', 'Transcription network error', {
@@ -2877,9 +2923,9 @@ function App() {
   }, [isListening, stopListening])
 
   /**
-   * Raise-hand flow: wait for the current sentence to finish, then listen.
+   * Raise-hand flow: interrupt narration and listen immediately.
    */
-  const handleRaiseHandClick = useCallback(async () => {
+  const handleRaiseHandClick = useCallback(() => {
     if (isMicEnabled) {
       setIsMicEnabled(false)
       cancelRaiseHand()
@@ -2888,12 +2934,14 @@ function App() {
 
     setIsMicEnabled(true)
     setAllowAutoListen(true)
-    raiseHandRequestRef.current = true
-    setIsRaiseHandPending(true)
+    raiseHandRequestRef.current = false
+    setIsRaiseHandPending(false)
     setVoiceAgentQueue([])
+    interruptActiveAudio()
 
     if (uiState === UI_STATE.SLIDESHOW) {
-      pauseAfterCurrentSlideRef.current = true
+      pauseAfterCurrentSlideRef.current = false
+      setIsPlaying(false)
 
       const currentSlide = visibleSlides[currentIndex]
       if (currentSlide) {
@@ -2909,20 +2957,6 @@ function App() {
       }
     }
 
-    await waitForActiveAudioToEnd()
-
-    if (!raiseHandRequestRef.current) {
-      return
-    }
-
-    raiseHandRequestRef.current = false
-    setIsRaiseHandPending(false)
-    pauseAfterCurrentSlideRef.current = false
-
-    if (uiState === UI_STATE.SLIDESHOW) {
-      setIsPlaying(false)
-    }
-
     playMicOnSound()
     startListening()
   }, [
@@ -2931,8 +2965,8 @@ function App() {
     uiState,
     visibleSlides,
     currentIndex,
-    waitForActiveAudioToEnd,
     startListening,
+    interruptActiveAudio,
   ])
 
   /**
@@ -3376,10 +3410,14 @@ function App() {
       // No interval needed - refresh is triggered by refreshFunFact callback
 
       const isFollowUp = classifyResult.classification === 'follow_up'
+      // Get parent slide for 2D navigation (follow-up slides nest under current slide)
+      const followUpParentSlide = isFollowUp ? visibleSlides[currentIndex] : null
+      const followUpParentId = followUpParentSlide && !['header', 'suggestions'].includes(followUpParentSlide.type)
+        ? followUpParentSlide.id
+        : null
 
       if (isFollowUp) {
         setIsPreparingFollowUp(true)
-        enqueueVoiceAgentMessage(VOICE_AGENT_SCRIPT.PREPARING_FOLLOW_UP)
       }
 
       let generateData
@@ -3406,7 +3444,7 @@ function App() {
             clientId: wsClientId,
             explanationLevel: activeTopic.explanationLevel || selectedLevelRef.current,
             complexity: classifyResult.complexity, // CORE032
-            parentId: visibleSlides[currentIndex]?.id, // CORE032: Current slide is parent
+            parentId: followUpParentId, // CORE032: Current slide is parent when applicable
           }),
           signal,
         })
@@ -3487,6 +3525,17 @@ function App() {
       if (isFollowUp && activeTopic && generateData.slides?.length > 0) {
         // F039: Append new slides to current topic, navigate to first new slide
         const previousSlideCount = activeTopic.slides?.length || 0
+        const previousChildCount = followUpParentId
+          ? (activeTopic.slides || []).filter((slide) => slide?.parentId === followUpParentId).length
+          : 0
+        // Calculate the target index from actual slide counts, not stale visibleSlides
+        // visibleSlides = header + top-level slides (no parentId)
+        const previousTopLevelCount = (activeTopic.slides || []).filter(s => !s.parentId).length
+        const firstNewTopLevelIndex = 1 + previousTopLevelCount // +1 for header slide
+        const safeParentIndex = Math.min(
+          currentIndex,
+          Math.max(1 + previousTopLevelCount - 1, 0) // Ensure we don't exceed current slides
+        )
         const now = Date.now()
         const nextSlides = [
           ...(activeTopic.slides || []),
@@ -3515,8 +3564,13 @@ function App() {
         })
 
         // Navigate to the first new slide after appending (header + previous slides)
-        const headerOffset = 1
-        setCurrentIndex(previousSlideCount + headerOffset)
+        if (followUpParentId) {
+          setCurrentIndex(safeParentIndex)
+          setCurrentChildIndex(previousChildCount)
+        } else {
+          setCurrentChildIndex(null)
+          setCurrentIndex(firstNewTopLevelIndex)
+        }
         // F072: End timing for full generation pipeline
         logger.timeEnd('GENERATION', 'full-pipeline')
         queueSlidesReadyTransition(activeTopic.name, generateData.slides.length)
@@ -3525,6 +3579,7 @@ function App() {
         // F040: Create new topic with header card
         const now = Date.now()
         const initialLevel = selectedLevelRef.current
+
         const newTopic = {
           id: newTopicData.id,
           name: newTopicData.name,
@@ -3600,6 +3655,10 @@ function App() {
       setUiState(UI_STATE.ERROR)
     }
   }
+
+  useEffect(() => {
+    handleQuestionRef.current = handleQuestion
+  }, [handleQuestion])
 
   const handleTextSubmit = (e) => {
     e.preventDefault()
@@ -4404,9 +4463,14 @@ function App() {
                   {/* CORE024: Container with relative positioning for highlight overlay */}
                   <div className="relative w-full aspect-video bg-surface rounded-xl shadow-lg overflow-hidden">
                     <img
-                      src={displayedSlide?.imageUrl}
+                      src={displayedSlide?.imageUrl || FALLBACK_SLIDE_IMAGE_URL}
                       alt="Slide diagram"
                       className="w-full h-full object-contain"
+                      onError={(event) => {
+                        if (event.currentTarget.dataset.fallbackApplied) return
+                        event.currentTarget.dataset.fallbackApplied = 'true'
+                        event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
+                      }}
                     />
                     {/* CORE024: Highlight overlay for slide questions */}
                     <HighlightOverlay
@@ -4470,6 +4534,12 @@ function App() {
                     {/* Indicator for slides with children */}
                     {hasChildren && i !== currentIndex && (
                       <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1 h-1 bg-gray-400 rounded-full" />
+                    )}
+                    {/* Bouncing down arrow for current slide with children - shows vertical navigation is available */}
+                    {hasChildren && i === currentIndex && currentChildIndex === null && (
+                      <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 text-primary text-xs animate-bounce">
+                        ▼
+                      </span>
                     )}
                   </button>
                 )
@@ -4678,30 +4748,93 @@ function App() {
             }}
           >
             <div className="flex flex-col items-center gap-2 pointer-events-auto">
-              {isMicEnabled && (
-                <span className="text-xs text-gray-500 bg-white/90 px-3 py-1 rounded-full shadow-sm">
-                  {isListening
-                    ? 'Listening...'
-                    : isRaiseHandPending
-                      ? 'Waiting for the current sentence...'
-                      : 'Mic on'}
-                </span>
+              {/* Hide raise hand button when text input is shown */}
+              {!showTextFallback && (
+                <>
+                  {isMicEnabled && (
+                    <span className="text-xs text-gray-500 bg-white/90 px-3 py-1 rounded-full shadow-sm">
+                      {isListening
+                        ? 'Listening...'
+                        : isRaiseHandPending
+                          ? 'Waiting for the current sentence...'
+                          : 'Mic on'}
+                    </span>
+                  )}
+                  <button
+                    onClick={handleRaiseHandClick}
+                    aria-label={isMicEnabled ? 'Lower hand' : 'Raise hand'}
+                    className={`w-14 h-14 min-h-[44px] rounded-full shadow-lg text-2xl transition-all select-none flex items-center justify-center ${
+                      isMicEnabled
+                        ? 'bg-red-500 hover:bg-red-600'
+                        : 'bg-primary hover:scale-105'
+                    }`}
+                    style={{
+                      WebkitTouchCallout: 'none',
+                      userSelect: 'none',
+                    }}
+                  >
+                    {isMicEnabled ? '🤚' : '✋'}
+                  </button>
+                  <button
+                    onClick={() => setShowTextFallback(true)}
+                    className="text-xs text-gray-400 hover:text-gray-600 transition-colors mt-1"
+                  >
+                    can't talk? type here
+                  </button>
+                </>
               )}
-              <button
-                onClick={handleRaiseHandClick}
-                aria-label={isMicEnabled ? 'Lower hand' : 'Raise hand'}
-                className={`w-14 h-14 min-h-[44px] rounded-full shadow-lg text-2xl transition-all select-none flex items-center justify-center ${
-                  isMicEnabled
-                    ? 'bg-red-500 hover:bg-red-600'
-                    : 'bg-primary hover:scale-105'
-                }`}
-                style={{
-                  WebkitTouchCallout: 'none',
-                  userSelect: 'none',
-                }}
-              >
-                {isMicEnabled ? '🤚' : '✋'}
-              </button>
+
+              {/* Text input for typing questions */}
+              {showTextFallback && (
+                <div className="w-72 bg-white rounded-xl shadow-lg p-3 animate-fade-in">
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      if (textInput.trim()) {
+                        handleQuestion(textInput.trim())
+                        setTextInput('')
+                        setShowTextFallback(false)
+                      }
+                    }}
+                    className="flex gap-2"
+                  >
+                    <input
+                      type="text"
+                      value={textInput}
+                      onChange={(e) => setTextInput(e.target.value)}
+                      onFocus={() => {
+                        // Stop narration and auto-advance when user starts typing
+                        interruptActiveAudio()
+                        setIsPlaying(false)
+                      }}
+                      placeholder="Type your question..."
+                      className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:border-primary focus:outline-none"
+                      autoFocus
+                    />
+                    <button
+                      type="submit"
+                      disabled={!textInput.trim()}
+                      className={`
+                        px-3 py-2 rounded-lg transition-all
+                        ${textInput.trim()
+                          ? 'bg-primary text-white hover:bg-primary/90'
+                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        }
+                      `}
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                      </svg>
+                    </button>
+                  </form>
+                  <button
+                    onClick={() => setShowTextFallback(false)}
+                    className="w-full text-xs text-gray-400 hover:text-gray-600 mt-2 transition-colors"
+                  >
+                    ✕ close
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}

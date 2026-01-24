@@ -293,7 +293,7 @@ function TopicSidebar({
                   <div
                     onClick={() => handleTopicClick(topic.id)}
                     className={`
-                      w-full flex items-center gap-3 px-3 py-3
+                      w-full flex items-center gap-2 px-3 py-3
                       min-h-[44px] rounded-lg
                       text-left transition-all duration-200
                       hover:bg-gray-100 cursor-pointer
@@ -414,6 +414,7 @@ function TopicSidebar({
                       </button>
                     </div>
                   )}
+
                 </li>
               )
             })}

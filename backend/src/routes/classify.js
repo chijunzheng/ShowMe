@@ -1,6 +1,6 @@
 import express from 'express'
 import { sanitizeQuery } from '../utils/sanitize.js'
-import { determineQueryComplexity } from '../services/gemini.js'
+import { determineQueryComplexity, determineSemanticRelation } from '../services/gemini.js'
 
 const router = express.Router()
 
@@ -21,6 +21,39 @@ const topicKeywords = {
   computer: ['computer', 'processor', 'cpu', 'software', 'hardware', 'memory', 'ram', 'digital', 'program', 'code'],
   ocean: ['ocean', 'sea', 'marine', 'wave', 'tide', 'underwater', 'coral', 'fish', 'aquatic'],
   dna: ['dna', 'gene', 'genetic', 'chromosome', 'heredity', 'mutation', 'genome', 'rna'],
+}
+
+/**
+ * Stop words to filter out when extracting keywords from slide content
+ * These common words don't help determine topic relevance
+ */
+const STOP_WORDS = new Set([
+  'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should',
+  'may', 'might', 'must', 'shall', 'can', 'to', 'of', 'in', 'for', 'on', 'with',
+  'at', 'by', 'from', 'as', 'into', 'through', 'during', 'before', 'after',
+  'above', 'below', 'between', 'under', 'again', 'further', 'then', 'once',
+  'here', 'there', 'when', 'where', 'why', 'how', 'all', 'each', 'every',
+  'both', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not',
+  'only', 'own', 'same', 'so', 'than', 'too', 'very', 'just', 'and', 'but',
+  'if', 'or', 'because', 'until', 'while', 'it', 'its', 'this', 'that',
+  'these', 'those', 'which', 'who', 'whom', 'what', 'about', 'like', 'also',
+  'our', 'their', 'your', 'they', 'them', 'we', 'us', 'you', 'he', 'she',
+])
+
+/**
+ * Extract meaningful keywords from text by removing stop words
+ * Used to compare query terms against slide content
+ * @param {string} text - Text to extract keywords from
+ * @returns {string[]} Array of lowercase keywords
+ */
+function extractKeywordsFromText(text) {
+  if (!text) return []
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(word => word.length > 2 && !STOP_WORDS.has(word))
 }
 
 const chitchatIntents = [
@@ -363,14 +396,14 @@ function isSlideQuestion(query) {
 
 /**
  * Check if a query is related to the active topic using keyword matching
- * In production, this would use Gemini for semantic understanding
+ * Falls back to Gemini semantic analysis when keyword matching is inconclusive
  * @param {string} query - The user's new question
  * @param {object} activeTopic - The current active topic with name and keywords
  * @param {Array} conversationHistory - Previous Q&A context
  * @param {object} currentSlide - The current slide context (for SLIDE_QUESTION detection)
- * @returns {{classification: string, reasoning: string}}
+ * @returns {Promise<{classification: string, reasoning: string}>}
  */
-function classifyQueryRelation(query, activeTopic, conversationHistory = [], currentSlide = null) {
+async function classifyQueryRelation(query, activeTopic, conversationHistory = [], currentSlide = null) {
   const normalizedQuery = query.toLowerCase()
 
   // CORE023: First check if this is a slide question
@@ -442,6 +475,42 @@ function classifyQueryRelation(query, activeTopic, conversationHistory = [], cur
         isFollowUp: false,
         reasoning: `Query appears to be about a new subject (${category}) unrelated to the current topic "${activeTopic?.name || 'Unknown'}".`
       }
+    }
+  }
+
+  // Check if query relates to current slide content via keyword overlap
+  // This catches follow-ups like "How is timing managed?" when slide discusses "CPU clock synchronization"
+  if (currentSlide?.subtitle) {
+    const slideKeywords = extractKeywordsFromText(currentSlide.subtitle)
+    const queryKeywords = extractKeywordsFromText(query)
+
+    // Count keywords that match (including partial matches like "sync" matching "synchronization")
+    const matchingSlideKeywords = queryKeywords.filter(qw =>
+      slideKeywords.some(sw => sw.includes(qw) || qw.includes(sw))
+    )
+
+    if (matchingSlideKeywords.length >= 1) {
+      return {
+        isFollowUp: true,
+        reasoning: `Query relates to current slide content (matched: ${matchingSlideKeywords.slice(0, 3).join(', ')}).`
+      }
+    }
+  }
+
+  // Semantic fallback: use AI to detect semantic relationship when keyword matching fails
+  // This catches cases like "How is timing managed?" related to "CPU clock synchronization"
+  if (currentSlide?.subtitle && activeTopic?.name) {
+    try {
+      const semantic = await determineSemanticRelation(query, currentSlide.subtitle, activeTopic.name)
+      if (semantic.isRelated && semantic.confidence >= 0.7) {
+        return {
+          isFollowUp: true,
+          reasoning: `AI determined query is semantically related (confidence: ${semantic.confidence.toFixed(2)}).`
+        }
+      }
+    } catch (error) {
+      console.warn('[Classify] Semantic relation check failed:', error.message)
+      // Continue to default fallback
     }
   }
 
@@ -529,7 +598,8 @@ router.post('/', async (req, res) => {
 
     // Classify the query against the active topic (using sanitized input)
     // CORE023: Pass currentSlide context for slide_question detection
-    const classifyResult = classifyQueryRelation(
+    // Now async to support semantic fallback with Gemini
+    const classifyResult = await classifyQueryRelation(
       sanitizedQuery,
       activeTopic,
       conversationHistory,
@@ -562,10 +632,15 @@ router.post('/', async (req, res) => {
     // Only evict if: new topic, and we're at the max topic limit (3)
     const shouldEvictOldest = !isFollowUp && topicCount >= 3
 
+    // Suggest creating a nested topic for deeper follow-ups (moderate/complex)
+    // This allows the frontend to show sub-topics in the sidebar
+    const suggestNestedTopic = isFollowUp && (complexity === 'moderate' || complexity === 'complex')
+
     const response = {
       classification: isFollowUp ? 'follow_up' : 'new_topic',
       reasoning,
       complexity: isFollowUp ? complexity : undefined, // CORE032
+      suggestNestedTopic, // Phase 3: Nested topics in sidebar
       shouldEvictOldest,
       evictTopicId: shouldEvictOldest ? oldestTopicId : null,
     }

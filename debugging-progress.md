@@ -505,3 +505,135 @@ if (uiState === UI_STATE.GENERATING || (isSlideRevealPending && uiState !== UI_S
 - Allowed GCS domains in CSP for image rendering
 
 **Key Changes:** `backend/src/services/slideStore.js`, `backend/src/routes/slides.js`, `backend/src/index.js`, `frontend/src/App.jsx`
+
+---
+
+## Session 6: 2026-01-23
+
+### Issue 1: Follow-up Questions Creating Separate Topics
+
+**Symptoms:**
+- Asking a follow-up question created a new topic in the sidebar
+- Expected: Follow-up should nest under the current topic or append as child slides
+- Content was relevant and answered the query, but appeared as separate topic
+
+**Root Cause:**
+- `shouldNest` condition was too restrictive: `classifyResult?.suggestNestedTopic && activeTopic?.id`
+- The `suggestNestedTopic` flag wasn't being set correctly in classification
+
+**Initial Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// BEFORE (too restrictive):
+const shouldNest = classifyResult?.suggestNestedTopic && activeTopic?.id
+
+// AFTER (always nest when active topic exists):
+const shouldNest = activeTopic?.id
+```
+
+**Later Decision:** Removed nested topics entirely in favor of 2D grid navigation (see Issue 2).
+
+---
+
+### Issue 2: Nested Topic Slides Not Loading
+
+**Symptoms:**
+- Nested topic appeared correctly in sidebar hierarchy
+- Clicking on nested topic showed no slides (empty slideshow)
+- Console showed topic existed with slides property populated
+
+**Root Cause:** Multiple issues:
+1. State race condition when switching to newly created nested topic
+2. `visibleSlides` calculated from stale state before new topic was added
+3. Version/storage key mismatch - `parentTopicId` wasn't part of storage key
+
+**Investigation:**
+- Deep-dive into navigation flow revealed `handleNavigateToTopic` calculated slides from outdated `visibleSlides` memo
+- New topic added to state, but memo hadn't recalculated yet
+- Storage persistence used inconsistent keys for nested vs root topics
+
+**Fix Applied:** Pivoted away from nested topics entirely
+- Removed `shouldCreateNestedTopic` branch from `frontend/src/App.jsx`
+- Removed `parentTopicId` from topic creation
+- Simplified `TopicSidebar.jsx` to flat list (removed hierarchical rendering)
+- Follow-ups now append as child slides with `parentId` linking to parent slide
+- 2D grid navigation (↑/↓ for children, ←/→ for siblings) handles the hierarchy
+
+---
+
+### Issue 3: TTS Warning About Missing Package
+
+**Symptoms:**
+```
+[Gemini] TTS: @google/generative-ai not available, falling back to @google/genai
+```
+- Warning appeared on every TTS request
+- TTS still worked via fallback
+
+**Root Cause:**
+- Code had two TTS paths: `@google/generative-ai` (preferred) and `@google/genai` (fallback)
+- `@google/generative-ai` was never installed (dynamic import always failed)
+- The fallback path worked fine, but warning was misleading
+
+**Fix Applied:** `backend/src/services/gemini.js`
+```javascript
+// REMOVED: Unused code paths
+- ttsClientPromise variable
+- getTtsClient() function
+- generateTtsWithGenerativeAI() function
+
+// SIMPLIFIED: generateTTS() now only uses @google/genai
+export async function generateTTS(text, options = {}) {
+  const ai = getAIClient()
+  // ... direct call to generateTtsWithGenAI()
+}
+```
+
+---
+
+### Issue 4: Audio Not Stopping When Typing
+
+**Symptoms:**
+- User clicked "can't talk? type here" and started typing
+- Narration continued playing
+- Slideshow auto-advanced while user was composing question
+
+**Root Cause:**
+- Text input had no `onFocus` handler to interrupt audio
+- `isPlaying` state remained true
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+<input
+  type="text"
+  value={textInput}
+  onChange={(e) => setTextInput(e.target.value)}
+  onFocus={() => {
+    // Stop narration and auto-advance when user starts typing
+    interruptActiveAudio()
+    setIsPlaying(false)
+  }}
+  placeholder="Type your question..."
+  // ...
+/>
+```
+
+---
+
+## Debugging Tips (Updated)
+
+### Model Configuration
+Image generation models are now:
+- Primary: `gemini-3-pro-image-preview`
+- Fallback: `gemini-2.5-flash-image`
+
+TTS models:
+- Primary: `gemini-2.5-flash-lite-tts-preview`
+- Fallback: `gemini-2.5-flash-preview-tts`
+
+### 2D Navigation Testing
+To test child slide navigation:
+1. Generate a topic with slides
+2. Ask a follow-up question while viewing a slide
+3. New slides should have `parentId` set to current slide's ID
+4. Progress dots should show ▼ indicator on slides with children
+5. Press ↓ to navigate to child slides, ↑ to return to parent

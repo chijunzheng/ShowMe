@@ -1143,3 +1143,87 @@ Updated topic structure to support versions:
 ### Context for Next Agent
 - The application now supports dynamic response types based on the semantic complexity of user follow-up questions.
 - The slideshow can handle nested (2D) slides, with UI controls for vertical and horizontal navigation.
+
+---
+
+## Session 17: Model Updates, 2D Navigation Polish & Text Fallback (2026-01-23)
+
+### Model Configuration Changes
+
+#### Image Generation Models - UPDATED
+- **Primary model**: Changed to `gemini-3-pro-image-preview`
+- **Fallback model**: Changed to `gemini-2.5-flash-image`
+- **Removed**: All Imagen model usage (`IMAGE_GENERATE_MODELS` constant and related code)
+- Simplified to use only Gemini native image generation
+
+#### TTS Code Cleanup - IMPLEMENTED
+- Removed unused `@google/generative-ai` code paths
+- Deleted `ttsClientPromise`, `getTtsClient()`, `generateTtsWithGenerativeAI()` functions
+- Simplified `generateTTS()` to only use `@google/genai` package
+- Cleaner logs without misleading "Cannot find package" warnings
+
+### UX Improvements
+
+#### 2D Slide Navigation Polish - IMPLEMENTED
+- **Removed nested topics from sidebar**: Follow-ups no longer create separate topics
+- Simplified TopicSidebar to flat list (removed hierarchical rendering)
+- Follow-up slides now append as child slides with `parentId` linking to parent
+- **Added bouncing ▼ indicator**: Shows on progress dots when current slide has children
+- Vertical progress indicator already existed for child slide navigation
+
+#### Text Input Fallback - IMPLEMENTED
+- Added "can't talk? type here" link below raise hand button during slideshow
+- Clicking expands to a text input form with send button
+- Raise hand button hides when text input is shown (cleaner UI)
+- **Audio interruption**: Typing in text input stops narration and auto-advance
+  - Calls `interruptActiveAudio()` and `setIsPlaying(false)` on input focus
+
+#### Voice Agent Cleanup
+- Removed "Preparing your follow-up" TTS message for cleaner experience
+
+### Bug Fixes
+
+1. **Nested topic slides not loading** - Fixed by removing feature
+   - Root cause: State race condition when switching to newly created nested topic
+   - Version/storage key mismatch caused slides to not load
+   - Solution: Pivoted to 2D grid navigation instead of nested topics
+
+2. **Follow-up creating separate topics** - Fixed
+   - Changed `shouldNest` condition to always nest when `activeTopic?.id` exists
+   - Then removed nested topic feature entirely in favor of child slides
+
+### Files Modified
+
+- **`backend/src/services/gemini.js`**:
+  - Changed `IMAGE_MODEL` to `gemini-3-pro-image-preview`
+  - Changed `IMAGE_MODEL_FALLBACKS` to `['gemini-2.5-flash-image']`
+  - Removed Imagen-related code
+  - Removed unused TTS functions (`ttsClientPromise`, `getTtsClient`, `generateTtsWithGenerativeAI`)
+  - Simplified `generateTTS()` function
+
+- **`frontend/src/App.jsx`**:
+  - Removed `shouldCreateNestedTopic` branch
+  - Removed `parentTopicId` from topic creation
+  - Added bouncing ▼ indicator for slides with children
+  - Added text fallback UI with show/hide toggle
+  - Added audio interruption on text input focus
+  - Removed "Preparing your follow-up" voice message
+
+- **`frontend/src/components/TopicSidebar.jsx`**:
+  - Simplified to flat topic list
+  - Removed `expandedTopics` state and hierarchical rendering
+  - Removed `rootTopics`/`getChildTopics` logic
+
+### Git Commits
+- (pending): feat: model updates, 2D navigation polish, and text fallback
+
+### Features Status
+- **Total Features**: 96 (previous 95 + text fallback)
+- **Completed**: All changes implemented and tested
+
+### Context for Next Agent
+- Image generation uses Gemini models only (no Imagen)
+- TTS uses simplified `@google/genai` path only
+- Follow-ups append as child slides (2D grid) not nested topics
+- Text input available as fallback to voice during slideshow
+- Typing stops narration to prevent auto-advance while composing

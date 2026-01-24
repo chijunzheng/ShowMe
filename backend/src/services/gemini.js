@@ -15,7 +15,11 @@ import { GoogleGenAI } from '@google/genai'
 
 // Configuration constants
 const TEXT_MODEL = 'gemini-3-flash-preview'
-const IMAGE_MODEL = 'gemini-3-pro-image-preview'
+const IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-3-pro-image-preview'
+const IMAGE_MODEL_FALLBACKS = [
+  'gemini-2.5-flash-image',
+]
+
 const FAST_MODEL = 'gemini-2.5-flash-lite'
 const TTS_MODEL = 'gemini-2.5-flash-preview-tts'
 const TTS_FALLBACK_MODEL = 'gemini-2.5-pro-preview-tts'
@@ -292,7 +296,6 @@ function repairJSON(jsonStr) {
 // Initialize the Google GenAI client
 // Uses GEMINI_API_KEY from environment if not explicitly provided
 let aiClient = null
-let ttsClientPromise = null
 
 /**
  * Get or initialize the Gemini AI client
@@ -320,35 +323,6 @@ function getAIClient() {
   }
 }
 
-/**
- * Get or initialize the Gemini TTS client (uses @google/generative-ai if available).
- * Falls back to @google/genai if the SDK is not installed.
- * @returns {Promise<Object|null>} The TTS client or null if no API key or SDK missing
- */
-async function getTtsClient() {
-  if (ttsClientPromise) {
-    return ttsClientPromise
-  }
-
-  const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey || apiKey === 'your_gemini_api_key_here') {
-    return null
-  }
-
-  ttsClientPromise = (async () => {
-    try {
-      const { GoogleGenerativeAI } = await import('@google/generative-ai')
-      const client = new GoogleGenerativeAI(apiKey)
-      console.log('[Gemini] TTS client initialized successfully')
-      return client
-    } catch (error) {
-      console.warn('[Gemini] TTS SDK unavailable, falling back to @google/genai:', error.message)
-      return null
-    }
-  })()
-
-  return ttsClientPromise
-}
 
 /**
  * Check if Gemini API is available
@@ -620,41 +594,46 @@ ${levelStyleInstructions}
 ${languageInstruction}
 ${topic ? `- Topic context: ${topic}` : ''}`
 
-  try {
-    const response = await ai.models.generateContent({
-      model: IMAGE_MODEL,
-      contents: enhancedPrompt,
-      config: {
-        responseModalities: ['TEXT', 'IMAGE'],
+  let lastError = null
+
+  for (const model of [IMAGE_MODEL, ...IMAGE_MODEL_FALLBACKS]) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: enhancedPrompt,
+        config: {
+          responseModalities: ['IMAGE'],
+        }
+      })
+
+      // Extract image data from response
+      const parts = response.candidates?.[0]?.content?.parts || []
+
+      for (const part of parts) {
+        if (part.inlineData) {
+          const mimeType = part.inlineData.mimeType || 'image/png'
+          const base64Data = (part.inlineData.data || '').replace(/\s/g, '')
+          const imageUrl = `data:${mimeType};base64,${base64Data}`
+          return { imageUrl, error: null }
+        }
       }
-    })
-
-    // Extract image data from response
-    const parts = response.candidates?.[0]?.content?.parts || []
-
-    for (const part of parts) {
-      if (part.inlineData) {
-        const mimeType = part.inlineData.mimeType || 'image/png'
-        const base64Data = part.inlineData.data
-        const imageUrl = `data:${mimeType};base64,${base64Data}`
-        return { imageUrl, error: null }
-      }
+    } catch (error) {
+      lastError = error.message || 'UNKNOWN_ERROR'
+      console.warn('[Gemini] generateContent image failed, trying next model:', {
+        model,
+        error: error.message,
+      })
     }
-
-    // No image in response
-    return { imageUrl: null, error: 'NO_IMAGE_GENERATED' }
-  } catch (error) {
-    console.error('[Gemini] Image generation error:', error.message)
-
-    if (error.message?.includes('quota') || error.message?.includes('rate')) {
-      return { imageUrl: null, error: 'RATE_LIMITED' }
-    }
-    if (error.message?.includes('safety') || error.message?.includes('blocked')) {
-      return { imageUrl: null, error: 'CONTENT_FILTERED' }
-    }
-
-    return { imageUrl: null, error: error.message || 'UNKNOWN_ERROR' }
   }
+
+  if (lastError?.includes('quota') || lastError?.includes('rate')) {
+    return { imageUrl: null, error: 'RATE_LIMITED' }
+  }
+  if (lastError?.includes('safety') || lastError?.includes('blocked')) {
+    return { imageUrl: null, error: 'CONTENT_FILTERED' }
+  }
+
+  return { imageUrl: null, error: lastError || 'NO_IMAGE_GENERATED' }
 }
 
 function normalizeTtsError(error) {
@@ -785,28 +764,6 @@ async function generateTtsWithGenAI(ai, model, prompt, voice) {
   }
 }
 
-async function generateTtsWithGenerativeAI(client, model, prompt, voice) {
-  try {
-    const ttsModel = client.getGenerativeModel({ model })
-    const result = await ttsModel.generateContent({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: voice },
-          },
-        },
-      },
-    })
-
-    const inlineData = extractInlineAudio(result)
-    return buildAudioResult(inlineData)
-  } catch (error) {
-    console.error('[Gemini] TTS generation error (generative-ai):', error.message)
-    return { audioUrl: null, duration: 0, error: normalizeTtsError(error) }
-  }
-}
 
 /**
  * Generate TTS audio from text
@@ -826,23 +783,12 @@ export async function generateTTS(text, options = {}) {
     ? `用清晰、生动的方式朗读以下内容，就像在教导一个好奇的学生: ${text}`
     : `Speak clearly and engagingly, as if teaching a curious student: ${text}`
 
-  const ttsClient = await getTtsClient()
-  if (ttsClient) {
-    const ttsResult = await generateTtsWithGenerativeAI(ttsClient, TTS_MODEL, speakingPrompt, voice)
-    if (!ttsResult.error) {
-      return ttsResult
-    }
-    if (ttsResult.error === 'RATE_LIMITED') {
-      return ttsResult
-    }
-    console.warn('[Gemini] TTS via @google/generative-ai failed, falling back:', ttsResult.error)
-  }
-
   const ai = getAIClient()
   if (!ai) {
     return { audioUrl: null, duration: 0, error: 'API_NOT_AVAILABLE' }
   }
 
+  // Try primary TTS model
   const primaryResult = await generateTtsWithGenAI(ai, TTS_MODEL, speakingPrompt, voice)
   if (!primaryResult.error) {
     return primaryResult
@@ -851,6 +797,7 @@ export async function generateTTS(text, options = {}) {
     return primaryResult
   }
 
+  // Fallback to preview model if primary fails
   const fallbackResult = await generateTtsWithGenAI(ai, TTS_FALLBACK_MODEL, speakingPrompt, voice)
   if (!fallbackResult.error) {
     console.warn('[Gemini] TTS fell back to preview model')
@@ -1003,13 +950,16 @@ Output Format (JSON):
   ]
 }`
 
-  try {
+  const generateWithModel = async (model) => {
     const response = await ai.models.generateContent({
-      model: FAST_MODEL,
-      contents: prompt,
+      model,
+      contents: [
+        { role: 'user', parts: [{ text: prompt }] }
+      ],
       config: {
         temperature: 0.8,
         maxOutputTokens: 512,
+        responseMimeType: 'application/json',
       }
     })
 
@@ -1017,23 +967,43 @@ Output Format (JSON):
     const jsonStr = repairJSON(extractJSON(text))
     const parsed = JSON.parse(jsonStr)
 
+    const funFact = parsed.funFact && typeof parsed.funFact.text === 'string'
+      ? parsed.funFact
+      : null
+    const suggestedQuestions = Array.isArray(parsed.suggestedQuestions)
+      ? parsed.suggestedQuestions
+      : null
+
     return {
-      funFact: parsed.funFact || null,
-      suggestedQuestions: parsed.suggestedQuestions || [],
-      error: null
+      funFact,
+      suggestedQuestions,
+      error: funFact && suggestedQuestions ? null : 'INVALID_RESPONSE'
     }
-  } catch (error) {
-    console.error('[Gemini] Engagement generation error:', error.message)
-
-    if (error.message?.includes('JSON')) {
-      return { funFact: null, suggestedQuestions: null, error: 'PARSE_ERROR' }
-    }
-    if (error.message?.includes('quota') || error.message?.includes('rate')) {
-      return { funFact: null, suggestedQuestions: null, error: 'RATE_LIMITED' }
-    }
-
-    return { funFact: null, suggestedQuestions: null, error: error.message || 'UNKNOWN_ERROR' }
   }
+
+  const modelsToTry = [FAST_MODEL, TEXT_MODEL]
+  let lastError = 'UNKNOWN_ERROR'
+
+  for (const model of modelsToTry) {
+    try {
+      const result = await generateWithModel(model)
+      if (!result.error) {
+        return result
+      }
+      lastError = result.error
+    } catch (error) {
+      console.error('[Gemini] Engagement generation error:', error.message)
+      if (error.message?.includes('JSON')) {
+        lastError = 'PARSE_ERROR'
+      } else if (error.message?.includes('quota') || error.message?.includes('rate')) {
+        lastError = 'RATE_LIMITED'
+      } else {
+        lastError = error.message || 'UNKNOWN_ERROR'
+      }
+    }
+  }
+
+  return { funFact: null, suggestedQuestions: null, error: lastError }
 }
 
 /**
@@ -1481,6 +1451,61 @@ Return ONLY a JSON object:
 }
 
 /**
+ * Determine if a query is semantically related to current slide content
+ * Used as fallback when keyword matching fails to detect follow-up intent
+ *
+ * @param {string} query - The user's question
+ * @param {string} slideSubtitle - The current slide's narration text
+ * @param {string} topicName - The current topic name
+ * @returns {Promise<{isRelated: boolean, confidence: number, error: string|null}>}
+ */
+export async function determineSemanticRelation(query, slideSubtitle, topicName) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { isRelated: false, confidence: 0, error: 'API_NOT_AVAILABLE' }
+  }
+
+  const prompt = `You are classifying whether a user's question is a follow-up to the current educational content.
+
+Current topic: "${topicName}"
+Current slide content: "${slideSubtitle}"
+User's new question: "${query}"
+
+Determine if the question is asking about or related to the current slide/topic content.
+Consider semantic relationships - the question doesn't need exact keyword matches.
+
+Example: Slide about "CPU clock cycles synchronize operations" + question "How is timing managed?" = RELATED
+Example: Slide about "photosynthesis in plants" + question "What is quantum physics?" = NOT RELATED
+
+Return JSON only: {"isRelated": true/false, "confidence": 0.0-1.0}`
+
+  try {
+    const response = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.1,
+        maxOutputTokens: 64,
+        responseMimeType: 'application/json',
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    return {
+      isRelated: parsed.isRelated === true,
+      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
+      error: null
+    }
+  } catch (error) {
+    console.error('[Gemini] Semantic relation error:', error.message)
+    return { isRelated: false, confidence: 0, error: error.message }
+  }
+}
+
+/**
  * Generate suggested questions based on topic history or default commonly asked questions
  * Uses FAST_MODEL (gemini-2.5-flash-lite) for quick response
  * @param {Array<string>} topicNames - Array of topic names from user's history
@@ -1560,4 +1585,5 @@ export default {
   generateTopicMetadata,
   generateSuggestedQuestions,
   determineQueryComplexity,
+  determineSemanticRelation,
 }
