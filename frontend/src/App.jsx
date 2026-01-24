@@ -3,6 +3,7 @@ import FunFactCard from './components/FunFactCard'
 import SuggestionCard from './components/SuggestionCard'
 import Toast from './components/Toast'
 import TopicHeader from './components/TopicHeader'
+import SectionDivider from './components/SectionDivider'
 import TopicSidebar from './components/TopicSidebar'
 import HighlightOverlay from './components/HighlightOverlay'
 import LevelCard from './components/LevelCard'
@@ -138,6 +139,9 @@ const AUDIO_CONFIG = {
   MIN_SPEECH_DURATION_MS: 300,
   // Minimum speech frames (50ms per frame) before sending to STT
   MIN_SPEECH_FRAMES: 5,
+  // Retry listening when no speech is detected
+  NO_SPEECH_RETRY_MAX: 2,
+  NO_SPEECH_RETRY_DELAY_MS: 350,
   // Audio analyser FFT size (must be power of 2)
   FFT_SIZE: 256,
   // Animation frame interval for waveform updates (ms)
@@ -146,6 +150,11 @@ const AUDIO_CONFIG = {
   MIN_AUDIO_SIZE: 5000,
   // Maximum audio size in bytes (matches backend 10MB limit)
   MAX_AUDIO_SIZE: 10 * 1024 * 1024,
+}
+
+const TTS_PREFETCH_CONFIG = {
+  MAX_CONCURRENCY: 2,
+  DELAY_MS: 150,
 }
 
 // Voice agent script templates
@@ -870,6 +879,24 @@ function createHeaderSlide(topic) {
 }
 
 /**
+ * Create a section divider slide that marks a follow-up section.
+ * Displayed as a "chapter card" showing the follow-up question.
+ * @param {string} topicId - Parent topic ID
+ * @param {string} question - The follow-up question text
+ * @returns {Object} Section divider slide object
+ */
+function createSectionDivider(topicId, question) {
+  return {
+    id: `section_${topicId}_${Date.now()}`,
+    type: 'section',
+    topicId,
+    question,
+    // Section dividers don't have imageUrl, audioUrl, or duration
+    // They are rendered using the SectionDivider component
+  }
+}
+
+/**
  * Get slides from the current version of a topic.
  * Falls back to topic.slides for backward compatibility.
  * @param {Object|null} topic - Topic object with versions array
@@ -1434,6 +1461,7 @@ function App() {
   // Audio playback ref for slide narration (F037)
   const slideAudioRef = useRef(null)
   const lastSlideIdRef = useRef(null)
+  const ttsPrefetchBatchRef = useRef(0)
   const resumeListeningAfterSlideRef = useRef(false)
   const slideAudioCacheRef = useRef(new Map())
   const slideAudioRequestRef = useRef(new Map())
@@ -1592,6 +1620,47 @@ function App() {
     if (slideAudioCacheRef.current.has(slide.id)) return
     void requestSlideAudio(slide)
   }, [requestSlideAudio])
+
+  const prefetchSlideNarrationBatch = useCallback((slides = []) => {
+    if (!Array.isArray(slides) || slides.length === 0) return
+
+    const batchId = Date.now()
+    ttsPrefetchBatchRef.current = batchId
+
+    const queue = slides.filter((slide) =>
+      slide &&
+      slide.type !== 'header' &&
+      slide.type !== 'suggestions' &&
+      typeof slide.subtitle === 'string' &&
+      slide.subtitle.trim().length > 0
+    )
+
+    let index = 0
+    let inFlight = 0
+
+    const pump = () => {
+      if (ttsPrefetchBatchRef.current !== batchId) return
+
+      while (inFlight < TTS_PREFETCH_CONFIG.MAX_CONCURRENCY && index < queue.length) {
+        const slide = queue[index++]
+        if (!slide || slideAudioFailureRef.current.has(slide.id)) continue
+        if (getCachedSlideAudio(slide.id)) continue
+        if (slideAudioRequestRef.current.has(slide.id)) continue
+
+        inFlight += 1
+        requestSlideAudio(slide)
+          .finally(() => {
+            inFlight -= 1
+            if (ttsPrefetchBatchRef.current !== batchId) return
+            if (index < queue.length || inFlight > 0) {
+              setTimeout(pump, TTS_PREFETCH_CONFIG.DELAY_MS)
+            }
+          })
+      }
+    }
+
+    pump()
+  }, [getCachedSlideAudio, requestSlideAudio])
 
   const getSlideDuration = useCallback((slide) => {
     if (!slide) return DEFAULT_SLIDE_DURATION
@@ -2284,6 +2353,12 @@ function App() {
     }
   }, [uiState, visibleSlides.length])
 
+  useEffect(() => {
+    if (!activeTopic || allTopicSlides.length === 0) return
+    if (uiState !== UI_STATE.SLIDESHOW && uiState !== UI_STATE.GENERATING) return
+    prefetchSlideNarrationBatch(allTopicSlides)
+  }, [activeTopic, allTopicSlides, uiState, prefetchSlideNarrationBatch])
+
   /**
    * F037: Restart audio when navigating to a new slide
    * Stops current audio and starts audio for the new slide from the beginning
@@ -2879,6 +2954,21 @@ function App() {
     }
     isProcessingRecordingRef.current = true
     try {
+      const scheduleNoSpeechRetry = (message) => {
+        if (isMicEnabledRef.current && emptyTranscriptRetryRef.current < AUDIO_CONFIG.NO_SPEECH_RETRY_MAX) {
+          emptyTranscriptRetryRef.current += 1
+          setLiveTranscription(message)
+          const delay = AUDIO_CONFIG.NO_SPEECH_RETRY_DELAY_MS * emptyTranscriptRetryRef.current
+          setTimeout(() => {
+            if (!isMicEnabledRef.current) return
+            raiseHandRequestRef.current = false
+            startListeningRef.current?.()
+          }, delay)
+          return true
+        }
+        return false
+      }
+
       // Capture MIME type before cleanup (refs will be cleared by stopListening)
       const recorder = mediaRecorderRef.current
       const mimeType = recorder?.mimeType || 'audio/webm'
@@ -2895,12 +2985,6 @@ function App() {
       // Copy chunks AFTER stop so we get the final chunk from ondataavailable
       const chunks = [...audioChunksRef.current]
 
-      // Clean up audio resources (this also tries to stop, but recorder is already stopped)
-      stopListening()
-
-      // Play confirmation sound to indicate recording complete
-      playRecordingCompleteSound()
-
       const speechStartedAt = speechStartedAtRef.current
       const speechEndedAt = lastSpeechTimeRef.current
       const speechDurationMs = speechStartedAt && speechEndedAt
@@ -2910,22 +2994,18 @@ function App() {
         && speechDurationMs >= AUDIO_CONFIG.MIN_SPEECH_DURATION_MS
         && speechFrameCountRef.current >= AUDIO_CONFIG.MIN_SPEECH_FRAMES
 
+      // Clean up audio resources (this also tries to stop, but recorder is already stopped)
+      stopListening()
+
+      // Play confirmation sound to indicate recording complete
+      playRecordingCompleteSound()
+
       if (!hasSpeech) {
         logger.warn('AUDIO', 'No speech detected, skipping transcription', {
           speechDurationMs,
           speechFrames: speechFrameCountRef.current,
         })
-        if (isMicEnabledRef.current && emptyTranscriptRetryRef.current < 1) {
-          emptyTranscriptRetryRef.current += 1
-          setLiveTranscription('Didn’t catch that. Listening again...')
-          setTimeout(() => {
-            if (!isMicEnabledRef.current) return
-            raiseHandRequestRef.current = false
-            stopListeningRef.current?.()
-            startListeningRef.current?.()
-          }, 350)
-          return
-        }
+        if (scheduleNoSpeechRetry('Didn’t catch that. Listening again...')) return
         setLiveTranscription('No question detected. Tap to try again.')
         return
       }
@@ -2946,6 +3026,7 @@ function App() {
           size: audioBlob.size,
           minSize: AUDIO_CONFIG.MIN_AUDIO_SIZE,
         })
+        if (scheduleNoSpeechRetry('Recording too short. Listening again...')) return
         setLiveTranscription('Recording too short. Please speak longer.')
         return
       }
@@ -3014,17 +3095,7 @@ function App() {
       // F028: Check for empty transcription
       if (!data.transcription || data.transcription.trim() === '') {
         logger.warn('AUDIO', 'Empty transcription received')
-        if (isMicEnabledRef.current && emptyTranscriptRetryRef.current < 1) {
-          emptyTranscriptRetryRef.current += 1
-          setLiveTranscription('Didn’t catch that. Listening again...')
-          setTimeout(() => {
-            if (!isMicEnabledRef.current) return
-            raiseHandRequestRef.current = false
-            stopListeningRef.current?.()
-            startListeningRef.current?.()
-          }, 350)
-          return
-        }
+        if (scheduleNoSpeechRetry('Didn’t catch that. Listening again...')) return
         setLiveTranscription('No question detected. Tap to try again.')
         return
       }
@@ -3690,8 +3761,13 @@ function App() {
           Math.max(1 + previousTopLevelCount - 1, 0) // Ensure we don't exceed current slides
         )
         const now = Date.now()
+        // Create section divider for top-level follow-ups (not nested children)
+        const sectionDivider = !followUpParentId
+          ? createSectionDivider(activeTopic.id, trimmedQuery)
+          : null
         const nextSlides = [
           ...(activeTopic.slides || []),
+          ...(sectionDivider ? [sectionDivider] : []),
           ...generateData.slides,
         ]
 
@@ -4594,6 +4670,11 @@ function App() {
                           name={displayedSlide.topicName}
                         />
                       </div>
+                    ) : displayedSlide?.type === 'section' ? (
+                      // Render section divider card for follow-up sections
+                      <div className="absolute inset-0 bg-surface rounded-xl shadow-lg overflow-hidden">
+                        <SectionDivider question={displayedSlide.question} />
+                      </div>
                     ) : displayedSlide?.type === 'suggestions' ? (
                       // Render suggestions slide with clickable question buttons
                       <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-primary/10 rounded-xl shadow-lg overflow-hidden flex flex-col items-center justify-center p-6 md:p-8">
@@ -4752,8 +4833,9 @@ function App() {
               {/* F044, F057: Progress dots - show slides for current topic with 44px touch target */}
               <div className="flex items-center gap-1 flex-wrap justify-center" role="tablist" aria-label="Slide navigation">
                 {visibleSlides.map((slide, i) => {
-                  // Use different styling for header, suggestions, and content dots
+                  // Use different styling for header, section, suggestions, and content dots
                   const isHeader = slide.type === 'header'
+                  const isSection = slide.type === 'section'
                   const isSuggestions = slide.type === 'suggestions'
                   const hasChildren = allTopicSlides.some(s => s.parentId === slide.id) // Check for children
                   return (
@@ -4765,6 +4847,8 @@ function App() {
                       aria-label={
                         isHeader
                           ? `Go to ${slide.topicName} topic header`
+                          : isSection
+                          ? 'Go to follow-up section'
                           : isSuggestions
                           ? 'Go to suggested questions'
                           : `Go to slide ${i + 1} of ${visibleSlides.length}`
@@ -4772,11 +4856,13 @@ function App() {
                       className="p-2 transition-colors cursor-pointer hover:scale-125 relative"
                     >
                       {/* Inner dot - visual indicator, outer padding provides 44px touch target */}
-                      {/* Header: rectangle, Suggestions: diamond, Content: circle */}
+                      {/* Header: rectangle, Section: rounded square, Suggestions: diamond, Content: circle */}
                       <span
                         className={`block ${
                           isHeader
                             ? `w-4 h-3 rounded ${i === currentIndex ? 'bg-primary' : 'bg-gray-400'}`
+                            : isSection
+                            ? `w-3 h-3 rounded-sm ${i === currentIndex ? 'bg-indigo-500' : 'bg-gray-300'}`
                             : isSuggestions
                             ? `w-3 h-3 rotate-45 ${i === currentIndex ? 'bg-primary' : 'bg-gray-300'}`
                             : `w-3 h-3 rounded-full ${i === currentIndex ? 'bg-primary' : 'bg-gray-300'}`

@@ -738,3 +738,24 @@ if (!hasSpeech) {
   return
 }
 ```
+
+---
+
+### Issue 9: Slide Narration Start Delay
+
+**Symptoms:**
+- Slide narration sometimes starts late when entering a new slide
+- Audio fetch + TTS generation occurs just-in-time, causing gaps
+
+**Root Cause:**
+- Narration audio was fetched on-demand per slide
+- Only next-slide prefetching was used, leaving initial slides cold
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// Batch prefetch TTS for all slides with subtitles (concurrency-limited)
+prefetchSlideNarrationBatch(allTopicSlides)
+
+// Configurable concurrency + delay to avoid rate limits
+const TTS_PREFETCH_CONFIG = { MAX_CONCURRENCY: 2, DELAY_MS: 150 }
+```

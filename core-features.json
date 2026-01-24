@@ -1,0 +1,1208 @@
+{
+  "category": "core",
+  "description": "Core MVP Features - Voice-first educational slideshow app",
+  "feature_count": 34,
+  "features": [
+    {
+      "id": "CORE032",
+      "name": "Adaptive Follow-up Responses",
+      "description": "Agent handles follow-up queries with varying complexity (Trivial: voice, Simple: voice+1 slide, Moderate: 2-3 slides, Complex: offer choice). Nested slides (2D) for follow-ups.",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Ask trivial follow-up (e.g., 'What color is that?')",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify only voice response (no new slides)",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Ask simple follow-up (e.g., 'Show me another example')",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify 1 new slide generated nested under current slide",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Ask moderate follow-up",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify 2-3 new slides nested",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify UI handles 2D navigation (up/down/left/right)",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE033",
+      "name": "Follow-up Rail + Mobile Drawer",
+      "description": "Follow-up slides are accessible from a right-side rail on desktop and a bottom drawer on mobile without shrinking the main slide.",
+      "priority": 2,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Generate a topic and ask a follow-up question",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify the right-side follow-up rail shows thumbnails and count on desktop",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify the main slide size is unchanged when the rail appears",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "On mobile, open the follow-up drawer and select a child slide",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify closing the drawer returns to the slideshow without layout shift",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE001",
+      "name": "Voice recording to transcription",
+      "description": "User speaks into mic, audio sent to STT, transcription returned",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Click mic button to start recording",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Speak 'How do volcanoes work?'",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify waveform visualization shows activity",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify transcription appears in UI",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify transcription matches spoken words",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE002",
+      "name": "Slide generation from query",
+      "description": "Text query generates slides with AI images and TTS audio",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Submit query 'How do volcanoes work?'",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify generating state shown",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Wait for generation to complete",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify 3-6 slides created",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify each slide has image (not placeholder)",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify each slide has audio (real TTS)",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify each slide has subtitle/narration text",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE003",
+      "name": "AI-generated images are real",
+      "description": "Slide images come from Gemini, not placeholders",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Generate slides",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Inspect image data",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify NOT placeholder URL (placehold.co)",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify image content relates to topic",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE004",
+      "name": "TTS audio is real",
+      "description": "Slide audio comes from Gemini TTS, not silence",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Generate slides",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Play slide audio",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify audio is not silence",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify spoken content matches subtitle",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE005",
+      "name": "UI state: Listening",
+      "description": "App shows listening state with mic button and waveform",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Open app fresh",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify mic button visible and prominent",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Click mic to start recording",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify waveform visualization appears",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify live transcription preview shown",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE006",
+      "name": "UI state: Generating",
+      "description": "App shows generating state with progress indicator",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Submit query",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify generating UI shown",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify progress indicator visible",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify query text displayed",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE007",
+      "name": "UI state: Slideshow",
+      "description": "App shows slideshow with image, subtitles, and controls",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Complete slide generation",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify slideshow view displayed",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify current slide image shown",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify subtitles displayed",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify progress dots show slide position",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify playback controls visible",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE008",
+      "name": "Slideshow auto-advance",
+      "description": "Slides auto-advance when audio completes",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Start slideshow with 4 slides",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Wait for slide 1 audio to complete",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify auto-advance to slide 2",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify audio for slide 2 starts",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE009",
+      "name": "Slideshow manual navigation",
+      "description": "User can manually navigate between slides",
+      "priority": 2,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "View slideshow",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Click next button",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify next slide shown",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Click previous button",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify previous slide shown",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE010",
+      "name": "AI greeting on cold start",
+      "description": "App greets user with audio on first open",
+      "priority": 2,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Clear localStorage",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Open app",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify greeting audio plays",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify example questions shown",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE011",
+      "name": "Topic classification - NEW_TOPIC",
+      "description": "Unrelated question creates new topic",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Generate volcano topic",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Ask 'How do computers work?'",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify classified as NEW_TOPIC",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify new topic created in sidebar",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify volcano topic preserved",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE012",
+      "name": "Topic classification - TOPIC_FOLLOWUP",
+      "description": "Follow-up question appends slides to current topic",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Generate volcano topic with 4 slides",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Ask 'Tell me more about the magma chamber'",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify classified as TOPIC_FOLLOWUP",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify new slides appended (now 6-8 slides)",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify same topic, not new one",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE013",
+      "name": "Classification is real AI decision",
+      "description": "Classification comes from AI, not hardcoded",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Ask follow-up 'Tell me more'",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify classified as TOPIC_FOLLOWUP",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Ask new topic 'What is gravity?'",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify classified as NEW_TOPIC",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE014",
+      "name": "Follow-up slides append correctly",
+      "description": "Follow-up generation adds slides to existing topic",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Have topic with 4 slides",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Ask follow-up question",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify POST to /api/generate/follow-up",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify new slides appended after existing",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify slideshow continues from new slides",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE015",
+      "name": "Follow-up slides build on context",
+      "description": "Follow-up content references previous slides",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Generate volcano topic",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Ask 'Tell me more about the magma chamber'",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify new slides are about magma chambers",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify content builds on previous context",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE016",
+      "name": "Topic sidebar displays topics",
+      "description": "Sidebar shows list of topics with icons",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Create topic about volcanoes",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify topic appears in sidebar",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify topic has name and icon",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Create second topic",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify both topics in sidebar",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE017",
+      "name": "Topic sidebar navigation",
+      "description": "Clicking topic in sidebar switches to that topic",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Create 2 topics",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Click on first topic in sidebar",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify first topic's slides displayed",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Click on second topic",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify second topic's slides displayed",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE018",
+      "name": "Topic eviction at max capacity",
+      "description": "4th topic removes oldest (max 3 topics)",
+      "priority": 2,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Create topics A, B, C",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify all 3 in sidebar",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Create topic D",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify topic A removed",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify B, C, D remain",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE019",
+      "name": "Push-to-talk recording",
+      "description": "Hold button to record, release to send",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Press and hold mic button",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify recording indicator active",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Speak while holding",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Release button",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify transcription processed",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify query submitted",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE020",
+      "name": "Push-to-talk interrupt during playback",
+      "description": "Hold mic during slideshow to interrupt and ask question",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Start slideshow playback",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Press and hold mic button",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify audio pauses",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Speak question",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Release button",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify question processed",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE021",
+      "name": "VAD interrupt detection",
+      "description": "Voice activity during playback triggers interrupt",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Start slideshow with audio playing",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Speak while audio playing (VAD enabled)",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify VAD detects speech",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify slideshow audio pauses",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify listening mode activated",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE022",
+      "name": "Interrupt and continue flow",
+      "description": "After interrupt response, can resume slideshow",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Start slideshow",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Interrupt with question",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify response generated/played",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify option to continue slideshow",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Click continue",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify slideshow resumes",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE023",
+      "name": "Narration with annotations - verbal response",
+      "description": "SLIDE_QUESTION gets verbal response about visible content",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "View slide with diagram",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Ask 'What's the red part?'",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify classified as SLIDE_QUESTION",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify verbal response plays (not new slides)",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify response relates to visible content",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE024",
+      "name": "Annotation highlight on diagram",
+      "description": "When explaining diagram element, highlight appears",
+      "priority": 2,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Ask about diagram element",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify highlight/annotation appears on image",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify highlight corresponds to discussed element",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify highlight fades after response",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE025",
+      "name": "Voice query to slideshow E2E",
+      "description": "Complete flow: speak → transcribe → generate → view slides",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Click mic button",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Speak 'How do airplanes fly?'",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Wait for transcription",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Wait for generating state",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Wait for slides to complete",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify slideshow plays with audio",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify subtitles displayed",
+          "status": "pending"
+        },
+        {
+          "id": "T008",
+          "description": "Verify topic in sidebar",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE026",
+      "name": "Play/pause audio control",
+      "description": "User can pause and resume slideshow audio",
+      "priority": 2,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Start slideshow with audio playing",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Click pause button",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify audio pauses",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Click play button",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify audio resumes from pause point",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE027",
+      "name": "Topic persists across refresh",
+      "description": "Topics and slides survive page refresh",
+      "priority": 2,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Create topic with slides",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Refresh page",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify topic still in sidebar",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify slides still accessible",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE028",
+      "name": "Audio-driven slide transitions",
+      "description": "Slides wait for audio narration to complete before advancing, with a brief pause between transitions",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Start slideshow with multiple slides",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify slide does not advance until audio finishes",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify brief pause (400ms) occurs after audio ends before next slide",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify next slide audio starts after pause",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify slideshow stops at last slide without looping",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE029",
+      "name": "Multi-language support (Chinese)",
+      "description": "Auto-detect query language and generate content (subtitles, image labels, TTS) in the same language",
+      "priority": 2,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Ask question in Chinese: '什么是光合作用?'",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify STT transcribes Chinese correctly",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify generated subtitles are in Chinese",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify TTS speaks in Chinese",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify image labels/annotations are in Chinese",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Ask question in English",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify English query produces English content (no regression)",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE030",
+      "name": "Randomized home screen headlines",
+      "description": "Home screen displays varied welcome messages instead of static text",
+      "priority": 3,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Open app to home screen",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify headline text is displayed",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Refresh page multiple times",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify different headlines appear across refreshes",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify all headlines convey similar meaning (asking what to learn/show)",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE031",
+      "name": "Voice interaction sound effects",
+      "description": "Gentle audio feedback for voice interactions: mic-on chime when starting to listen, confirmation tone when recording completes",
+      "priority": 2,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Click level card on HOME screen to start listening",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify gentle mic-on sound plays (rising chime)",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Click raise hand button during slideshow",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify same mic-on sound plays for raise hand",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Speak a question and finish recording",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify recording-complete sound plays (ascending arpeggio)",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify sounds are synthesized (no external audio files)",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE034",
+      "name": "Follow-up Section Divider Cards",
+      "description": "Visual section divider cards appear before follow-up slides to clearly separate content sections. Shows 'Diving deeper into...' with the follow-up question text, animated magnifying glass icon, and distinct progress dot shape (rounded square).",
+      "priority": 2,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Generate a topic and view the slideshow",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Click a follow-up suggestion from 'Want to learn more?' slide",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify section divider card appears before new follow-up slides",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify divider shows 'Diving deeper into...' label with magnifying glass icon",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify the follow-up question text is displayed prominently",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify progress dots show distinct rounded-square shape for section dividers",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify section dividers persist after page refresh",
+          "status": "pending"
+        },
+        {
+          "id": "T008",
+          "description": "Verify multiple follow-ups each get their own section divider",
+          "status": "pending"
+        }
+      ]
+    }
+  ]
+}

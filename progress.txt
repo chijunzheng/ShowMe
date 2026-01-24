@@ -1264,3 +1264,69 @@ Updated topic structure to support versions:
 
 ### Files Modified
 - `frontend/src/App.jsx`: speech detection counters + pre-STT guard
+
+## Session: TTS Prefetch (2026-01-23)
+
+### Updates
+- Added batch prefetch for slide narration TTS to reduce playback delay
+- Concurrency-limited queue to avoid rate-limit spikes
+- Prefetch triggered during generation + slideshow for active topic slides
+
+### Files Modified
+- `frontend/src/App.jsx`: TTS prefetch queue + batch trigger
+
+---
+
+## Session 18: Follow-up Section Divider Cards (2026-01-24)
+
+### Completed Features
+
+#### CORE034: Follow-up Section Divider Cards - IMPLEMENTED
+Visual "chapter marker" cards that appear before follow-up slides to clearly separate content sections and show the learning journey hierarchy.
+
+**Design:**
+- Gradient background: indigo → purple → pink (eye-catching but not overwhelming)
+- Animated pulsing magnifying glass icon (🔍)
+- "Diving deeper into..." label with bold question text
+- Bouncing arrow animation pointing down
+- "Swipe to explore" hint
+
+**Progress Dot:**
+- New rounded-square shape to distinguish from other slide types
+- Indigo color when selected (distinct from primary color)
+
+**Visual Hierarchy (Progress Dots):**
+| Slide Type   | Shape          | Selected Color |
+|-------------|----------------|----------------|
+| header      | rectangle      | primary        |
+| section     | rounded square | indigo         |
+| content     | circle         | primary        |
+| suggestions | diamond        | primary        |
+
+### Files Created
+- `frontend/src/components/SectionDivider.jsx` - Section divider component with animated icons
+
+### Files Modified
+- `frontend/src/App.jsx`:
+  - Added `import SectionDivider from './components/SectionDivider'`
+  - Added `createSectionDivider(topicId, question)` function
+  - Modified follow-up append logic to insert section divider before new slides
+  - Updated progress dot rendering to handle `type === 'section'`
+  - Added section divider rendering in slideshow display
+
+### Implementation Details
+- Section dividers only appear for top-level follow-ups (not nested children with `parentId`)
+- Dividers are stored in the slides array, so they persist in localStorage
+- Uses the follow-up question text as the divider title
+
+### Git Commits
+- (pending): feat: implement CORE034 follow-up section divider cards
+
+### Features Status
+- **Total Features**: 34 (previous 33 + CORE034)
+- **Completed**: CORE034 implemented and build verified
+
+### Context for Next Agent
+- Section dividers create clear visual breaks between follow-up sections
+- Users can see their learning journey at a glance via progress dot shapes
+- Judges will see "chapter markers" showing the exploration path
