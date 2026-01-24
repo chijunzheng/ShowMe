@@ -1,7 +1,7 @@
 {
   "category": "core",
   "description": "Core MVP Features - Voice-first educational slideshow app",
-  "feature_count": 32,
+  "feature_count": 33,
   "features": [
     {
       "id": "CORE032",
@@ -43,6 +43,40 @@
         {
           "id": "T007",
           "description": "Verify UI handles 2D navigation (up/down/left/right)",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE033",
+      "name": "Follow-up Rail + Mobile Drawer",
+      "description": "Follow-up slides are accessible from a right-side rail on desktop and a bottom drawer on mobile without shrinking the main slide.",
+      "priority": 2,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Generate a topic and ask a follow-up question",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify the right-side follow-up rail shows thumbnails and count on desktop",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify the main slide size is unchanged when the rail appears",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "On mobile, open the follow-up drawer and select a child slide",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify closing the drawer returns to the slideshow without layout shift",
           "status": "pending"
         }
       ]

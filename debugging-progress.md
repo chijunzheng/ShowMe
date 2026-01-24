@@ -637,3 +637,54 @@ To test child slide navigation:
 3. New slides should have `parentId` set to current slide's ID
 4. Progress dots should show ▼ indicator on slides with children
 5. Press ↓ to navigate to child slides, ↑ to return to parent
+
+---
+
+### Issue 5: Follow-up TTS Plays Parent Slide Audio
+
+**Symptoms:**
+- Follow-up slides render correctly
+- TTS narration always reads the original parent slide
+- Auto-advance continues based on parent slide audio
+
+**Root Cause:**
+- Narration and auto-advance used the main `currentIndex` slide instead of the active child slide
+- Audio prefetch logic also ignored `currentChildIndex`
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// Use displayedSlide (parent or child) for narration and auto-advance
+const displayedSlide = currentChildIndex === null
+  ? visibleSlides[currentIndex]
+  : activeChildSlides[currentChildIndex]
+
+// Auto-advance uses child-first navigation
+const advanceToNextSlide = () => {
+  if (currentChildIndex === null && activeChildSlides.length > 0) {
+    setCurrentChildIndex(0)
+    return
+  }
+  // ...
+}
+
+// Prefetch uses next slide in the same sequence
+const nextSlide = getNextSlideForPrefetch()
+prefetchSlideAudio(nextSlide)
+```
+
+---
+
+### Issue 6: Vite JSX Parse Error
+
+**Symptoms:**
+- Vite overlay: "Unexpected token, expected ','" near follow-up drawer
+- Babel parser: "Expected corresponding JSX closing tag for <>"
+
+**Root Cause:**
+- A stray `}` after the slideshow block broke JSX nesting
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// Removed the extra brace after the slideshow conditional
+{uiState === UI_STATE.SLIDESHOW && visibleSlides.length > 0 && ( ... )}
+```

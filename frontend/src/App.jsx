@@ -964,6 +964,7 @@ function App() {
   const [currentIndex, setCurrentIndex] = useState(0)
   // CORE032: Vertical navigation state for 2D slides
   const [currentChildIndex, setCurrentChildIndex] = useState(null)
+  const [isFollowUpDrawerOpen, setIsFollowUpDrawerOpen] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
   const [liveTranscription, setLiveTranscription] = useState('')
   const [lastTranscription, setLastTranscription] = useState('')
@@ -1119,6 +1120,7 @@ function App() {
     }
     return visibleSlides[currentIndex]
   }, [visibleSlides, currentIndex, activeChildSlides, currentChildIndex])
+  const parentSlide = visibleSlides[currentIndex] || null
 
   /**
    * Limit in-memory slides to a recent-access cache to avoid unbounded growth.
@@ -1358,6 +1360,10 @@ function App() {
   useEffect(() => {
     isPlayingRef.current = isPlaying
   }, [isPlaying])
+
+  useEffect(() => {
+    setIsFollowUpDrawerOpen(false)
+  }, [currentIndex, activeChildSlides.length])
 
   // Audio refs - these persist across renders without causing re-renders
   const audioContextRef = useRef(null)
@@ -2117,7 +2123,7 @@ function App() {
       return
     }
 
-    const currentSlide = visibleSlides[currentIndex]
+    const currentSlide = displayedSlide
 
     // Wait for narration to be ready (header slides are always "ready")
     if (currentSlide?.type !== 'header' && currentSlide?.type !== 'suggestions' && !isSlideNarrationReady) {
@@ -2182,7 +2188,10 @@ function App() {
     isSlideNarrationReady,
     isSlideNarrationPlaying,
     currentIndex,
+    currentChildIndex,
+    activeChildSlides.length,
     visibleSlides,
+    displayedSlide,
     getSlideDuration,
   ])
 
@@ -2270,7 +2279,18 @@ function App() {
       return
     }
 
-    const currentSlide = visibleSlides[currentIndex]
+    const currentSlide = displayedSlide
+    const getNextSlideForPrefetch = () => {
+      if (activeChildSlides.length > 0) {
+        if (currentChildIndex === null) {
+          return activeChildSlides[0] || visibleSlides[currentIndex + 1]
+        }
+        if (currentChildIndex < activeChildSlides.length - 1) {
+          return activeChildSlides[currentChildIndex + 1]
+        }
+      }
+      return visibleSlides[currentIndex + 1]
+    }
     setIsSlideNarrationReady(false)
     setIsSlideNarrationLoading(false)
 
@@ -2297,7 +2317,7 @@ function App() {
     if (currentSlide?.type === 'header') {
       setIsSlideNarrationPlaying(false)
       setIsSlideNarrationReady(true)
-      prefetchSlideAudio(visibleSlides[currentIndex + 1])
+      prefetchSlideAudio(getNextSlideForPrefetch())
       return
     }
 
@@ -2393,6 +2413,17 @@ function App() {
         // Only advance if still playing
         if (isPlayingRef.current) {
           slideTransitionTimeoutRef.current = setTimeout(() => {
+            if (activeChildSlides.length > 0) {
+              if (currentChildIndex === null) {
+                setCurrentChildIndex(0)
+                return
+              }
+              if (currentChildIndex < activeChildSlides.length - 1) {
+                setCurrentChildIndex((prev) => prev + 1)
+                return
+              }
+            }
+
             setCurrentIndex((prev) => {
               const nextIndex = prev + 1
               // If we reach the end, stop playing and mark slideshow as finished
@@ -2401,6 +2432,7 @@ function App() {
                 hasFinishedSlideshowRef.current = true
                 return prev
               }
+              setCurrentChildIndex(null)
               return nextIndex
             })
           }, SLIDE_TRANSITION_PAUSE_MS)
@@ -2420,7 +2452,7 @@ function App() {
         resumeListeningAfterSlideRef.current = false
       })
 
-      prefetchSlideAudio(visibleSlides[currentIndex + 1])
+      prefetchSlideAudio(getNextSlideForPrefetch())
     }
 
     playSlideAudio()
@@ -2440,7 +2472,10 @@ function App() {
   }, [
     uiState,
     currentIndex,
+    currentChildIndex,
+    activeChildSlides,
     visibleSlides,
+    displayedSlide,
     isPlaying,
     isVoiceAgentSpeaking,
     requestSlideAudio,
@@ -3555,11 +3590,22 @@ function App() {
         persistTopicSlides(activeTopic.id, nextSlides, currentVersion?.id)
 
         setTopics((prev) => {
-          const updated = prev.map((topic) =>
-            topic.id === activeTopic.id
-              ? { ...topic, slides: nextSlides, suggestedQuestions, lastAccessedAt: now }
-              : topic
-          )
+          const updated = prev.map((topic) => {
+            if (topic.id !== activeTopic.id) return topic
+            const versionIndex = topic.currentVersionIndex ?? 0
+            const updatedVersions = Array.isArray(topic.versions)
+              ? topic.versions.map((v, idx) =>
+                  idx === versionIndex ? { ...v, slides: nextSlides } : v
+                )
+              : topic.versions
+            return {
+              ...topic,
+              slides: nextSlides,
+              versions: updatedVersions,
+              suggestedQuestions,
+              lastAccessedAt: now,
+            }
+          })
           return pruneSlideCache(updated, activeTopic.id)
         })
 
@@ -4413,323 +4459,461 @@ function App() {
                 Preparing your follow-up...
               </div>
             )}
-            {/* F050: Slide content with fade transition - key triggers animation on slide change */}
-            {/* F043, F044: handles both header and content slides */}
-            <div key={displayedSlide?.id || `slide-${currentIndex}-${currentChildIndex}`} className="slide-fade w-full relative">
-              {/* CORE032: Vertical navigation indicators (active if children exist) */}
-              {activeChildSlides.length > 0 && (
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-10">
-                  {/* Parent dot */}
-                  <div className={`w-2 h-2 rounded-full transition-all ${currentChildIndex === null ? 'bg-primary scale-125' : 'bg-gray-300'}`} />
-                  {/* Child dots */}
-                  {activeChildSlides.map((_, idx) => (
-                    <div 
-                      key={idx} 
-                      className={`w-2 h-2 rounded-full transition-all ${currentChildIndex === idx ? 'bg-primary scale-125' : 'bg-gray-300'}`}
-                    />
-                  ))}
+            <div className="w-full flex flex-col items-center gap-4">
+              <div className="w-full relative overflow-visible">
+                {/* F050: Slide content with fade transition - key triggers animation on slide change */}
+                {/* F043, F044: handles both header and content slides */}
+                <div
+                  key={displayedSlide?.id || `slide-${currentIndex}-${currentChildIndex}`}
+                  className="slide-fade w-full relative"
+                >
+                  {displayedSlide?.type === 'header' ? (
+                    // F043: Render topic header card with TopicHeader component
+                    <div className="w-full aspect-video bg-surface rounded-xl shadow-lg overflow-hidden">
+                      <TopicHeader
+                        icon={displayedSlide.topicIcon}
+                        name={displayedSlide.topicName}
+                      />
+                    </div>
+                  ) : displayedSlide?.type === 'suggestions' ? (
+                    // Render suggestions slide with clickable question buttons
+                    <div className="w-full aspect-video bg-gradient-to-br from-primary/5 to-primary/10 rounded-xl shadow-lg overflow-hidden flex flex-col items-center justify-center p-6 md:p-8">
+                      <h3 className="text-xl md:text-2xl font-semibold text-gray-800 mb-6 text-center">
+                        Want to learn more?
+                      </h3>
+                      <div className="flex flex-col gap-3 w-full max-w-md">
+                        {displayedSlide?.questions?.map((question, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => handleSuggestionClick(question)}
+                            className="w-full px-4 py-3 bg-white hover:bg-primary hover:text-white text-gray-700 rounded-lg shadow-sm border border-gray-200 hover:border-primary transition-all duration-200 text-left text-sm md:text-base"
+                          >
+                            {question}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    // Regular content slide with image and subtitle
+                    <>
+                      {/* CORE024: Container with relative positioning for highlight overlay */}
+                      <div className="relative w-full aspect-video bg-surface rounded-xl shadow-lg overflow-hidden">
+                        <img
+                          src={displayedSlide?.imageUrl || FALLBACK_SLIDE_IMAGE_URL}
+                          alt="Slide diagram"
+                          className="w-full h-full object-contain"
+                          onError={(event) => {
+                            if (event.currentTarget.dataset.fallbackApplied) return
+                            event.currentTarget.dataset.fallbackApplied = 'true'
+                            event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
+                          }}
+                        />
+                        {/* CORE024: Highlight overlay for slide questions */}
+                        <HighlightOverlay
+                          x={highlightPosition?.x}
+                          y={highlightPosition?.y}
+                          visible={highlightPosition !== null}
+                        />
+                      </div>
+
+                      {/* Subtitle - only shown for content slides */}
+                      <div className="mt-4">
+                        {/* F091: Show "Key Takeaways" badge for conclusion slides */}
+                        {displayedSlide?.isConclusion && (
+                          <div className="flex justify-center mb-2">
+                            <span className="text-xs font-medium px-2 py-0.5 bg-primary/10 text-primary rounded-full">
+                              Key Takeaways
+                            </span>
+                          </div>
+                        )}
+                        <p className="text-base text-center line-clamp-5">
+                          {displayedSlide?.subtitle}
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </div>
+
+                {activeChildSlides.length > 0 && (
+                  <div className="hidden xl:block absolute left-full top-1/2 -translate-y-1/2 translate-x-8 z-10">
+                    <div className="w-44 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-xl shadow-sm p-3 flex flex-col gap-2.5">
+                      <div className="flex items-center justify-between px-1">
+                        <span className="text-[10px] uppercase tracking-wider text-gray-500">Follow-ups</span>
+                        <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold">
+                          {activeChildSlides.length}
+                        </span>
+                      </div>
+
+                      <button
+                        onClick={() => setCurrentChildIndex(null)}
+                        aria-label="Back to main slide"
+                        className={`group flex items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                          currentChildIndex === null
+                            ? 'border-primary/40 bg-primary/5'
+                            : 'border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className="w-16 h-11 rounded-md bg-gray-100 border border-gray-200 overflow-hidden flex-shrink-0">
+                          {parentSlide?.imageUrl ? (
+                            <img
+                              src={parentSlide.imageUrl}
+                              alt="Main slide thumbnail"
+                              className="w-full h-full object-cover"
+                              onError={(event) => {
+                                if (event.currentTarget.dataset.fallbackApplied) return
+                                event.currentTarget.dataset.fallbackApplied = 'true'
+                                event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
+                              }}
+                            />
+                          ) : (
+                            <div className="w-full h-full bg-gradient-to-br from-gray-100 to-gray-200" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium text-gray-700">Main</div>
+                          <div className="text-[10px] text-gray-400 line-clamp-1">
+                            {parentSlide?.subtitle || 'Overview'}
+                          </div>
+                        </div>
+                      </button>
+
+                      {activeChildSlides.map((slide, idx) => (
+                        <button
+                          key={slide.id || idx}
+                          onClick={() => setCurrentChildIndex(idx)}
+                          aria-label={`Go to follow-up ${idx + 1}`}
+                          className={`group flex items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                            currentChildIndex === idx
+                              ? 'border-primary/40 bg-primary/5'
+                              : 'border-gray-200 hover:bg-gray-50'
+                          }`}
+                        >
+                          <div className="w-16 h-11 rounded-md bg-gray-100 border border-gray-200 overflow-hidden flex-shrink-0">
+                            <img
+                              src={slide?.imageUrl || FALLBACK_SLIDE_IMAGE_URL}
+                              alt={`Follow-up ${idx + 1} thumbnail`}
+                              className="w-full h-full object-cover"
+                              onError={(event) => {
+                                if (event.currentTarget.dataset.fallbackApplied) return
+                                event.currentTarget.dataset.fallbackApplied = 'true'
+                                event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
+                              }}
+                            />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-xs font-medium text-gray-700">Follow-up {idx + 1}</div>
+                            <div className="text-[10px] text-gray-400 line-clamp-1">
+                              {slide?.subtitle || 'More detail'}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {activeChildSlides.length > 0 && (
+                <button
+                  onClick={() => setIsFollowUpDrawerOpen(true)}
+                  className="xl:hidden inline-flex items-center gap-2 px-3 py-2 rounded-full border border-gray-200 text-xs text-gray-600 bg-white hover:bg-gray-50 transition-colors"
+                >
+                  <span className="font-medium">Follow-ups</span>
+                  <span className="inline-flex items-center justify-center min-w-[18px] h-4 px-1 rounded-full bg-primary/10 text-primary text-[10px] font-semibold">
+                    {activeChildSlides.length}
+                  </span>
+                </button>
               )}
 
-              {displayedSlide?.type === 'header' ? (
-                // F043: Render topic header card with TopicHeader component
-                <div className="w-full aspect-video bg-surface rounded-xl shadow-lg overflow-hidden">
-                  <TopicHeader
-                    icon={displayedSlide.topicIcon}
-                    name={displayedSlide.topicName}
-                  />
+              {/* F044, F057: Progress dots - show slides for current topic with 44px touch target */}
+              <div className="flex items-center gap-1 flex-wrap justify-center" role="tablist" aria-label="Slide navigation">
+                {visibleSlides.map((slide, i) => {
+                  // Use different styling for header, suggestions, and content dots
+                  const isHeader = slide.type === 'header'
+                  const isSuggestions = slide.type === 'suggestions'
+                  const hasChildren = allTopicSlides.some(s => s.parentId === slide.id) // Check for children
+                  return (
+                    <button
+                      key={slide.id}
+                      onClick={() => { setCurrentIndex(i); setCurrentChildIndex(null); }}
+                      role="tab"
+                      aria-selected={i === currentIndex}
+                      aria-label={
+                        isHeader
+                          ? `Go to ${slide.topicName} topic header`
+                          : isSuggestions
+                          ? 'Go to suggested questions'
+                          : `Go to slide ${i + 1} of ${visibleSlides.length}`
+                      }
+                      className="p-2 transition-colors cursor-pointer hover:scale-125 relative"
+                    >
+                      {/* Inner dot - visual indicator, outer padding provides 44px touch target */}
+                      {/* Header: rectangle, Suggestions: diamond, Content: circle */}
+                      <span
+                        className={`block ${
+                          isHeader
+                            ? `w-4 h-3 rounded ${i === currentIndex ? 'bg-primary' : 'bg-gray-400'}`
+                            : isSuggestions
+                            ? `w-3 h-3 rotate-45 ${i === currentIndex ? 'bg-primary' : 'bg-gray-300'}`
+                            : `w-3 h-3 rounded-full ${i === currentIndex ? 'bg-primary' : 'bg-gray-300'}`
+                        }`}
+                      />
+                      {/* Indicator for slides with children */}
+                      {hasChildren && i !== currentIndex && (
+                        <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1 h-1 bg-gray-400 rounded-full" />
+                      )}
+                      {/* Bouncing down arrow for current slide with children - shows vertical navigation is available */}
+                      {hasChildren && i === currentIndex && currentChildIndex === null && (
+                        <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 text-primary text-xs animate-bounce">
+                          ▼
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Controls - arrow buttons and play/pause */}
+              <div className="flex flex-col items-center gap-2">
+                {/* CORE032: Vertical controls (only visible if children exist) */}
+                {activeChildSlides.length > 0 && (
+                  <button
+                    onClick={goToChildPrev}
+                    disabled={currentChildIndex === null}
+                    className={`p-2 rounded-full transition-colors ${
+                      currentChildIndex === null ? 'text-gray-200' : 'text-primary hover:bg-gray-100'
+                    }`}
+                  >
+                    <span aria-hidden="true">&#9650;</span>
+                  </button>
+                )}
+
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={goToPrevSlide}
+                    disabled={currentIndex === 0}
+                    aria-label="Previous slide"
+                    className={`p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${
+                      currentIndex === 0
+                        ? 'text-gray-300 cursor-not-allowed'
+                        : 'text-gray-500 hover:text-primary hover:bg-gray-100'
+                    }`}
+                  >
+                    <span aria-hidden="true">&#9664;</span>
+                  </button>
+                  <button
+                    onClick={togglePlayPause}
+                    aria-label={isPlaying ? 'Pause slideshow' : 'Play slideshow'}
+                    className="p-3 min-w-[44px] min-h-[44px] bg-primary text-white rounded-full hover:bg-primary/90 transition-colors"
+                  >
+                    <span aria-hidden="true">{isPlaying ? '❚❚' : '▶'}</span>
+                  </button>
+                  <button
+                    onClick={goToNextSlide}
+                    disabled={currentIndex === visibleSlides.length - 1}
+                    aria-label="Next slide"
+                    className={`p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${
+                      currentIndex === visibleSlides.length - 1
+                        ? 'text-gray-300 cursor-not-allowed'
+                        : 'text-gray-500 hover:text-primary hover:bg-gray-100'
+                    }`}
+                  >
+                    <span aria-hidden="true">&#9654;</span>
+                  </button>
                 </div>
-              ) : displayedSlide?.type === 'suggestions' ? (
-                // Render suggestions slide with clickable question buttons
-                <div className="w-full aspect-video bg-gradient-to-br from-primary/5 to-primary/10 rounded-xl shadow-lg overflow-hidden flex flex-col items-center justify-center p-6 md:p-8">
-                  <h3 className="text-xl md:text-2xl font-semibold text-gray-800 mb-6 text-center">
-                    Want to learn more?
-                  </h3>
-                  <div className="flex flex-col gap-3 w-full max-w-md">
-                    {displayedSlide?.questions?.map((question, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => handleSuggestionClick(question)}
-                        className="w-full px-4 py-3 bg-white hover:bg-primary hover:text-white text-gray-700 rounded-lg shadow-sm border border-gray-200 hover:border-primary transition-all duration-200 text-left text-sm md:text-base"
+
+                {/* CORE032: Down arrow for children */}
+                {activeChildSlides.length > 0 && (
+                  <button
+                    onClick={goToChildNext}
+                    disabled={currentChildIndex === activeChildSlides.length - 1}
+                    className={`p-2 rounded-full transition-colors ${
+                      currentChildIndex === activeChildSlides.length - 1 ? 'text-gray-200' : 'text-primary hover:bg-gray-100'
+                    }`}
+                  >
+                    <span aria-hidden="true">&#9660;</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Queue indicator - shows number of questions waiting (F048) */}
+              {questionQueue.length > 0 && (
+                <p className="text-sm text-gray-400 mt-2">
+                  {questionQueue.length} question{questionQueue.length > 1 ? 's' : ''} queued
+                </p>
+              )}
+
+              {/* Level indicator with regenerate button and version switcher */}
+              {activeTopic && (
+                <div className="flex flex-col items-center gap-3 mt-4 mb-16">
+                  {/* Current level indicator with regenerate dropdown */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">Level:</span>
+                    <span className={`
+                      px-2 py-1 text-xs rounded-full bg-primary text-white
+                    `}>
+                      {LEVEL_CONFIG[getCurrentVersionLevel(activeTopic)]?.icon}{' '}
+                      {LEVEL_CONFIG[getCurrentVersionLevel(activeTopic)]?.title}
+                    </span>
+                    {/* Regenerate dropdown */}
+                    <RegenerateDropdown
+                      levelConfig={LEVEL_CONFIG}
+                      currentLevel={getCurrentVersionLevel(activeTopic)}
+                      onRegenerate={handleRegenerate}
+                      isRegenerating={isRegenerating}
+                      disabled={!activeTopic.query}
+                    />
+                  </div>
+
+                  {/* Version switcher - only shown when multiple versions exist */}
+                  {activeTopic.versions && activeTopic.versions.length > 1 && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-gray-400 mr-1">Versions:</span>
+                      {activeTopic.versions.map((version, index) => {
+                        const isActive = (activeTopic.currentVersionIndex ?? 0) === index
+                        const levelConfig = LEVEL_CONFIG[version.explanationLevel] || LEVEL_CONFIG[EXPLANATION_LEVEL.STANDARD]
+                        return (
+                          <button
+                            key={version.id}
+                            onClick={() => handleVersionSwitch(index)}
+                            className={`
+                              px-2 py-1 text-xs rounded-md transition-all
+                              flex items-center gap-1
+                              ${isActive
+                                ? 'bg-primary/10 text-primary border border-primary/30'
+                                : 'bg-gray-100 text-gray-500 hover:bg-gray-200 border border-transparent'
+                              }
+                            `}
+                            title={`${levelConfig.title} - ${new Date(version.createdAt).toLocaleString()}`}
+                          >
+                            <span>{levelConfig.icon}</span>
+                            <span className="hidden sm:inline">{levelConfig.title}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* Regenerating indicator */}
+                  {isRegenerating && (
+                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                      <svg
+                        className="w-3 h-3 animate-spin"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
                       >
-                        {question}
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        />
+                      </svg>
+                      <span>Regenerating slides...</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {activeChildSlides.length > 0 && isFollowUpDrawerOpen && (
+              <div className="xl:hidden fixed inset-0 z-50">
+                <button
+                  type="button"
+                  aria-label="Close follow-ups drawer"
+                  onClick={() => setIsFollowUpDrawerOpen(false)}
+                  className="absolute inset-0 bg-black/30"
+                />
+                <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-xl p-4 max-h-[70vh] overflow-y-auto">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-sm font-semibold text-gray-700">Follow-ups</div>
+                    <button
+                      type="button"
+                      onClick={() => setIsFollowUpDrawerOpen(false)}
+                      className="text-xs text-gray-500 hover:text-gray-700"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={() => {
+                        setCurrentChildIndex(null)
+                        setIsFollowUpDrawerOpen(false)
+                      }}
+                      className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
+                        currentChildIndex === null
+                          ? 'border-primary/40 bg-primary/5'
+                          : 'border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="w-20 h-14 rounded-md bg-gray-100 border border-gray-200 overflow-hidden flex-shrink-0">
+                        {parentSlide?.imageUrl ? (
+                          <img
+                            src={parentSlide.imageUrl}
+                            alt="Main slide thumbnail"
+                            className="w-full h-full object-cover"
+                            onError={(event) => {
+                              if (event.currentTarget.dataset.fallbackApplied) return
+                              event.currentTarget.dataset.fallbackApplied = 'true'
+                              event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
+                            }}
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-gradient-to-br from-gray-100 to-gray-200" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-gray-700">Main</div>
+                        <div className="text-xs text-gray-400 line-clamp-2">
+                          {parentSlide?.subtitle || 'Overview'}
+                        </div>
+                      </div>
+                    </button>
+
+                    {activeChildSlides.map((slide, idx) => (
+                      <button
+                        key={slide.id || idx}
+                        onClick={() => {
+                          setCurrentChildIndex(idx)
+                          setIsFollowUpDrawerOpen(false)
+                        }}
+                        className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
+                          currentChildIndex === idx
+                            ? 'border-primary/40 bg-primary/5'
+                            : 'border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className="w-20 h-14 rounded-md bg-gray-100 border border-gray-200 overflow-hidden flex-shrink-0">
+                          <img
+                            src={slide?.imageUrl || FALLBACK_SLIDE_IMAGE_URL}
+                            alt={`Follow-up ${idx + 1} thumbnail`}
+                            className="w-full h-full object-cover"
+                            onError={(event) => {
+                              if (event.currentTarget.dataset.fallbackApplied) return
+                              event.currentTarget.dataset.fallbackApplied = 'true'
+                              event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
+                            }}
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-gray-700">Follow-up {idx + 1}</div>
+                          <div className="text-xs text-gray-400 line-clamp-2">
+                            {slide?.subtitle || 'More detail'}
+                          </div>
+                        </div>
                       </button>
                     ))}
                   </div>
                 </div>
-              ) : (
-                // Regular content slide with image and subtitle
-                <>
-                  {/* CORE024: Container with relative positioning for highlight overlay */}
-                  <div className="relative w-full aspect-video bg-surface rounded-xl shadow-lg overflow-hidden">
-                    <img
-                      src={displayedSlide?.imageUrl || FALLBACK_SLIDE_IMAGE_URL}
-                      alt="Slide diagram"
-                      className="w-full h-full object-contain"
-                      onError={(event) => {
-                        if (event.currentTarget.dataset.fallbackApplied) return
-                        event.currentTarget.dataset.fallbackApplied = 'true'
-                        event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
-                      }}
-                    />
-                    {/* CORE024: Highlight overlay for slide questions */}
-                    <HighlightOverlay
-                      x={highlightPosition?.x}
-                      y={highlightPosition?.y}
-                      visible={highlightPosition !== null}
-                    />
-                  </div>
-
-                  {/* Subtitle - only shown for content slides */}
-                  <div className="mt-4">
-                    {/* F091: Show "Key Takeaways" badge for conclusion slides */}
-                    {displayedSlide?.isConclusion && (
-                      <div className="flex justify-center mb-2">
-                        <span className="text-xs font-medium px-2 py-0.5 bg-primary/10 text-primary rounded-full">
-                          Key Takeaways
-                        </span>
-                      </div>
-                    )}
-                    <p className="text-base text-center line-clamp-5">
-                      {displayedSlide?.subtitle}
-                    </p>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* F044, F057: Progress dots - show slides for current topic with 44px touch target */}
-            <div className="flex items-center gap-1 flex-wrap justify-center" role="tablist" aria-label="Slide navigation">
-              {visibleSlides.map((slide, i) => {
-                // Use different styling for header, suggestions, and content dots
-                const isHeader = slide.type === 'header'
-                const isSuggestions = slide.type === 'suggestions'
-                const hasChildren = allTopicSlides.some(s => s.parentId === slide.id) // Check for children
-                return (
-                  <button
-                    key={slide.id}
-                    onClick={() => { setCurrentIndex(i); setCurrentChildIndex(null); }}
-                    role="tab"
-                    aria-selected={i === currentIndex}
-                    aria-label={
-                      isHeader
-                        ? `Go to ${slide.topicName} topic header`
-                        : isSuggestions
-                        ? 'Go to suggested questions'
-                        : `Go to slide ${i + 1} of ${visibleSlides.length}`
-                    }
-                    className="p-2 transition-colors cursor-pointer hover:scale-125 relative"
-                  >
-                    {/* Inner dot - visual indicator, outer padding provides 44px touch target */}
-                    {/* Header: rectangle, Suggestions: diamond, Content: circle */}
-                    <span
-                      className={`block ${
-                        isHeader
-                          ? `w-4 h-3 rounded ${i === currentIndex ? 'bg-primary' : 'bg-gray-400'}`
-                          : isSuggestions
-                          ? `w-3 h-3 rotate-45 ${i === currentIndex ? 'bg-primary' : 'bg-gray-300'}`
-                          : `w-3 h-3 rounded-full ${i === currentIndex ? 'bg-primary' : 'bg-gray-300'}`
-                      }`}
-                    />
-                    {/* Indicator for slides with children */}
-                    {hasChildren && i !== currentIndex && (
-                      <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1 h-1 bg-gray-400 rounded-full" />
-                    )}
-                    {/* Bouncing down arrow for current slide with children - shows vertical navigation is available */}
-                    {hasChildren && i === currentIndex && currentChildIndex === null && (
-                      <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 text-primary text-xs animate-bounce">
-                        ▼
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-
-            {/* Controls - arrow buttons and play/pause */}
-            <div className="flex flex-col items-center gap-2">
-              {/* CORE032: Vertical controls (only visible if children exist) */}
-              {activeChildSlides.length > 0 && (
-                <button
-                  onClick={goToChildPrev}
-                  disabled={currentChildIndex === null}
-                  className={`p-2 rounded-full transition-colors ${
-                    currentChildIndex === null ? 'text-gray-200' : 'text-primary hover:bg-gray-100'
-                  }`}
-                >
-                  <span aria-hidden="true">&#9650;</span>
-                </button>
-              )}
-              
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={goToPrevSlide}
-                  disabled={currentIndex === 0}
-                  aria-label="Previous slide"
-                  className={`p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${
-                    currentIndex === 0
-                      ? 'text-gray-300 cursor-not-allowed'
-                      : 'text-gray-500 hover:text-primary hover:bg-gray-100'
-                  }`}
-                >
-                  <span aria-hidden="true">&#9664;</span>
-                </button>
-                <button
-                  onClick={togglePlayPause}
-                  aria-label={isPlaying ? 'Pause slideshow' : 'Play slideshow'}
-                  className="p-3 min-w-[44px] min-h-[44px] bg-primary text-white rounded-full hover:bg-primary/90 transition-colors"
-                >
-                  <span aria-hidden="true">{isPlaying ? '\u275A\u275A' : '\u25B6'}</span>
-                </button>
-                <button
-                  onClick={goToNextSlide}
-                  disabled={currentIndex === visibleSlides.length - 1}
-                  aria-label="Next slide"
-                  className={`p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${
-                    currentIndex === visibleSlides.length - 1
-                      ? 'text-gray-300 cursor-not-allowed'
-                      : 'text-gray-500 hover:text-primary hover:bg-gray-100'
-                  }`}
-                >
-                  <span aria-hidden="true">&#9654;</span>
-                </button>
-              </div>
-
-              {/* CORE032: Down arrow for children */}
-              {activeChildSlides.length > 0 && (
-                <button
-                  onClick={goToChildNext}
-                  disabled={currentChildIndex === activeChildSlides.length - 1}
-                  className={`p-2 rounded-full transition-colors ${
-                    currentChildIndex === activeChildSlides.length - 1 ? 'text-gray-200' : 'text-primary hover:bg-gray-100'
-                  }`}
-                >
-                  <span aria-hidden="true">&#9660;</span>
-                </button>
-              )}
-            </div>
-
-            {/* CORE022: Resume button - shown when user interrupted a previous slideshow */}
-            {interruptResumePoint && (interruptResumePoint.topicId !== activeTopicId || interruptResumePoint.slideIndex !== currentIndex) && (
-              <div className="flex items-center gap-2 mt-3 p-3 bg-surface rounded-lg border border-gray-200">
-                <button
-                  onClick={handleResumeFromInterrupt}
-                  aria-label="Resume previous slideshow"
-                  className="px-4 py-2 min-h-[44px] bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium flex items-center gap-2"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className="w-4 h-4"
-                    aria-hidden="true"
-                  >
-                    <path fillRule="evenodd" d="M15.79 14.77a.75.75 0 01-1.06.02l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 111.04 1.08L11.832 10l3.938 3.71a.75.75 0 01.02 1.06zm-6 0a.75.75 0 01-1.06.02l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 111.04 1.08L5.832 10l3.938 3.71a.75.75 0 01.02 1.06z" clipRule="evenodd" />
-                  </svg>
-                  Resume previous
-                </button>
-                <button
-                  onClick={handleDismissResumePoint}
-                  aria-label="Dismiss resume option"
-                  className="p-2 min-w-[44px] min-h-[44px] text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className="w-5 h-5"
-                    aria-hidden="true"
-                  >
-                    <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                  </svg>
-                </button>
-              </div>
-            )}
-
-            {/* Queue indicator - shows number of questions waiting (F048) */}
-            {questionQueue.length > 0 && (
-              <p className="text-sm text-gray-400 mt-2">
-                {questionQueue.length} question{questionQueue.length > 1 ? 's' : ''} queued
-              </p>
-            )}
-
-            {/* Level indicator with regenerate button and version switcher */}
-            {activeTopic && (
-              <div className="flex flex-col items-center gap-3 mt-4 mb-16">
-                {/* Current level indicator with regenerate dropdown */}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400">Level:</span>
-                  <span className={`
-                    px-2 py-1 text-xs rounded-full bg-primary text-white
-                  `}>
-                    {LEVEL_CONFIG[getCurrentVersionLevel(activeTopic)]?.icon}{' '}
-                    {LEVEL_CONFIG[getCurrentVersionLevel(activeTopic)]?.title}
-                  </span>
-                  {/* Regenerate dropdown */}
-                  <RegenerateDropdown
-                    levelConfig={LEVEL_CONFIG}
-                    currentLevel={getCurrentVersionLevel(activeTopic)}
-                    onRegenerate={handleRegenerate}
-                    isRegenerating={isRegenerating}
-                    disabled={!activeTopic.query}
-                  />
-                </div>
-
-                {/* Version switcher - only shown when multiple versions exist */}
-                {activeTopic.versions && activeTopic.versions.length > 1 && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-gray-400 mr-1">Versions:</span>
-                    {activeTopic.versions.map((version, index) => {
-                      const isActive = (activeTopic.currentVersionIndex ?? 0) === index
-                      const levelConfig = LEVEL_CONFIG[version.explanationLevel] || LEVEL_CONFIG[EXPLANATION_LEVEL.STANDARD]
-                      return (
-                        <button
-                          key={version.id}
-                          onClick={() => handleVersionSwitch(index)}
-                          className={`
-                            px-2 py-1 text-xs rounded-md transition-all
-                            flex items-center gap-1
-                            ${isActive
-                              ? 'bg-primary/10 text-primary border border-primary/30'
-                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200 border border-transparent'
-                            }
-                          `}
-                          title={`${levelConfig.title} - ${new Date(version.createdAt).toLocaleString()}`}
-                        >
-                          <span>{levelConfig.icon}</span>
-                          <span className="hidden sm:inline">{levelConfig.title}</span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-
-                {/* Regenerating indicator */}
-                {isRegenerating && (
-                  <div className="flex items-center gap-2 text-xs text-gray-500">
-                    <svg
-                      className="w-3 h-3 animate-spin"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      />
-                    </svg>
-                    <span>Regenerating slides...</span>
-                  </div>
-                )}
               </div>
             )}
           </div>

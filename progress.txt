@@ -1,6 +1,6 @@
 === TDD Progress Report ===
 Project: ShowMe
-Last Updated: 2026-01-21
+Last Updated: 2026-01-23
 
 ## Session 1: Initialization
 
@@ -1227,3 +1227,19 @@ Updated topic structure to support versions:
 - Follow-ups append as child slides (2D grid) not nested topics
 - Text input available as fallback to voice during slideshow
 - Typing stops narration to prevent auto-advance while composing
+
+## Session: Follow-up UX + TTS Sync (2026-01-23)
+
+### Updates
+- Follow-up slides now narrate the currently displayed slide (parent or child), not the original parent
+- Auto-advance and audio prefetch now use child-first sequencing when follow-ups exist
+- Added follow-up rail UI on desktop and a mobile drawer without shrinking the main slide
+- Right rail anchored beyond slide bounds so the main slide size stays constant
+- Fixed raise-hand alignment to stay centered under controls even with follow-up UI
+- Resolved JSX parsing error caused by a stray closing brace in slideshow markup
+
+### Files Modified
+- `frontend/src/App.jsx`: follow-up TTS sync, prefetch logic, and follow-up rail/drawer layout
+- `progress.txt`: add session notes
+- `debugging-progress.md`: add follow-up TTS issue + fix notes
+- `.tdd/features/core-features.json`: add follow-up rail/drawer UI feature
