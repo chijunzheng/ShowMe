@@ -134,6 +134,10 @@ const AUDIO_CONFIG = {
   SILENCE_THRESHOLD: 15,
   // Duration of silence before triggering generation (ms)
   SILENCE_DURATION: 1500,
+  // Minimum detected speech duration to treat recording as valid (ms)
+  MIN_SPEECH_DURATION_MS: 300,
+  // Minimum speech frames (50ms per frame) before sending to STT
+  MIN_SPEECH_FRAMES: 5,
   // Audio analyser FFT size (must be power of 2)
   FFT_SIZE: 256,
   // Animation frame interval for waveform updates (ms)
@@ -941,6 +945,30 @@ function buildTopicSlides(topic) {
   return slides
 }
 
+const TRIVIAL_TRANSCRIPT_TOKENS = new Set([
+  'yes', 'yeah', 'yep', 'no', 'nope', 'ok', 'okay', 'uh', 'um', 'hmm', 'hm',
+  'mmm', 'mm', 'uhh', 'umm', 'er', 'ah', 'oops', 'sorry', 'please', 'thanks',
+  'thank', 'hi', 'hello', 'stop', 'cancel',
+])
+
+const SHORT_QUESTION_WORDS = new Set([
+  'why', 'how', 'what', 'when', 'where', 'who', 'which',
+])
+
+function isTrivialTranscription(text) {
+  if (!text || typeof text !== 'string') return true
+  const cleaned = text.trim().toLowerCase()
+  if (!cleaned) return true
+  const normalized = cleaned.replace(/[^a-z0-9\s]/g, ' ')
+  const tokens = normalized.split(/\s+/).filter(Boolean)
+  if (!tokens.length) return true
+  if (tokens.every((token) => TRIVIAL_TRANSCRIPT_TOKENS.has(token))) return true
+  if (tokens.length === 1 && tokens[0].length <= 3 && !SHORT_QUESTION_WORDS.has(tokens[0])) {
+    return true
+  }
+  return false
+}
+
 function App() {
   // CORE027: Load persisted topics on initial mount
   // This uses a lazy initializer to only run once on mount
@@ -1329,6 +1357,7 @@ function App() {
   const [isSlideNarrationLoading, setIsSlideNarrationLoading] = useState(false)
   // Raise-hand state for gated listening
   const [isRaiseHandPending, setIsRaiseHandPending] = useState(false)
+  const emptyTranscriptRetryRef = useRef(0)
   const isListeningRef = useRef(false)
   const isMicEnabledRef = useRef(false)
   const allowAutoListenRef = useRef(true)
@@ -1374,6 +1403,8 @@ function App() {
   const silenceTimerRef = useRef(null)
   const animationFrameRef = useRef(null)
   const lastSpeechTimeRef = useRef(null)
+  const speechStartedAtRef = useRef(null)
+  const speechFrameCountRef = useRef(0)
   const isProcessingRecordingRef = useRef(false)
   const isStartingListeningRef = useRef(false)
   const startListeningRef = useRef(null)
@@ -1402,6 +1433,7 @@ function App() {
 
   // Audio playback ref for slide narration (F037)
   const slideAudioRef = useRef(null)
+  const lastSlideIdRef = useRef(null)
   const resumeListeningAfterSlideRef = useRef(false)
   const slideAudioCacheRef = useRef(new Map())
   const slideAudioRequestRef = useRef(new Map())
@@ -2265,6 +2297,7 @@ function App() {
         slideAudioRef.current.pause()
         slideAudioRef.current = null
       }
+      lastSlideIdRef.current = null
       setIsSlideNarrationPlaying(false)
       setIsSlideNarrationReady(false)
       setIsSlideNarrationLoading(false)
@@ -2291,28 +2324,34 @@ function App() {
       }
       return visibleSlides[currentIndex + 1]
     }
-    setIsSlideNarrationReady(false)
-    setIsSlideNarrationLoading(false)
-
     if (!currentSlide) {
+      lastSlideIdRef.current = null
       setIsSlideNarrationPlaying(false)
       setIsSlideNarrationReady(false)
       setIsSlideNarrationLoading(false)
       return
     }
 
-    // Stop previous audio if playing
-    if (slideAudioRef.current) {
-      slideAudioRef.current.pause()
-      slideAudioRef.current = null
+    const slideId = currentSlide?.id || null
+    const slideChanged = slideId !== lastSlideIdRef.current
+    if (slideChanged) {
+      lastSlideIdRef.current = slideId
+      setIsSlideNarrationReady(false)
+      setIsSlideNarrationLoading(false)
     }
 
     // CORE023, CORE024: Stop slide response audio and clear highlight when navigating
-    if (slideResponseAudioRef.current) {
-      slideResponseAudioRef.current.pause()
-      slideResponseAudioRef.current = null
+    if (slideChanged) {
+      if (slideAudioRef.current) {
+        slideAudioRef.current.pause()
+        slideAudioRef.current = null
+      }
+      if (slideResponseAudioRef.current) {
+        slideResponseAudioRef.current.pause()
+        slideResponseAudioRef.current = null
+      }
+      setHighlightPosition(null)
     }
-    setHighlightPosition(null)
 
     if (currentSlide?.type === 'header') {
       setIsSlideNarrationPlaying(false)
@@ -2334,6 +2373,9 @@ function App() {
     }
 
     if (!isPlaying || isVoiceAgentSpeaking) {
+      if (slideAudioRef.current && !slideAudioRef.current.paused) {
+        slideAudioRef.current.pause()
+      }
       setIsSlideNarrationPlaying(false)
       return
     }
@@ -2341,6 +2383,26 @@ function App() {
     if (isListeningRef.current) {
       resumeListeningAfterSlideRef.current = true
       stopListeningRef.current?.()
+    }
+
+    if (slideAudioRef.current && !slideChanged) {
+      setIsSlideNarrationReady(true)
+      if (!slideAudioRef.current.paused && !slideAudioRef.current.ended) {
+        setIsSlideNarrationPlaying(true)
+        return
+      }
+      if (!slideAudioRef.current.ended) {
+        slideAudioRef.current.play().then(() => {
+          setIsSlideNarrationPlaying(true)
+        }).catch((error) => {
+          logger.warn('AUDIO', 'Slide audio resume failed', {
+            error: error.message,
+            slideId: currentSlide.id,
+          })
+          setIsSlideNarrationPlaying(false)
+        })
+        return
+      }
     }
 
     let cancelled = false
@@ -2539,7 +2601,12 @@ function App() {
 
     if (isSpeaking) {
       // User is speaking - record the time and update transcription status
-      lastSpeechTimeRef.current = Date.now()
+      const now = Date.now()
+      lastSpeechTimeRef.current = now
+      if (!speechStartedAtRef.current) {
+        speechStartedAtRef.current = now
+      }
+      speechFrameCountRef.current += 1
       setLiveTranscription('')
 
       // Clear any existing silence timer
@@ -2631,6 +2698,8 @@ function App() {
     analyserRef.current = null
     mediaRecorderRef.current = null
     lastSpeechTimeRef.current = null
+    speechStartedAtRef.current = null
+    speechFrameCountRef.current = 0
   }, [])
 
   stopListeningRef.current = stopListening
@@ -2745,6 +2814,8 @@ function App() {
       // Start recording with timeslice for periodic data chunks
       mediaRecorder.start(100) // Emit data every 100ms
       lastSpeechTimeRef.current = null
+      speechStartedAtRef.current = null
+      speechFrameCountRef.current = 0
       isProcessingRecordingRef.current = false
       setIsListening(true)
       setLiveTranscription('')
@@ -2830,6 +2901,35 @@ function App() {
       // Play confirmation sound to indicate recording complete
       playRecordingCompleteSound()
 
+      const speechStartedAt = speechStartedAtRef.current
+      const speechEndedAt = lastSpeechTimeRef.current
+      const speechDurationMs = speechStartedAt && speechEndedAt
+        ? Math.max(0, speechEndedAt - speechStartedAt)
+        : 0
+      const hasSpeech = speechStartedAt
+        && speechDurationMs >= AUDIO_CONFIG.MIN_SPEECH_DURATION_MS
+        && speechFrameCountRef.current >= AUDIO_CONFIG.MIN_SPEECH_FRAMES
+
+      if (!hasSpeech) {
+        logger.warn('AUDIO', 'No speech detected, skipping transcription', {
+          speechDurationMs,
+          speechFrames: speechFrameCountRef.current,
+        })
+        if (isMicEnabledRef.current && emptyTranscriptRetryRef.current < 1) {
+          emptyTranscriptRetryRef.current += 1
+          setLiveTranscription('Didn’t catch that. Listening again...')
+          setTimeout(() => {
+            if (!isMicEnabledRef.current) return
+            raiseHandRequestRef.current = false
+            stopListeningRef.current?.()
+            startListeningRef.current?.()
+          }, 350)
+          return
+        }
+        setLiveTranscription('No question detected. Tap to try again.')
+        return
+      }
+
       // F027: Validate audio was captured
       if (chunks.length === 0) {
         logger.warn('AUDIO', 'No audio chunks captured, cannot transcribe')
@@ -2914,11 +3014,28 @@ function App() {
       // F028: Check for empty transcription
       if (!data.transcription || data.transcription.trim() === '') {
         logger.warn('AUDIO', 'Empty transcription received')
-        setLiveTranscription('Could not understand the audio. Please try again.')
+        if (isMicEnabledRef.current && emptyTranscriptRetryRef.current < 1) {
+          emptyTranscriptRetryRef.current += 1
+          setLiveTranscription('Didn’t catch that. Listening again...')
+          setTimeout(() => {
+            if (!isMicEnabledRef.current) return
+            raiseHandRequestRef.current = false
+            stopListeningRef.current?.()
+            startListeningRef.current?.()
+          }, 350)
+          return
+        }
+        setLiveTranscription('No question detected. Tap to try again.')
         return
       }
 
       const transcription = data.transcription.trim()
+
+      if (isTrivialTranscription(transcription)) {
+        logger.warn('AUDIO', 'Trivial transcription ignored', { transcription })
+        setLiveTranscription('No question detected. Please try again.')
+        return
+      }
 
       // F028: Display the transcription result
       setLastTranscription(transcription)
@@ -2971,6 +3088,7 @@ function App() {
     setAllowAutoListen(true)
     raiseHandRequestRef.current = false
     setIsRaiseHandPending(false)
+    emptyTranscriptRetryRef.current = 0
     setVoiceAgentQueue([])
     interruptActiveAudio()
 
@@ -4943,11 +5061,11 @@ function App() {
                 <>
                   {isMicEnabled && (
                     <span className="text-xs text-gray-500 bg-white/90 px-3 py-1 rounded-full shadow-sm">
-                      {isListening
+                      {liveTranscription || (isListening
                         ? 'Listening...'
                         : isRaiseHandPending
                           ? 'Waiting for the current sentence...'
-                          : 'Mic on'}
+                          : 'Mic on')}
                     </span>
                   )}
                   <button

@@ -713,3 +713,28 @@ className="group flex h-full w-full items-center ..."
 // Slightly wider rail for label wrapping
 <div className="h-full w-52 ...">
 ```
+
+---
+
+### Issue 8: Silent Raise-hand Triggered Generation
+
+**Symptoms:**
+- Raising hand without speaking still sent audio to STT
+- STT returned long hallucinated transcripts, triggering generation
+
+**Root Cause:**
+- Any non-empty audio blob passed size checks, even with no detected speech
+- Silence detection only controlled stop timing, not transcription eligibility
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// Track speech start + frame count during listening
+const speechStartedAtRef = useRef(null)
+const speechFrameCountRef = useRef(0)
+
+// Before STT: require minimum speech duration/frames
+if (!hasSpeech) {
+  setLiveTranscription('No question detected. Tap to try again.')
+  return
+}
+```

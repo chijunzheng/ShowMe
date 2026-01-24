@@ -1254,3 +1254,13 @@ Updated topic structure to support versions:
 
 ### Files Modified
 - `frontend/src/App.jsx`: follow-up rail positioning, sizing, and labels
+
+## Session: Raise-hand Speech Guard (2026-01-23)
+
+### Updates
+- Added speech detection gating before STT to prevent silent raise-hand from triggering generation
+- One-time auto-relisten on no speech, then show "No question detected" message
+- Added minimum speech duration and speech-frame thresholds
+
+### Files Modified
+- `frontend/src/App.jsx`: speech detection counters + pre-STT guard
