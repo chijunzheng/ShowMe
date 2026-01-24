@@ -4467,156 +4467,162 @@ function App() {
                   key={displayedSlide?.id || `slide-${currentIndex}-${currentChildIndex}`}
                   className="slide-fade w-full relative"
                 >
-                  {displayedSlide?.type === 'header' ? (
-                    // F043: Render topic header card with TopicHeader component
-                    <div className="w-full aspect-video bg-surface rounded-xl shadow-lg overflow-hidden">
-                      <TopicHeader
-                        icon={displayedSlide.topicIcon}
-                        name={displayedSlide.topicName}
-                      />
-                    </div>
-                  ) : displayedSlide?.type === 'suggestions' ? (
-                    // Render suggestions slide with clickable question buttons
-                    <div className="w-full aspect-video bg-gradient-to-br from-primary/5 to-primary/10 rounded-xl shadow-lg overflow-hidden flex flex-col items-center justify-center p-6 md:p-8">
-                      <h3 className="text-xl md:text-2xl font-semibold text-gray-800 mb-6 text-center">
-                        Want to learn more?
-                      </h3>
-                      <div className="flex flex-col gap-3 w-full max-w-md">
-                        {displayedSlide?.questions?.map((question, idx) => (
-                          <button
-                            key={idx}
-                            onClick={() => handleSuggestionClick(question)}
-                            className="w-full px-4 py-3 bg-white hover:bg-primary hover:text-white text-gray-700 rounded-lg shadow-sm border border-gray-200 hover:border-primary transition-all duration-200 text-left text-sm md:text-base"
-                          >
-                            {question}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    // Regular content slide with image and subtitle
-                    <>
-                      {/* CORE024: Container with relative positioning for highlight overlay */}
-                      <div className="relative w-full aspect-video bg-surface rounded-xl shadow-lg overflow-hidden">
-                        <img
-                          src={displayedSlide?.imageUrl || FALLBACK_SLIDE_IMAGE_URL}
-                          alt="Slide diagram"
-                          className="w-full h-full object-contain"
-                          onError={(event) => {
-                            if (event.currentTarget.dataset.fallbackApplied) return
-                            event.currentTarget.dataset.fallbackApplied = 'true'
-                            event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
-                          }}
-                        />
-                        {/* CORE024: Highlight overlay for slide questions */}
-                        <HighlightOverlay
-                          x={highlightPosition?.x}
-                          y={highlightPosition?.y}
-                          visible={highlightPosition !== null}
+                  <div className="relative w-full aspect-video overflow-visible">
+                    {displayedSlide?.type === 'header' ? (
+                      // F043: Render topic header card with TopicHeader component
+                      <div className="absolute inset-0 bg-surface rounded-xl shadow-lg overflow-hidden">
+                        <TopicHeader
+                          icon={displayedSlide.topicIcon}
+                          name={displayedSlide.topicName}
                         />
                       </div>
+                    ) : displayedSlide?.type === 'suggestions' ? (
+                      // Render suggestions slide with clickable question buttons
+                      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-primary/10 rounded-xl shadow-lg overflow-hidden flex flex-col items-center justify-center p-6 md:p-8">
+                        <h3 className="text-xl md:text-2xl font-semibold text-gray-800 mb-6 text-center">
+                          Want to learn more?
+                        </h3>
+                        <div className="flex flex-col gap-3 w-full max-w-md">
+                          {displayedSlide?.questions?.map((question, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => handleSuggestionClick(question)}
+                              className="w-full px-4 py-3 bg-white hover:bg-primary hover:text-white text-gray-700 rounded-lg shadow-sm border border-gray-200 hover:border-primary transition-all duration-200 text-left text-sm md:text-base"
+                            >
+                              {question}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      // Regular content slide with image and subtitle
+                      <>
+                        {/* CORE024: Container with relative positioning for highlight overlay */}
+                        <div className="absolute inset-0 bg-surface rounded-xl shadow-lg overflow-hidden">
+                          <img
+                            src={displayedSlide?.imageUrl || FALLBACK_SLIDE_IMAGE_URL}
+                            alt="Slide diagram"
+                            className="w-full h-full object-contain"
+                            onError={(event) => {
+                              if (event.currentTarget.dataset.fallbackApplied) return
+                              event.currentTarget.dataset.fallbackApplied = 'true'
+                              event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
+                            }}
+                          />
+                          {/* CORE024: Highlight overlay for slide questions */}
+                          <HighlightOverlay
+                            x={highlightPosition?.x}
+                            y={highlightPosition?.y}
+                            visible={highlightPosition !== null}
+                          />
+                        </div>
+                      </>
+                    )}
 
-                      {/* Subtitle - only shown for content slides */}
-                      <div className="mt-4">
-                        {/* F091: Show "Key Takeaways" badge for conclusion slides */}
-                        {displayedSlide?.isConclusion && (
-                          <div className="flex justify-center mb-2">
-                            <span className="text-xs font-medium px-2 py-0.5 bg-primary/10 text-primary rounded-full">
-                              Key Takeaways
+                    {activeChildSlides.length > 0 && (
+                      <div className="hidden min-[1400px]:block absolute left-full top-0 bottom-0 translate-x-6 z-20">
+                        <div className="h-full w-52 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-xl shadow-sm p-3 flex flex-col gap-2.5">
+                          <div className="flex items-center justify-between px-1">
+                            <span className="text-[10px] uppercase tracking-wider text-gray-500">Follow-ups</span>
+                            <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold">
+                              {activeChildSlides.length}
                             </span>
                           </div>
-                        )}
-                        <p className="text-base text-center line-clamp-5">
-                          {displayedSlide?.subtitle}
-                        </p>
+
+                          <div className="flex-1 min-h-0 flex flex-col gap-2.5 overflow-y-auto pr-1">
+                            <button
+                              onClick={() => setCurrentChildIndex(null)}
+                              aria-label="Back to main slide"
+                              className={`group flex h-full w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                                currentChildIndex === null
+                                  ? 'border-primary/40 bg-primary/5'
+                                  : 'border-gray-200 hover:bg-gray-50'
+                              }`}
+                            >
+                              <div className="w-16 h-11 rounded-md bg-gray-100 border border-gray-200 overflow-hidden flex-shrink-0">
+                                {parentSlide?.imageUrl ? (
+                                  <img
+                                    src={parentSlide.imageUrl}
+                                    alt="Main slide thumbnail"
+                                    className="w-full h-full object-cover"
+                                    onError={(event) => {
+                                      if (event.currentTarget.dataset.fallbackApplied) return
+                                      event.currentTarget.dataset.fallbackApplied = 'true'
+                                      event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="w-full h-full bg-gradient-to-br from-gray-100 to-gray-200" />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-xs font-medium text-gray-700">Main</div>
+                                <div className="text-[10px] text-gray-400 line-clamp-1">
+                                  {parentSlide?.subtitle || 'Overview'}
+                                </div>
+                              </div>
+                            </button>
+
+                            {activeChildSlides.map((slide, idx) => (
+                              <button
+                                key={slide.id || idx}
+                                onClick={() => setCurrentChildIndex(idx)}
+                                aria-label={`Go to follow-up ${idx + 1}`}
+                                className={`group flex h-full w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                                  currentChildIndex === idx
+                                    ? 'border-primary/40 bg-primary/5'
+                                    : 'border-gray-200 hover:bg-gray-50'
+                                }`}
+                              >
+                                <div className="w-16 h-11 rounded-md bg-gray-100 border border-gray-200 overflow-hidden flex-shrink-0">
+                                  <img
+                                    src={slide?.imageUrl || FALLBACK_SLIDE_IMAGE_URL}
+                                    alt={`Follow-up ${idx + 1} thumbnail`}
+                                    className="w-full h-full object-cover"
+                                    onError={(event) => {
+                                      if (event.currentTarget.dataset.fallbackApplied) return
+                                      event.currentTarget.dataset.fallbackApplied = 'true'
+                                      event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
+                                    }}
+                                  />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="text-xs font-medium text-gray-700">Follow-up slide {idx + 1}</div>
+                                  <div className="text-[10px] text-gray-400 line-clamp-1">
+                                    {slide?.subtitle || 'More detail'}
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       </div>
-                    </>
+                    )}
+                  </div>
+
+                  {/* Subtitle - only shown for content slides */}
+                  {displayedSlide?.type !== 'header' && displayedSlide?.type !== 'suggestions' && (
+                    <div className="mt-4">
+                      {/* F091: Show "Key Takeaways" badge for conclusion slides */}
+                      {displayedSlide?.isConclusion && (
+                        <div className="flex justify-center mb-2">
+                          <span className="text-xs font-medium px-2 py-0.5 bg-primary/10 text-primary rounded-full">
+                            Key Takeaways
+                          </span>
+                        </div>
+                      )}
+                      <p className="text-base text-center line-clamp-5">
+                        {displayedSlide?.subtitle}
+                      </p>
+                    </div>
                   )}
                 </div>
-
-                {activeChildSlides.length > 0 && (
-                  <div className="hidden xl:block absolute left-full top-1/2 -translate-y-1/2 translate-x-8 z-10">
-                    <div className="w-44 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-xl shadow-sm p-3 flex flex-col gap-2.5">
-                      <div className="flex items-center justify-between px-1">
-                        <span className="text-[10px] uppercase tracking-wider text-gray-500">Follow-ups</span>
-                        <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold">
-                          {activeChildSlides.length}
-                        </span>
-                      </div>
-
-                      <button
-                        onClick={() => setCurrentChildIndex(null)}
-                        aria-label="Back to main slide"
-                        className={`group flex items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors ${
-                          currentChildIndex === null
-                            ? 'border-primary/40 bg-primary/5'
-                            : 'border-gray-200 hover:bg-gray-50'
-                        }`}
-                      >
-                        <div className="w-16 h-11 rounded-md bg-gray-100 border border-gray-200 overflow-hidden flex-shrink-0">
-                          {parentSlide?.imageUrl ? (
-                            <img
-                              src={parentSlide.imageUrl}
-                              alt="Main slide thumbnail"
-                              className="w-full h-full object-cover"
-                              onError={(event) => {
-                                if (event.currentTarget.dataset.fallbackApplied) return
-                                event.currentTarget.dataset.fallbackApplied = 'true'
-                                event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
-                              }}
-                            />
-                          ) : (
-                            <div className="w-full h-full bg-gradient-to-br from-gray-100 to-gray-200" />
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-xs font-medium text-gray-700">Main</div>
-                          <div className="text-[10px] text-gray-400 line-clamp-1">
-                            {parentSlide?.subtitle || 'Overview'}
-                          </div>
-                        </div>
-                      </button>
-
-                      {activeChildSlides.map((slide, idx) => (
-                        <button
-                          key={slide.id || idx}
-                          onClick={() => setCurrentChildIndex(idx)}
-                          aria-label={`Go to follow-up ${idx + 1}`}
-                          className={`group flex items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors ${
-                            currentChildIndex === idx
-                              ? 'border-primary/40 bg-primary/5'
-                              : 'border-gray-200 hover:bg-gray-50'
-                          }`}
-                        >
-                          <div className="w-16 h-11 rounded-md bg-gray-100 border border-gray-200 overflow-hidden flex-shrink-0">
-                            <img
-                              src={slide?.imageUrl || FALLBACK_SLIDE_IMAGE_URL}
-                              alt={`Follow-up ${idx + 1} thumbnail`}
-                              className="w-full h-full object-cover"
-                              onError={(event) => {
-                                if (event.currentTarget.dataset.fallbackApplied) return
-                                event.currentTarget.dataset.fallbackApplied = 'true'
-                                event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
-                              }}
-                            />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="text-xs font-medium text-gray-700">Follow-up {idx + 1}</div>
-                            <div className="text-[10px] text-gray-400 line-clamp-1">
-                              {slide?.subtitle || 'More detail'}
-                            </div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
 
               {activeChildSlides.length > 0 && (
                 <button
                   onClick={() => setIsFollowUpDrawerOpen(true)}
-                  className="xl:hidden inline-flex items-center gap-2 px-3 py-2 rounded-full border border-gray-200 text-xs text-gray-600 bg-white hover:bg-gray-50 transition-colors"
+                  className="min-[1400px]:hidden inline-flex items-center gap-2 px-3 py-2 rounded-full border border-gray-200 text-xs text-gray-600 bg-white hover:bg-gray-50 transition-colors"
                 >
                   <span className="font-medium">Follow-ups</span>
                   <span className="inline-flex items-center justify-center min-w-[18px] h-4 px-1 rounded-full bg-primary/10 text-primary text-[10px] font-semibold">
@@ -4849,7 +4855,7 @@ function App() {
                         setCurrentChildIndex(null)
                         setIsFollowUpDrawerOpen(false)
                       }}
-                      className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
+                      className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
                         currentChildIndex === null
                           ? 'border-primary/40 bg-primary/5'
                           : 'border-gray-200 hover:bg-gray-50'
@@ -4886,7 +4892,7 @@ function App() {
                           setCurrentChildIndex(idx)
                           setIsFollowUpDrawerOpen(false)
                         }}
-                        className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
+                        className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
                           currentChildIndex === idx
                             ? 'border-primary/40 bg-primary/5'
                             : 'border-gray-200 hover:bg-gray-50'
@@ -4905,7 +4911,7 @@ function App() {
                           />
                         </div>
                         <div className="min-w-0">
-                          <div className="text-sm font-medium text-gray-700">Follow-up {idx + 1}</div>
+                          <div className="text-sm font-medium text-gray-700">Follow-up slide {idx + 1}</div>
                           <div className="text-xs text-gray-400 line-clamp-2">
                             {slide?.subtitle || 'More detail'}
                           </div>

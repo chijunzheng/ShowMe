@@ -1243,3 +1243,14 @@ Updated topic structure to support versions:
 - `progress.txt`: add session notes
 - `debugging-progress.md`: add follow-up TTS issue + fix notes
 - `.tdd/features/core-features.json`: add follow-up rail/drawer UI feature
+
+## Session: Follow-up Rail Alignment (2026-01-23)
+
+### Updates
+- Aligned follow-up rail to the slide image only (not subtitle block)
+- Reverted rail list to compact cards instead of full-height rows
+- Standardized follow-up labels to "Follow-up slide N"
+- Increased rail width to fit label wrapping cleanly
+
+### Files Modified
+- `frontend/src/App.jsx`: follow-up rail positioning, sizing, and labels

@@ -688,3 +688,28 @@ prefetchSlideAudio(nextSlide)
 // Removed the extra brace after the slideshow conditional
 {uiState === UI_STATE.SLIDESHOW && visibleSlides.length > 0 && ( ... )}
 ```
+
+---
+
+### Issue 7: Follow-up Rail Misalignment + Overflow
+
+**Symptoms:**
+- Right follow-up rail did not align with the slide image
+- Panel height included subtitles, causing vertical mismatch
+- Thumbnail cards overflowed or clipped the rail width
+
+**Root Cause:**
+- Rail was anchored to the overall slide container instead of the 16:9 image box
+- Cards lacked width constraints when rail width changed
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// Anchor rail to the aspect-video image wrapper
+<div className="relative w-full aspect-video overflow-visible"> ... </div>
+
+// Ensure cards fill the rail width and keep compact sizing
+className="group flex h-full w-full items-center ..."
+
+// Slightly wider rail for label wrapping
+<div className="h-full w-52 ...">
+```
