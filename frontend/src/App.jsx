@@ -1562,7 +1562,15 @@ function App() {
     if (!slide.subtitle || typeof slide.subtitle !== 'string') return null
     if (slideAudioFailureRef.current.has(slide.id)) return null
 
-    // Check rate limit backoff - ALWAYS check, no exceptions
+    // Check cache first - if already fetched, return immediately
+    const cached = getCachedSlideAudio(slide.id)
+    if (cached) return cached
+
+    // Check if request is already in flight - return that promise to await it
+    const inFlight = slideAudioRequestRef.current.get(slide.id)
+    if (inFlight) return inFlight
+
+    // Check rate limit backoff - only for NEW requests
     const now = Date.now()
     if (now < ttsRateLimitUntilRef.current) {
       logger.debug('AUDIO', 'Skipping TTS request due to rate limit backoff', {
@@ -1572,7 +1580,7 @@ function App() {
       return null
     }
 
-    // Enforce minimum interval between requests (prevents burst requests)
+    // Enforce minimum interval between NEW requests (prevents burst)
     const timeSinceLastRequest = now - lastTtsRequestTimeRef.current
     if (timeSinceLastRequest < TTS_PREFETCH_CONFIG.MIN_REQUEST_INTERVAL_MS) {
       logger.debug('AUDIO', 'Skipping TTS request - too soon after last request', {
@@ -1581,12 +1589,6 @@ function App() {
       })
       return null
     }
-
-    const cached = getCachedSlideAudio(slide.id)
-    if (cached) return cached
-
-    const inFlight = slideAudioRequestRef.current.get(slide.id)
-    if (inFlight) return inFlight
 
     // Update last request time BEFORE making request to prevent concurrent requests
     lastTtsRequestTimeRef.current = now
