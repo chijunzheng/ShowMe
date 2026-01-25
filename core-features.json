@@ -1,7 +1,7 @@
 {
   "category": "core",
   "description": "Core MVP Features - Voice-first educational slideshow app",
-  "feature_count": 34,
+  "feature_count": 36,
   "features": [
     {
       "id": "CORE032",
@@ -1200,6 +1200,84 @@
         {
           "id": "T008",
           "description": "Verify multiple follow-ups each get their own section divider",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE035",
+      "name": "Conversational Narration Style",
+      "description": "TTS narration sounds like a human presenter naturally explaining a slide, using deictic references ('See this part here...', 'Notice how...'), rhetorical questions, and natural transitions instead of reading formal text.",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Generate slides for any topic",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify narration includes deictic references to the visual (e.g., 'look at', 'see here', 'notice')",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify narration uses conversational transitions (e.g., 'So here's the thing...', 'Now...')",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify narration sounds natural when spoken by TTS, not like reading a textbook",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify rhetorical questions are used where appropriate",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "CORE036",
+      "name": "Streaming Subtitles",
+      "description": "Subtitles appear word-by-word in sync with TTS audio playback, creating a karaoke-style effect. Uses punctuation-aware timing for natural pacing with pauses at sentence boundaries.",
+      "priority": 1,
+      "status": "complete",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Play a slide with audio",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify subtitle words appear progressively as audio plays",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify pacing matches approximate speech speed",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify longer pauses occur at sentence endings (periods, question marks)",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify subtitle resets when navigating to a different slide",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify pausing audio also pauses subtitle streaming",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify manual navigation shows full subtitle immediately (no streaming)",
           "status": "pending"
         }
       ]

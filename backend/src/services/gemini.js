@@ -506,9 +506,33 @@ ${slideCountGuidance}
 IMAGE PROMPT STYLE:
 ${imageLevelInstructions}
 
+NARRATION STYLE - Write like a human presenter naturally explaining a slide:
+The subtitles will be read aloud by TTS. Write them as if you are a friendly, engaging presenter pointing at a diagram and explaining it to a curious learner. NOT like a textbook or formal document.
+
+DO use:
+- Deictic references to the visual: "See this part here...", "Notice how...", "Look at this...", "Right here you can see..."
+- Natural transitions: "So here's the thing...", "Now, what happens next is...", "And this is where it gets interesting..."
+- Rhetorical questions: "But wait, how does that work?", "So why does this matter?"
+- Brief pauses for emphasis: "And that... is what makes it special", "The key here... is the connection"
+- Reference specific parts of the diagram: "This arrow shows...", "The blue section represents...", "Over on the left side..."
+- Conversational connectors: "Okay, so...", "Now here's the cool part...", "Think of it this way..."
+
+DO NOT use:
+- Formal, textbook language: "It is important to note that..."
+- Passive voice: "The process is initiated by..."
+- Stiff academic phrasing: "One must consider..." or "It should be observed that..."
+- Abstract statements without visual connection: "Photosynthesis is a process whereby..."
+
+Examples:
+BAD (robotic): "Photosynthesis is the process by which plants convert sunlight into energy. Chlorophyll absorbs light in the chloroplasts."
+GOOD (human): "See how the leaf takes in sunlight? Right here in these tiny parts called chloroplasts... that's where the magic happens. The green stuff, chlorophyll, basically catches the light like a solar panel."
+
+BAD (robotic): "The water cycle consists of evaporation, condensation, and precipitation phases."
+GOOD (human): "Okay, so look at this cycle. Water goes up... that's evaporation. Then notice these clouds forming? The water's cooling down and condensing. And then... it falls back down as rain."
+
 IMPORTANT: Always end with a CONCLUSION slide that:
 - Summarizes 2-3 key takeaways from the explanation
-- Uses a clear "key takeaways" format in the subtitle
+- Uses a conversational "key takeaways" format in the subtitle
 - Has isConclusion: true to mark it as the final summary
 
 CRITICAL: Subtitles are spoken aloud by TTS. Do NOT use markdown formatting (no **bold**, *italics*, or other markup). Write plain text only.
@@ -517,11 +541,11 @@ Output Format (JSON):
 {
   "slides": [
     {
-      "subtitle": "Clear explanation text that will be spoken aloud",
+      "subtitle": "Conversational explanation text that sounds natural when spoken aloud",
       "imagePrompt": "Description of educational diagram showing [concept], with labeled parts including [details]. Style: clean, colorful educational illustration."
     },
     {
-      "subtitle": "To wrap up: First, [key point 1]. Second, [key point 2]. And remember, [key point 3].",
+      "subtitle": "Alright, let's wrap this up. First thing to remember... [key point 1]. Second... [key point 2]. And the big takeaway? [key point 3].",
       "imagePrompt": "Summary infographic with three key points highlighted in boxes or icons. Clean, minimal design with bullet points.",
       "isConclusion": true
     }
