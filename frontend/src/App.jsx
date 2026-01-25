@@ -4918,6 +4918,7 @@ function App() {
                           duration={getSlideDuration(displayedSlide)}
                           isPlaying={isSlideNarrationPlaying}
                           showAll={wasManualNavRef.current}
+                          audioRef={slideAudioRef}
                         />
                       </p>
                     </div>
