@@ -22,6 +22,8 @@ function StreamingSubtitle({ text, duration, isPlaying, showAll = false, onCompl
   const animationFrameRef = useRef(null)
   // Track if onComplete has been called to prevent double-firing
   const completedRef = useRef(false)
+  // Track previous isPlaying state to detect transitions
+  const prevIsPlayingRef = useRef(isPlaying)
 
   // Parse text into words with their timing weights
   // Punctuation after words adds extra pause time
@@ -94,6 +96,19 @@ function StreamingSubtitle({ text, duration, isPlaying, showAll = false, onCompl
     lastTickRef.current = null
     completedRef.current = false
   }, [text, duration])
+
+  // SYNC FIX: Reset timer when transitioning from not-playing to playing
+  // This ensures subtitle animation starts fresh when audio actually begins
+  useEffect(() => {
+    if (isPlaying && !prevIsPlayingRef.current) {
+      // Transition from not-playing to playing - reset timer for fresh sync
+      elapsedTimeRef.current = 0
+      lastTickRef.current = null
+      setRevealedCount(0)
+      completedRef.current = false
+    }
+    prevIsPlayingRef.current = isPlaying
+  }, [isPlaying])
 
   // Handle showAll prop - reveal everything immediately
   useEffect(() => {

@@ -58,11 +58,17 @@ const GENERATION_TIMEOUT = {
   FUN_FACT_REFRESH_DELAY_MS: 60000,
 }
 
+// Local progress stage for TTS loading (not from WebSocket)
+const LOCAL_PROGRESS = {
+  TTS_LOADING: 'tts_loading',
+}
+
 const GENERATION_PROGRESS_PERCENT = {
   [PROGRESS_TYPES.START]: 10,
   [PROGRESS_TYPES.SCRIPT_READY]: 35,
   [PROGRESS_TYPES.IMAGES_GENERATING]: 65,
   [PROGRESS_TYPES.AUDIO_GENERATING]: 85,
+  [LOCAL_PROGRESS.TTS_LOADING]: 92,
   [PROGRESS_TYPES.COMPLETE]: 100,
   [PROGRESS_TYPES.ERROR]: 100,
 }
@@ -2164,12 +2170,12 @@ function App() {
   }, [])
 
   /**
-   * Transition to slideshow with "slides ready" narration.
-   * Interrupts any playing fun fact audio to avoid blocking the transition.
-   * @param {string} topicName - Name of the topic for the announcement
-   * @param {number} slideCount - Number of slides generated
+   * Transition to slideshow after prefetching TTS for the first content slide.
+   * Waits for narration to be ready before showing slides for a polished experience.
+   * @param {Array} slides - The slides to display (used to find first content slide)
+   * @param {number} startIndex - Index of the first slide to show (default 0)
    */
-  const queueSlidesReadyTransition = useCallback(() => {
+  const queueSlidesReadyTransition = useCallback(async (slides = [], startIndex = 0) => {
     // Stop any currently playing voice agent audio (e.g., fun fact)
     if (voiceAgentAudioRef.current) {
       voiceAgentAudioRef.current.pause()
@@ -2181,9 +2187,42 @@ function App() {
     voiceAgentBusyRef.current = false
     clearFunFactRefresh()
 
+    // Find the first content slide to prefetch TTS for (skip header, section dividers)
+    const firstContentSlide = slides.find((slide, idx) =>
+      idx >= startIndex &&
+      slide.type !== 'header' &&
+      slide.type !== 'section' &&
+      slide.type !== 'suggestions' &&
+      slide.subtitle
+    )
+
+    if (firstContentSlide) {
+      // Update progress to show TTS loading
+      setGenerationProgress(prev => ({
+        ...prev,
+        stage: LOCAL_PROGRESS.TTS_LOADING,
+        message: 'Preparing narration...',
+      }))
+
+      logger.info('GENERATION', 'Prefetching TTS for first slide before transition', {
+        slideId: firstContentSlide.id,
+      })
+
+      // Wait for TTS to be ready for the first slide
+      try {
+        await requestSlideAudio(firstContentSlide)
+        logger.info('GENERATION', 'TTS ready, transitioning to slideshow')
+      } catch (err) {
+        // Don't block transition if TTS fails - just log and continue
+        logger.warn('GENERATION', 'TTS prefetch failed, proceeding anyway', {
+          error: err?.message,
+        })
+      }
+    }
+
     setIsSlideRevealPending(false)
     setUiState(UI_STATE.SLIDESHOW)
-  }, [clearFunFactRefresh])
+  }, [clearFunFactRefresh, requestSlideAudio])
 
   /**
    * Cancel ongoing generation request (F053)
@@ -2552,7 +2591,7 @@ function App() {
 
       const audio = new Audio(audioPayload.audioUrl)
       slideAudioRef.current = audio
-      setIsSlideNarrationPlaying(true)
+      // Don't set isSlideNarrationPlaying yet - wait for audio to actually start
       setIsSlideNarrationReady(true)
 
       // F071: Log audio playback start
@@ -2563,6 +2602,17 @@ function App() {
 
       // Start from the beginning
       audio.currentTime = 0
+
+      // SYNC FIX: Set playing state only when audio ACTUALLY starts playing
+      // This ensures StreamingSubtitle animation is synchronized with audio
+      const handlePlaying = () => {
+        setIsSlideNarrationPlaying(true)
+        logger.debug('AUDIO', 'Audio playing event fired - subtitle sync started', {
+          slideId: currentSlide.id,
+        })
+      }
+      audio.addEventListener('playing', handlePlaying, { once: true })
+
       audio.onended = () => {
         setIsSlideNarrationPlaying(false)
 
@@ -2623,6 +2673,7 @@ function App() {
         }
       }
       audio.onerror = () => {
+        audio.removeEventListener('playing', handlePlaying)
         setIsSlideNarrationPlaying(false)
         resumeListeningAfterSlideRef.current = false
       }
@@ -2632,6 +2683,7 @@ function App() {
           error: error.message,
           slideId: currentSlide.id,
         })
+        audio.removeEventListener('playing', handlePlaying)
         setIsSlideNarrationPlaying(false)
         resumeListeningAfterSlideRef.current = false
       })
@@ -3859,7 +3911,8 @@ function App() {
         }
         // F072: End timing for full generation pipeline
         logger.timeEnd('GENERATION', 'full-pipeline')
-        queueSlidesReadyTransition(activeTopic.name, generateData.slides.length)
+        // Prefetch TTS for first new slide before transitioning
+        await queueSlidesReadyTransition(generateData.slides, 0)
 
       } else if (newTopicData && generateData.slides?.length > 0) {
         // F040: Create new topic with header card
@@ -3907,7 +3960,8 @@ function App() {
         setCurrentIndex(0)
         // F072: End timing for full generation pipeline
         logger.timeEnd('GENERATION', 'full-pipeline')
-        queueSlidesReadyTransition(newTopic.name, generateData.slides.length)
+        // Prefetch TTS for first content slide before transitioning
+        await queueSlidesReadyTransition(generateData.slides, 0)
 
       } else {
         // No slides returned - stay in generating state with a message

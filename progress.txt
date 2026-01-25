@@ -1462,12 +1462,6 @@ Now duplicate requests for the same slide properly await the existing in-flight 
    - `GENAI_TTS_MODEL = 'gemini-2.5-pro-preview-tts'`
    - `CLOUD_TTS_MODEL = 'gemini-2.5-flash-preview-tts'`
 
-### Current Status
-
-**Working on:** Testing updated TTS model names with `-preview-` suffix.
-
-**Next step:** Restart backend server and verify TTS works correctly with new model names. If successful, commit and push changes.
-
 ### Files Modified
 - `frontend/src/App.jsx`:
   - Fixed trivial transcription filter (line ~988)
@@ -1478,10 +1472,87 @@ Now duplicate requests for the same slide properly await the existing in-flight 
   - Updated model names to use `-preview-` suffix
 
 ### Git Commits
-- (pending): fix: TTS model names and hybrid fallback implementation
+- 8afac20: feat(tts): hybrid TTS with GenAI primary + Cloud TTS fallback
 
 ### Context for Next Agent
 - GenAI TTS uses `gemini-2.5-pro-preview-tts` for better quality
 - Cloud TTS fallback uses `gemini-2.5-flash-preview-tts` when rate limited
 - Hybrid approach: GenAI primary → Cloud TTS fallback on error
-- Backend needs restart to pick up model name changes
+
+---
+
+## Session 22: TTS Subtitle Sync + Polished Loading Transition (2026-01-25)
+
+### Bug Fix: TTS Subtitle Synchronization
+
+**Problem:** Streaming subtitle words were not synchronized with TTS audio narration. Words appeared before audio started playing.
+
+**Root Cause:** `setIsSlideNarrationPlaying(true)` was called synchronously before `audio.play()`, which is async. During audio buffering/decoding (50-500ms), subtitles started animating ahead of audio.
+
+**Fix Applied:**
+
+1. **App.jsx** - Wait for audio `playing` event before setting state:
+```javascript
+// SYNC FIX: Set playing state only when audio ACTUALLY starts playing
+const handlePlaying = () => {
+  setIsSlideNarrationPlaying(true)
+}
+audio.addEventListener('playing', handlePlaying, { once: true })
+```
+
+2. **StreamingSubtitle.jsx** - Reset timer on play state transition:
+```javascript
+// SYNC FIX: Reset timer when transitioning from not-playing to playing
+useEffect(() => {
+  if (isPlaying && !prevIsPlayingRef.current) {
+    elapsedTimeRef.current = 0
+    lastTickRef.current = null
+    setRevealedCount(0)
+    completedRef.current = false
+  }
+  prevIsPlayingRef.current = isPlaying
+}, [isPlaying])
+```
+
+### Enhancement: Polished Loading-to-Slideshow Transition
+
+**Problem:** Slides appeared immediately when generated, but TTS wasn't ready yet. Subtitles would sit visible without narration, looking unpolished.
+
+**Solution:** Wait for first slide's TTS to load before transitioning to slideshow.
+
+**Implementation:**
+
+1. **Added TTS_LOADING progress stage** at 92%:
+```javascript
+const LOCAL_PROGRESS = {
+  TTS_LOADING: 'tts_loading',
+}
+```
+
+2. **Updated `queueSlidesReadyTransition`** to prefetch TTS:
+   - Now async - waits for TTS before transitioning
+   - Updates progress bar to "Preparing narration..." at 92%
+   - Prefetches TTS for first content slide
+   - Graceful fallback if TTS fails
+
+3. **Progress bar flow:**
+   - 10% → 35% → 65% → 85% → **92% (Preparing narration...)** → 100%
+
+### Files Modified
+- `frontend/src/App.jsx`:
+  - Added `LOCAL_PROGRESS.TTS_LOADING` constant at 92%
+  - Fixed audio `playing` event sync for `isSlideNarrationPlaying`
+  - Made `queueSlidesReadyTransition` async with TTS prefetch
+  - Updated callers to await the transition
+- `frontend/src/components/StreamingSubtitle.jsx`:
+  - Added `prevIsPlayingRef` to track play state transitions
+  - Reset timer when transitioning from not-playing to playing
+
+### Git Commits
+- (pending): fix: TTS subtitle sync and polished loading transition
+
+### Context for Next Agent
+- Subtitles now sync precisely with audio playback start
+- Loading screen stays visible until first slide's TTS is ready
+- Progress bar shows "Preparing narration..." at 92% before transition
+- Users see a polished experience where narration starts immediately with slides
