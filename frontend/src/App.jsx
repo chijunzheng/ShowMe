@@ -1009,10 +1009,8 @@ function App() {
   const [selectedLevel, setSelectedLevel] = useState(EXPLANATION_LEVEL.STANDARD)
   // Show text input fallback on home screen
   const [showTextFallback, setShowTextFallback] = useState(false)
-  // Dynamic suggested questions - fetched from API based on topic history
+  // Suggested questions - using static defaults
   const [suggestedQuestions, setSuggestedQuestions] = useState(DEFAULT_QUESTIONS)
-  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
-  const [hasDynamicSuggestions, setHasDynamicSuggestions] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
   // CORE032: Vertical navigation state for 2D slides
   const [currentChildIndex, setCurrentChildIndex] = useState(null)
@@ -2018,45 +2016,6 @@ function App() {
     saveTopicsToStorage(topics)
   }, [topics])
 
-  // Fetch suggested questions when topics change
-  useEffect(() => {
-    const fetchSuggestions = async () => {
-      setIsLoadingSuggestions(true)
-      try {
-        const topicNames = topics
-          .map(t => t.name)
-          .filter(name => name && name.trim().length > 0)
-
-        const response = await fetch('/api/topic/suggestions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ topicNames }),
-        })
-
-        if (response.ok) {
-          const data = await response.json()
-          if (data.questions && data.questions.length > 0) {
-            setSuggestedQuestions(data.questions)
-            setHasDynamicSuggestions(true)
-          } else {
-            setSuggestedQuestions(DEFAULT_QUESTIONS)
-            setHasDynamicSuggestions(false)
-          }
-        } else {
-          setSuggestedQuestions(DEFAULT_QUESTIONS)
-          setHasDynamicSuggestions(false)
-        }
-      } catch (error) {
-        logger.warn('API', 'Failed to fetch suggestions', { error: error.message })
-        setSuggestedQuestions(DEFAULT_QUESTIONS)
-        setHasDynamicSuggestions(false)
-      } finally {
-        setIsLoadingSuggestions(false)
-      }
-    }
-
-    fetchSuggestions()
-  }, [topics])
 
   // Navigation helper functions with bounds checking (F044)
   // CORE032: 2D Navigation Logic
