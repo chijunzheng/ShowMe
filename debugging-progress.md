@@ -1029,3 +1029,122 @@ useEffect(() => {
 ```
 
 **Result:** Subtitles now pause and resume correctly, preserving position.
+
+---
+
+## Session 8: 2026-01-25
+
+### Issue 1: ClipPath Subtitle Reveal Broken on Multi-line Text
+
+**Symptoms:**
+- Subtitles revealed based on horizontal % of screen width
+- On multi-line text, the wrong parts were revealed (mid-word cuts like "buildi|ng")
+- Reveal didn't follow natural reading order
+
+**Root Cause:**
+```javascript
+// ClipPath clips based on HORIZONTAL % of container width
+clipPath: `inset(0 ${100 - progress}% 0 0)`
+```
+This works for single-line text, but multi-line text flows left-to-right THEN down. A 30% horizontal clip doesn't equal 30% of the text content.
+
+**Fix Applied:** `frontend/src/components/StreamingSubtitle.jsx`
+```javascript
+// Character-based reveal instead of clipPath
+const revealedText = text.slice(0, charsToShow)
+const unrevealedText = text.slice(charsToShow)
+```
+
+---
+
+### Issue 2: Subtitle Text Growing from Middle Instead of Left
+
+**Symptoms:**
+- After removing dimmed preview text, partial subtitles centered based on their width
+- Text appeared to grow "from the middle" instead of left-to-right
+
+**Root Cause:**
+- Parent container has `text-center` class
+- Without full text width, partial text re-centers on each reveal
+
+**Fix Applied:** `frontend/src/components/StreamingSubtitle.jsx`
+```javascript
+// Invisible placeholder maintains full text width for proper centering
+return (
+  <span>
+    {revealedText}
+    <span className="invisible">{unrevealedText}</span>
+  </span>
+)
+```
+
+---
+
+### Issue 3: Word-by-Word Reveal Feels Choppy
+
+**Symptoms:**
+- Entire words "pop" in at discrete moments
+- Felt jarring, not smooth like karaoke apps
+
+**Root Cause:**
+- Word-based reveal = discrete jumps when word weight threshold crossed
+- No visual transition between states
+
+**Fix Applied:** `frontend/src/components/StreamingSubtitle.jsx`
+
+Changed from word-level to character-level with weighted timing:
+```javascript
+// Spread word weight across its characters
+const weightPerChar = wordWeight / word.length
+for (let i = 0; i < word.length; i++) {
+  cumWeight += weightPerChar
+  weights.push(cumWeight)
+}
+```
+
+Added gradient fade at reveal edge (last 4 chars fade from 85% → 15% opacity):
+```javascript
+const FADE_CHARS = 4
+const fadeOpacities = [0.85, 0.6, 0.35, 0.15]
+
+{fadeChars.map((char, i) => (
+  <span key={i} style={{ opacity: fadeOpacities[i] || 0.15 }}>{char}</span>
+))}
+```
+
+---
+
+### Issue 4: Subtitles Appearing Before Audio Speaks
+
+**Symptoms:**
+- Text revealed ahead of when words were actually spoken
+- Subtitles finished before narration ended
+
+**Root Cause:**
+```javascript
+// 0.95 multiplier made text finish at 95% of audio duration
+const effectiveDuration = duration * 0.95
+```
+
+**Fix Applied:** `frontend/src/components/StreamingSubtitle.jsx`
+```javascript
+// Exact 1:1 sync - removed the multiplier
+const newProgress = Math.min(100, (currentMs / duration) * 100)
+```
+
+---
+
+### Summary of StreamingSubtitle Rewrite
+
+| Before | After |
+|--------|-------|
+| ClipPath horizontal % | Character-based slice |
+| Word-by-word reveal | Character-weighted with gradient fade |
+| Dimmed preview text | No preview, invisible placeholder |
+| 0.95x timing (early) | 1:1 exact sync |
+
+**Result:** Smooth, karaoke-style subtitle reveal that:
+- Follows natural reading order on multi-line text
+- Respects speech rhythm (longer words = slower reveal)
+- Has soft gradient fade at reveal edge
+- Syncs exactly with audio narration

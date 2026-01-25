@@ -1579,3 +1579,110 @@ const LOCAL_PROGRESS = {
 - Loading screen stays visible until first slide's TTS is ready
 - Progress bar shows "Preparing narration..." at 92% before transition
 - StreamingSubtitle component simplified (~110 lines vs ~250 lines)
+
+---
+
+## Session 23: Subtitle Streaming Rewrite - Character-Weighted with Gradient Fade (2026-01-25)
+
+### Problem
+The previous clipPath-based subtitle reveal had multiple issues:
+1. ClipPath revealed based on horizontal % of container width, not text flow
+2. Multi-line text revealed incorrectly (clipping wrong parts)
+3. Word-by-word reveal felt choppy
+4. Text appeared earlier than narration (0.95 multiplier)
+
+### Solution: Character-Weighted Reveal with Gradient Edge Fade
+
+#### Phase 1: Fix Multi-line Text Issue
+- Replaced clipPath with character-based reveal using `text.slice(0, charsToShow)`
+- Characters now reveal in reading order regardless of line wrapping
+
+#### Phase 2: Remove Dimmed Preview
+- User requested no preview of unspoken text
+- Removed dimmed background text (was 30% opacity)
+- Only show revealed characters
+
+#### Phase 3: Fix Centering Issue
+- Without full text, partial text was centering based on its width
+- Text appeared to grow "from the middle"
+- Fix: Added invisible placeholder for unrevealed text to maintain layout
+```javascript
+<span>{revealedText}</span>
+<span className="invisible">{unrevealedText}</span>
+```
+
+#### Phase 4: Word-Weighted Timing
+- Linear character reveal didn't match speech rhythm
+- Implemented word-weight calculation:
+  - Base weight = character count
+  - Punctuation adds pause weight: `.!?` (+4), `...` (+6), `,;:` (+2)
+  - Spaces get minimal weight (0.3)
+- Spread word weight across characters for smooth reveal
+
+#### Phase 5: Gradient Edge Fade
+- Character-by-character still felt choppy
+- Implemented gradient fade at reveal boundary:
+  - Last 4 characters fade with decreasing opacity: 85% → 60% → 35% → 15%
+  - Creates soft "spotlight" effect instead of hard cutoff
+
+#### Phase 6: Exact Timing Sync
+- Removed 0.95 multiplier that made text appear early
+- Now: `progress = currentMs / duration` (exact 1:1 sync)
+
+### Files Modified
+- `frontend/src/components/StreamingSubtitle.jsx`:
+  - Rewrote from clipPath to character-weighted reveal
+  - Added gradient fade at reveal edge
+  - Fixed timing to exact 1:1 sync
+
+### Implementation Details
+
+**Character Weight Calculation:**
+```javascript
+const { charWeights, totalWeight } = useMemo(() => {
+  // Split into words, calculate word weights
+  for (const word of wordList) {
+    let wordWeight = word.length
+    if (/[.!?]$/.test(word)) wordWeight += 4  // Full stop pause
+    else if (/\.\.\./.test(word)) wordWeight += 6  // Ellipsis pause
+    else if (/[,;:]$/.test(word)) wordWeight += 2  // Comma pause
+
+    // Spread weight across characters
+    const weightPerChar = wordWeight / word.length
+    for (let i = 0; i < word.length; i++) {
+      cumWeight += weightPerChar
+      weights.push(cumWeight)
+    }
+  }
+  return { charWeights: weights, totalWeight: cumWeight }
+}, [text])
+```
+
+**Gradient Fade Rendering:**
+```javascript
+const FADE_CHARS = 4
+const solidEnd = Math.max(0, charsToShow - FADE_CHARS)
+const solidText = text.slice(0, solidEnd)
+const fadeChars = text.slice(solidEnd, charsToShow).split('')
+const fadeOpacities = [0.85, 0.6, 0.35, 0.15]
+
+return (
+  <span>
+    {solidText}
+    {fadeChars.map((char, i) => (
+      <span key={i} style={{ opacity: fadeOpacities[i] || 0.15 }}>{char}</span>
+    ))}
+    <span className="invisible">{unrevealedText}</span>
+  </span>
+)
+```
+
+### Git Commits
+- (pending): fix: subtitle streaming rewrite with character-weighted gradient fade
+
+### Context for Next Agent
+- Subtitles now use character-weighted reveal with gradient fade at edge
+- Longer words reveal slower, punctuation adds natural pauses
+- Gradient fade (4 chars) creates smooth visual transition
+- Exact 1:1 timing sync with audio (no 0.95 multiplier)
+- Invisible placeholder maintains text centering
