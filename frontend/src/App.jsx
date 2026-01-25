@@ -8,6 +8,7 @@ import TopicSidebar from './components/TopicSidebar'
 import HighlightOverlay from './components/HighlightOverlay'
 import LevelCard from './components/LevelCard'
 import RegenerateDropdown from './components/RegenerateDropdown'
+import StreamingSubtitle from './components/StreamingSubtitle'
 import { useWebSocket, PROGRESS_TYPES } from './hooks/useWebSocket'
 import logger from './utils/logger'
 import { playMicOnSound, playRecordingCompleteSound } from './utils/soundEffects'
@@ -1471,6 +1472,8 @@ function App() {
   const pauseAfterCurrentSlideRef = useRef(false)
   // Track the transition timeout for cleanup when slide changes or unmounts
   const slideTransitionTimeoutRef = useRef(null)
+  // CORE036: Track if the last navigation was manual (for streaming subtitles)
+  const wasManualNavRef = useRef(false)
 
   const raiseHandRequestRef = useRef(false)
 
@@ -1985,6 +1988,7 @@ function App() {
   // Navigation helper functions with bounds checking (F044)
   // CORE032: 2D Navigation Logic
   const goToNextSlide = useCallback(() => {
+    wasManualNavRef.current = true // CORE036: Mark as manual navigation
     setCurrentIndex((prev) => {
       const nextIndex = Math.min(visibleSlides.length - 1, prev + 1)
       if (nextIndex !== prev) {
@@ -1995,6 +1999,7 @@ function App() {
   }, [visibleSlides.length])
 
   const goToPrevSlide = useCallback(() => {
+    wasManualNavRef.current = true // CORE036: Mark as manual navigation
     setCurrentIndex((prev) => {
       const nextIndex = Math.max(0, prev - 1)
       if (nextIndex !== prev) {
@@ -2006,6 +2011,7 @@ function App() {
 
   const goToChildNext = useCallback(() => {
     if (activeChildSlides.length === 0) return
+    wasManualNavRef.current = true // CORE036: Mark as manual navigation
     setCurrentChildIndex((prev) => {
       if (prev === null) return 0
       return Math.min(activeChildSlides.length - 1, prev + 1)
@@ -2013,6 +2019,7 @@ function App() {
   }, [activeChildSlides.length])
 
   const goToChildPrev = useCallback(() => {
+    wasManualNavRef.current = true // CORE036: Mark as manual navigation
     setCurrentChildIndex((prev) => {
       if (prev === null || prev === 0) return null
       return prev - 1
@@ -2253,6 +2260,9 @@ function App() {
         setIsPlaying(false)
         return
       }
+
+      // CORE036: Reset manual nav flag for auto-advance (enables streaming subtitles)
+      wasManualNavRef.current = false
 
       // CORE032: 2D Auto-advance Logic
       // Try to go to next child first
@@ -2550,6 +2560,9 @@ function App() {
         // Only advance if still playing
         if (isPlayingRef.current) {
           slideTransitionTimeoutRef.current = setTimeout(() => {
+            // CORE036: Reset manual nav flag for auto-advance (enables streaming subtitles)
+            wasManualNavRef.current = false
+
             if (activeChildSlides.length > 0) {
               if (currentChildIndex === null) {
                 setCurrentChildIndex(0)
@@ -3973,6 +3986,7 @@ function App() {
     })
 
     setActiveTopicId(topicId)
+    wasManualNavRef.current = true // CORE036: Mark as manual navigation
     setCurrentIndex(0)
     // If not already in slideshow, switch to slideshow state
     if (uiState !== UI_STATE.SLIDESHOW && topics.length > 0) {
@@ -4730,7 +4744,7 @@ function App() {
 
                           <div className="flex-1 min-h-0 flex flex-col gap-2.5 overflow-y-auto pr-1">
                             <button
-                              onClick={() => setCurrentChildIndex(null)}
+                              onClick={() => { wasManualNavRef.current = true; setCurrentChildIndex(null); }}
                               aria-label="Back to main slide"
                               className={`group flex h-full w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors ${
                                 currentChildIndex === null
@@ -4765,7 +4779,7 @@ function App() {
                             {activeChildSlides.map((slide, idx) => (
                               <button
                                 key={slide.id || idx}
-                                onClick={() => setCurrentChildIndex(idx)}
+                                onClick={() => { wasManualNavRef.current = true; setCurrentChildIndex(idx); }}
                                 aria-label={`Go to follow-up ${idx + 1}`}
                                 className={`group flex h-full w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors ${
                                   currentChildIndex === idx
@@ -4800,6 +4814,7 @@ function App() {
                   </div>
 
                   {/* Subtitle - only shown for content slides */}
+                  {/* CORE036: Streaming subtitles with karaoke-style word reveal */}
                   {displayedSlide?.type !== 'header' && displayedSlide?.type !== 'suggestions' && (
                     <div className="mt-4">
                       {/* F091: Show "Key Takeaways" badge for conclusion slides */}
@@ -4811,7 +4826,12 @@ function App() {
                         </div>
                       )}
                       <p className="text-base text-center line-clamp-5">
-                        {displayedSlide?.subtitle}
+                        <StreamingSubtitle
+                          text={displayedSlide?.subtitle}
+                          duration={getSlideDuration(displayedSlide)}
+                          isPlaying={isSlideNarrationPlaying}
+                          showAll={wasManualNavRef.current}
+                        />
                       </p>
                     </div>
                   )}
@@ -4841,7 +4861,7 @@ function App() {
                   return (
                     <button
                       key={slide.id}
-                      onClick={() => { setCurrentIndex(i); setCurrentChildIndex(null); }}
+                      onClick={() => { wasManualNavRef.current = true; setCurrentIndex(i); setCurrentChildIndex(null); }}
                       role="tab"
                       aria-selected={i === currentIndex}
                       aria-label={
