@@ -1,5 +1,7 @@
 import { Firestore } from '@google-cloud/firestore'
 import { Storage } from '@google-cloud/storage'
+import fs from 'fs/promises'
+import path from 'path'
 import logger from '../utils/logger.js'
 
 const SLIDE_COLLECTION = 'clients'
@@ -7,6 +9,10 @@ const URL_EXPIRY_MS = 24 * 60 * 60 * 1000
 
 const firestore = new Firestore()
 const storage = new Storage()
+const LOCAL_SLIDES_DIR = process.env.SHOWME_LOCAL_SLIDES_DIR
+  || path.join(process.cwd(), 'data', 'slides')
+const LOCAL_SLIDES_ENABLED = process.env.SHOWME_LOCAL_SLIDES === '1'
+  || (process.env.NODE_ENV !== 'production' && !process.env.SHOWME_GCS_BUCKET)
 
 function getBucketName() {
   return process.env.SHOWME_GCS_BUCKET || ''
@@ -30,6 +36,104 @@ function normalizeVersionId(versionId) {
 
 function sanitizeSegment(value) {
   return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_')
+}
+
+function useLocalSlidesStore() {
+  return LOCAL_SLIDES_ENABLED
+}
+
+function getLocalSlidesPath({ clientId, topicId, versionId }) {
+  const normalizedVersionId = normalizeVersionId(versionId)
+  const safeClientId = sanitizeSegment(clientId)
+  const safeTopicId = sanitizeSegment(topicId)
+  const safeVersionId = sanitizeSegment(normalizedVersionId)
+  return path.join(LOCAL_SLIDES_DIR, safeClientId, safeTopicId, `${safeVersionId}.json`)
+}
+
+async function saveSlidesLocal({ clientId, topicId, versionId, slides }) {
+  try {
+    const filePath = getLocalSlidesPath({ clientId, topicId, versionId })
+    await fs.mkdir(path.dirname(filePath), { recursive: true })
+    const normalizedVersionId = normalizeVersionId(versionId)
+    const payload = {
+      slides,
+      topicId,
+      versionId: normalizedVersionId,
+      updatedAt: Date.now(),
+    }
+    await fs.writeFile(filePath, JSON.stringify(payload), 'utf8')
+    return true
+  } catch (error) {
+    logger.warn('STORAGE', 'Failed to persist slides to local store', {
+      error: error.message,
+      clientId,
+      topicId,
+      versionId,
+    })
+    return false
+  }
+}
+
+async function loadSlidesLocal({ clientId, topicId, versionId }) {
+  try {
+    const filePath = getLocalSlidesPath({ clientId, topicId, versionId })
+    const raw = await fs.readFile(filePath, 'utf8')
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed?.slides) ? parsed.slides : null
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      logger.warn('STORAGE', 'Failed to load slides from local store', {
+        error: error.message,
+        clientId,
+        topicId,
+        versionId,
+      })
+    }
+    return null
+  }
+}
+
+async function loadLatestSlidesLocal({ clientId, topicId }) {
+  const safeClientId = sanitizeSegment(clientId)
+  const safeTopicId = sanitizeSegment(topicId)
+  const dirPath = path.join(LOCAL_SLIDES_DIR, safeClientId, safeTopicId)
+
+  try {
+    const entries = await fs.readdir(dirPath)
+    let latest = null
+
+    for (const entry of entries) {
+      if (!entry.endsWith('.json')) continue
+      const filePath = path.join(dirPath, entry)
+      let parsed
+      try {
+        const raw = await fs.readFile(filePath, 'utf8')
+        parsed = JSON.parse(raw)
+      } catch {
+        continue
+      }
+      if (!Array.isArray(parsed?.slides)) continue
+      const updatedAt = typeof parsed.updatedAt === 'number' ? parsed.updatedAt : 0
+      if (!latest || updatedAt > latest.updatedAt) {
+        latest = {
+          slides: parsed.slides,
+          versionId: parsed.versionId || entry.replace(/\.json$/, ''),
+          updatedAt,
+        }
+      }
+    }
+
+    return latest
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      logger.warn('STORAGE', 'Failed to load latest slides from local store', {
+        error: error.message,
+        clientId,
+        topicId,
+      })
+    }
+    return null
+  }
 }
 
 function isDataUrl(value) {
@@ -186,6 +290,10 @@ export async function saveSlides({ clientId, topicId, versionId, slides }) {
     return false
   }
 
+  if (useLocalSlidesStore()) {
+    return saveSlidesLocal({ clientId, topicId, versionId, slides })
+  }
+
   const bucket = getBucket()
   if (!bucket) return false
 
@@ -224,6 +332,10 @@ export async function loadSlides({ clientId, topicId, versionId }) {
     return null
   }
 
+  if (useLocalSlidesStore()) {
+    return loadSlidesLocal({ clientId, topicId, versionId })
+  }
+
   const bucket = getBucket()
   if (!bucket) return null
 
@@ -252,6 +364,10 @@ export async function loadSlides({ clientId, topicId, versionId }) {
 export async function loadLatestSlides({ clientId, topicId }) {
   if (!clientId || !topicId) {
     return null
+  }
+
+  if (useLocalSlidesStore()) {
+    return loadLatestSlidesLocal({ clientId, topicId })
   }
 
   const bucket = getBucket()

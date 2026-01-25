@@ -1380,3 +1380,108 @@ Visual "chapter marker" cards that appear before follow-up slides to clearly sep
 - Rate limiting enforces 3s minimum between TTS requests
 - Speech recognition uses Gemini 3 Flash directly (no Chirp 3)
 - Short transcriptions (2-3 chars) are now accepted as valid queries
+
+---
+
+## Session 20: TTS Autoplay Bug Fix (2026-01-25)
+
+### Bug: TTS Not Playing During Initial Autoplay
+
+**Symptoms:**
+- Slides generated successfully with subtitles visible
+- No TTS audio during initial autoplay
+- After autoplay finished, manually clicking play worked fine
+- Server logs showed TTS requests succeeding (200 status, audio returned)
+
+**Root Cause:**
+In `requestSlideAudio`, the minimum interval check happened BEFORE the in-flight check:
+1. Prefetch started TTS request for slide at time T
+2. `lastTtsRequestTimeRef.current` set to T
+3. Milliseconds later, `playSlideAudio` called `requestSlideAudio` for same slide
+4. Interval check: "too soon after last request" → returned `null`
+5. The in-flight promise check was never reached!
+
+**Fix Applied:** `frontend/src/App.jsx`
+Reordered checks in `requestSlideAudio`:
+1. Cache check (return cached audio)
+2. In-flight check (return existing promise to await)
+3. THEN rate limit and interval checks (only for NEW requests)
+
+Now duplicate requests for the same slide properly await the existing in-flight request.
+
+### Files Modified
+- `frontend/src/App.jsx`: Reordered cache/in-flight checks before rate limit checks
+
+### Git Commits
+- 0d7edde: fix: TTS not playing during autoplay - await in-flight requests before rate limiting
+
+### Context for Next Agent
+- TTS autoplay now works correctly on first slideshow run
+- Prefetch and playback requests for same slide share the same promise
+- Rate limiting only applies to genuinely new TTS requests
+
+---
+
+## Session 21: Hybrid TTS + Model Name Fixes (2026-01-25)
+
+### Approach: Hybrid TTS with GenAI Primary + Cloud TTS Fallback
+
+**Problem:** Cloud TTS API sounds slower and less natural than GenAI SDK TTS.
+**Solution:** Use GenAI SDK as primary (better quality) with Cloud TTS as fallback when rate limited.
+
+### TTS Model Discovery
+
+**Issue:** Incorrect model names caused 404 errors.
+
+| Attempted Model | Error |
+|-----------------|-------|
+| `gemini-2.5-flash-tts` | 404 - model not found for API version v1beta |
+| `gemini-2.5-flash` | 400 - "This model only supports text output" |
+| `gemini-2.5-pro-tts` | 404 - model not found |
+
+**Discovery via web search:** Gemini TTS models require the `-preview-` suffix:
+- `gemini-2.5-pro-preview-tts` - Higher quality (GenAI primary)
+- `gemini-2.5-flash-preview-tts` - Faster (Cloud TTS fallback)
+
+### Completed Steps
+
+1. **Removed dynamic topic suggestions** - Reduced latency by removing `/api/topic/suggestions` API calls
+
+2. **Fixed trivial transcription filter** - Changed threshold from `<= 3` to `<= 1` characters to allow short valid terms like "LLM", "API", "GPU"
+
+3. **Fixed TTS autoplay bug** - Reordered checks in `requestSlideAudio`:
+   - Check cache first (return cached audio)
+   - Check in-flight requests (return existing promise)
+   - THEN check rate limits (only for new requests)
+
+4. **Implemented hybrid TTS** - `backend/src/services/gemini.js`:
+   - GenAI SDK primary with `responseModalities: ['AUDIO']` and `speechConfig`
+   - Cloud TTS fallback when GenAI fails (rate limited, errors)
+
+5. **Updated TTS model names**:
+   - `GENAI_TTS_MODEL = 'gemini-2.5-pro-preview-tts'`
+   - `CLOUD_TTS_MODEL = 'gemini-2.5-flash-preview-tts'`
+
+### Current Status
+
+**Working on:** Testing updated TTS model names with `-preview-` suffix.
+
+**Next step:** Restart backend server and verify TTS works correctly with new model names. If successful, commit and push changes.
+
+### Files Modified
+- `frontend/src/App.jsx`:
+  - Fixed trivial transcription filter (line ~988)
+  - Removed dynamic suggestions fetch
+  - Fixed TTS in-flight check order in `requestSlideAudio`
+- `backend/src/services/gemini.js`:
+  - Implemented hybrid TTS with GenAI primary + Cloud TTS fallback
+  - Updated model names to use `-preview-` suffix
+
+### Git Commits
+- (pending): fix: TTS model names and hybrid fallback implementation
+
+### Context for Next Agent
+- GenAI TTS uses `gemini-2.5-pro-preview-tts` for better quality
+- Cloud TTS fallback uses `gemini-2.5-flash-preview-tts` when rate limited
+- Hybrid approach: GenAI primary → Cloud TTS fallback on error
+- Backend needs restart to pick up model name changes

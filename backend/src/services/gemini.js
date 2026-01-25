@@ -23,15 +23,16 @@ const IMAGE_MODEL_FALLBACKS = [
 
 const FAST_MODEL = 'gemini-2.5-flash-lite'
 
-// Gemini-TTS defaults for Cloud Text-to-Speech API
-// Use GA model for higher quota (150 QPM vs unknown for preview)
-const DEFAULT_TTS_MODEL = process.env.GEMINI_TTS_MODEL || 'gemini-2.5-flash-tts'
-const DEFAULT_TTS_AUDIO_ENCODING = process.env.GEMINI_TTS_AUDIO_ENCODING || 'MP3'
-const DEFAULT_TTS_REGION = process.env.GOOGLE_CLOUD_REGION || 'global'
-const TTS_SCOPE = 'https://www.googleapis.com/auth/cloud-platform'
-let ttsAuthClientPromise = null
+// GenAI TTS: Use pro TTS model with responseModalities: ['AUDIO']
+const GENAI_TTS_MODEL = 'gemini-2.5-pro-preview-tts'
 
-// Default TTS voice - Kore is a clear, engaging voice suitable for education.
+// Cloud TTS fallback config (used when GenAI fails)
+// Uses Gemini TTS voice through Cloud Text-to-Speech API (150 QPM)
+const CLOUD_TTS_MODEL = 'gemini-2.5-flash-tts'
+const CLOUD_TTS_SCOPE = 'https://www.googleapis.com/auth/cloud-platform'
+let cloudTtsAuthPromise = null
+
+// Default TTS voice for GenAI - Kore is clear and engaging
 const DEFAULT_VOICE = 'Kore'
 
 /**
@@ -682,38 +683,81 @@ function normalizeTtsError(error) {
   return message || 'UNKNOWN_ERROR'
 }
 
-function getTtsLanguageCode(language) {
-  return language === 'zh' ? 'cmn-CN' : 'en-US'
-}
-
-function getTtsEndpoint() {
-  if (DEFAULT_TTS_REGION && DEFAULT_TTS_REGION !== 'global') {
-    return `https://${DEFAULT_TTS_REGION}-texttospeech.googleapis.com`
-  }
-  return 'https://texttospeech.googleapis.com'
-}
-
-function getTtsMimeType(audioEncoding) {
-  const normalized = String(audioEncoding || '').toUpperCase()
-  if (normalized === 'MP3') return 'audio/mpeg'
-  if (normalized === 'OGG_OPUS') return 'audio/ogg'
-  return 'audio/pcm'
-}
-
-async function getTtsAccessToken() {
-  if (!ttsAuthClientPromise) {
-    const auth = new GoogleAuth({ scopes: [TTS_SCOPE] })
-    ttsAuthClientPromise = auth.getClient()
+// Cloud TTS helper functions (fallback when GenAI rate limited)
+async function getCloudTtsAccessToken() {
+  if (!cloudTtsAuthPromise) {
+    const auth = new GoogleAuth({ scopes: [CLOUD_TTS_SCOPE] })
+    cloudTtsAuthPromise = auth.getClient()
   }
 
   try {
-    const client = await ttsAuthClientPromise
+    const client = await cloudTtsAuthPromise
     const tokenResponse = await client.getAccessToken()
     if (typeof tokenResponse === 'string') return tokenResponse
     return tokenResponse?.token || null
   } catch (error) {
-    console.error('[TTS] Failed to acquire access token:', error.message)
+    console.error('[CloudTTS] Failed to acquire access token:', error.message)
     return null
+  }
+}
+
+async function generateCloudTTS(text, language = 'en') {
+  const accessToken = await getCloudTtsAccessToken()
+  if (!accessToken) {
+    return { audioUrl: null, duration: 0, error: 'CLOUD_TTS_AUTH_FAILED' }
+  }
+
+  const languageCode = language === 'zh' ? 'cmn-CN' : 'en-US'
+
+  // Use Gemini TTS model through Cloud TTS API
+  const requestBody = {
+    input: { text },
+    voice: {
+      languageCode,
+      model_name: CLOUD_TTS_MODEL,
+      name: 'Kore', // Gemini TTS voice
+    },
+    audioConfig: {
+      audioEncoding: 'MP3',
+    },
+  }
+
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT
+  const endpoint = 'https://texttospeech.googleapis.com/v1/text:synthesize'
+
+  console.log('[CloudTTS] Fallback request:', { model: CLOUD_TTS_MODEL, textLength: text.length })
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        ...(projectId ? { 'x-goog-user-project': projectId } : {}),
+      },
+      body: JSON.stringify(requestBody),
+    })
+
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      const message = data?.error?.message || `HTTP_${response.status}`
+      console.error('[CloudTTS] API error:', { status: response.status, message })
+      return { audioUrl: null, duration: 0, error: normalizeTtsError({ message, status: response.status }) }
+    }
+
+    const audioContent = data?.audioContent
+    if (!audioContent) {
+      return { audioUrl: null, duration: 0, error: 'NO_AUDIO_GENERATED' }
+    }
+
+    console.log('[CloudTTS] Success - audio content length:', audioContent.length)
+    const audioUrl = `data:audio/mpeg;base64,${audioContent}`
+    // Estimate duration: ~150 words per minute, ~5 chars per word
+    const estimatedDuration = Math.round((text.length / 5 / 150) * 60 * 1000)
+    return { audioUrl, duration: estimatedDuration, error: null }
+  } catch (error) {
+    console.error('[CloudTTS] Request failed:', error.message)
+    return { audioUrl: null, duration: 0, error: normalizeTtsError(error) }
   }
 }
 
@@ -800,6 +844,8 @@ function buildAudioResult(inlineData) {
 
 /**
  * Generate TTS audio from text
+ * Primary: Gemini GenAI SDK (better quality, 10 RPM limit)
+ * Fallback: Cloud TTS API (standard quality, 150 QPM limit)
  *
  * @param {string} text - The text to convert to speech
  * @param {Object} options - TTS options
@@ -811,69 +857,66 @@ export async function generateTTS(text, options = {}) {
   const {
     voice = DEFAULT_VOICE,
     language = 'en',
-    model = DEFAULT_TTS_MODEL,
-    audioEncoding = DEFAULT_TTS_AUDIO_ENCODING,
   } = options
 
-  // Use prompt field for style control; keep text clean for speech synthesis.
-  const prompt = language === 'zh'
-    ? '用清晰、生动的方式朗读以下内容，就像在教导一个好奇的学生。'
-    : 'Speak clearly and engagingly, as if teaching a curious student.'
-
-  const accessToken = await getTtsAccessToken()
-  if (!accessToken) {
-    return { audioUrl: null, duration: 0, error: 'API_NOT_AVAILABLE' }
+  const ai = getAIClient()
+  if (!ai) {
+    // No API key, try Cloud TTS directly
+    console.log('[TTS] No GenAI client, using Cloud TTS fallback')
+    return generateCloudTTS(text, language)
   }
 
-  const voiceConfig = {
-    languageCode: getTtsLanguageCode(language),
-    model_name: model,
-    ...(voice ? { name: voice } : {}),
-  }
+  // Style prompt for engaging, educational speech
+  const stylePrompt = language === 'zh'
+    ? '用清晰、生动、自然的方式朗读以下内容，就像在教导一个好奇的学生：'
+    : 'Read the following in a clear, engaging, and natural way, as if teaching a curious student:'
 
-  const requestBody = {
-    input: { text, prompt },
-    voice: voiceConfig,
-    audioConfig: { audioEncoding },
-  }
+  const fullPrompt = `${stylePrompt}\n\n${text}`
 
-  const projectId = process.env.GOOGLE_CLOUD_PROJECT
-  const endpoint = `${getTtsEndpoint()}/v1/text:synthesize`
-
-  console.log('[TTS] Request:', { model, endpoint, voice: voiceConfig })
+  console.log('[TTS] GenAI request:', { model: GENAI_TTS_MODEL, voice, textLength: text.length })
 
   try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        ...(projectId ? { 'x-goog-user-project': projectId } : {}),
+    const response = await ai.models.generateContent({
+      model: GENAI_TTS_MODEL,
+      contents: fullPrompt,
+      config: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName: voice,
+            },
+          },
+        },
       },
-      body: JSON.stringify(requestBody),
     })
 
-    const data = await response.json().catch(() => ({}))
-    if (!response.ok) {
-      const message = data?.error?.message || `HTTP_${response.status}`
-      console.error('[TTS] API error:', { status: response.status, message, model })
-      return { audioUrl: null, duration: 0, error: normalizeTtsError({ message, status: response.status }) }
+    // Extract audio data from response
+    const parts = response.candidates?.[0]?.content?.parts || []
+
+    for (const part of parts) {
+      if (part.inlineData) {
+        console.log('[TTS] GenAI success - mimeType:', part.inlineData.mimeType)
+        const result = buildAudioResult(part.inlineData)
+        console.log('[TTS] Audio URL length:', result.audioUrl?.length || 0, 'duration:', result.duration)
+        return result
+      }
     }
 
-    const audioContent = data?.audioContent || data?.audio_content
-    if (!audioContent) {
-      console.error('[TTS] No audio content in response:', JSON.stringify(data).slice(0, 200))
-      return { audioUrl: null, duration: 0, error: 'NO_AUDIO_GENERATED' }
-    }
-
-    console.log('[TTS] Success - audio content length:', audioContent.length)
-    const mimeType = getTtsMimeType(audioEncoding)
-    const result = buildAudioResult({ data: audioContent, mimeType })
-    console.log('[TTS] Audio URL length:', result.audioUrl?.length || 0, 'duration:', result.duration)
-    return result
+    console.error('[TTS] No audio in GenAI response, trying Cloud TTS fallback')
+    return generateCloudTTS(text, language)
   } catch (error) {
-    console.error('[TTS] Cloud Text-to-Speech request failed:', error.message)
-    return { audioUrl: null, duration: 0, error: normalizeTtsError(error) }
+    const normalizedError = normalizeTtsError(error)
+    console.warn('[TTS] GenAI failed:', error.message, '- trying Cloud TTS fallback')
+
+    // Fall back to Cloud TTS on any error (rate limit, network, etc.)
+    const fallbackResult = await generateCloudTTS(text, language)
+    if (fallbackResult.audioUrl) {
+      return fallbackResult
+    }
+
+    // Both failed - return original error
+    return { audioUrl: null, duration: 0, error: normalizedError }
   }
 }
 

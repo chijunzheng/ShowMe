@@ -899,3 +899,68 @@ if (tokens.length === 1 && tokens[0].length <= 1) {
   return true
 }
 ```
+
+---
+
+### Issue 6: TTS Not Playing During Initial Autoplay
+
+**Symptoms:**
+- Slides generated successfully with subtitles visible
+- No TTS audio during initial autoplay run
+- After autoplay finished, manually clicking play worked fine
+- Server logs showed TTS requests succeeding (200 status, audio content returned)
+
+**Root Cause:**
+In `requestSlideAudio`, the minimum interval check happened BEFORE the cache/in-flight checks:
+
+```javascript
+// BEFORE (broken order):
+const requestSlideAudio = async (slide) => {
+  // ... validation checks ...
+
+  // Rate limit backoff check
+  if (now < ttsRateLimitUntilRef.current) return null
+
+  // Minimum interval check - THIS BLOCKED VALID REQUESTS!
+  if (timeSinceLastRequest < MIN_REQUEST_INTERVAL_MS) return null
+
+  // Cache check - NEVER REACHED for duplicate requests
+  const cached = getCachedSlideAudio(slide.id)
+  if (cached) return cached
+
+  // In-flight check - NEVER REACHED!
+  const inFlight = slideAudioRequestRef.current.get(slide.id)
+  if (inFlight) return inFlight
+  // ...
+}
+```
+
+Flow:
+1. Prefetch started TTS request for slide at time T
+2. `lastTtsRequestTimeRef.current` set to T
+3. Milliseconds later, `playSlideAudio` called `requestSlideAudio` for same slide
+4. Interval check: `timeSinceLastRequest < 3000ms` → returned `null`
+5. The in-flight promise (which would resolve with audio) was never awaited!
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// AFTER (correct order):
+const requestSlideAudio = async (slide) => {
+  // ... validation checks ...
+
+  // Check cache first - if already fetched, return immediately
+  const cached = getCachedSlideAudio(slide.id)
+  if (cached) return cached
+
+  // Check if request is already in flight - return that promise to await it
+  const inFlight = slideAudioRequestRef.current.get(slide.id)
+  if (inFlight) return inFlight
+
+  // Rate limit checks only for genuinely NEW requests
+  if (now < ttsRateLimitUntilRef.current) return null
+  if (timeSinceLastRequest < MIN_REQUEST_INTERVAL_MS) return null
+  // ...
+}
+```
+
+Now duplicate requests for the same slide properly await the existing in-flight request instead of returning null.

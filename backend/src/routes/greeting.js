@@ -1,13 +1,9 @@
 import express from 'express'
-import { generateTTS, isGeminiAvailable } from '../services/gemini.js'
 
 const router = express.Router()
 
 // Greeting message for cold start
 const GREETING_MESSAGE = "Hi! I'm your AI tutor. What would you like to learn about today?"
-
-// Log Gemini availability for greeting
-console.log(`[Greeting] Gemini API available for TTS: ${isGeminiAvailable()}`)
 
 /**
  * POST /api/greeting
@@ -25,40 +21,12 @@ console.log(`[Greeting] Gemini API available for TTS: ${isGeminiAvailable()}`)
  */
 router.post('/', async (req, res) => {
   try {
-    // Check if Gemini TTS is available
-    if (!isGeminiAvailable()) {
-      console.log('[Greeting] Gemini API not available, returning no audio')
-      return res.json({
-        audioUrl: null,
-        duration: 0,
-        text: GREETING_MESSAGE,
-        available: false,
-      })
-    }
-
-    console.log('[Greeting] Generating TTS for greeting message')
-
-    // Generate TTS audio for the greeting
-    const ttsResult = await generateTTS(GREETING_MESSAGE)
-
-    if (ttsResult.error) {
-      console.warn('[Greeting] TTS generation failed:', ttsResult.error)
-      return res.json({
-        audioUrl: null,
-        duration: 0,
-        text: GREETING_MESSAGE,
-        available: false,
-        error: ttsResult.error,
-      })
-    }
-
-    console.log('[Greeting] TTS generated successfully, duration:', ttsResult.duration, 'ms')
-
+    // TTS greeting disabled to preserve quota; return text-only greeting.
     res.json({
-      audioUrl: ttsResult.audioUrl,
-      duration: ttsResult.duration,
+      audioUrl: null,
+      duration: 0,
       text: GREETING_MESSAGE,
-      available: true,
+      available: false,
     })
   } catch (error) {
     console.error('[Greeting] Error generating greeting:', error)

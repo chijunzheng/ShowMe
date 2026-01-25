@@ -8,7 +8,6 @@ import {
   generateEngagement as geminiGenerateEngagement,
   generateSlideResponse,
   generateTopicMetadata,
-  generateTTS,
   detectLanguage,
 } from '../services/gemini.js'
 
@@ -540,29 +539,22 @@ router.post('/engagement', async (req, res) => {
       !aiEngagement.funFact ||
       !Array.isArray(aiEngagement.suggestedQuestions)) {
       const fallbackEngagement = buildFallbackEngagement(fallbackTopic)
-      // Generate TTS for fallback fun fact
-      const ttsResult = await generateTTS(`Fun fact: ${fallbackEngagement.funFact.text}`)
       return res.json({
         funFact: {
           ...fallbackEngagement.funFact,
-          audioUrl: ttsResult.audioUrl || null,
-          duration: ttsResult.duration || 0,
+          audioUrl: null,
+          duration: 0,
         },
         suggestedQuestions: fallbackEngagement.suggestedQuestions,
         fallback: true,
       })
     }
 
-    // Generate TTS for the fun fact - this runs after text is ready
-    // so it adds ~2-3s but eliminates a separate frontend request
-    const funFactText = `Fun fact: ${aiEngagement.funFact.text}`
-    const ttsResult = await generateTTS(funFactText)
-
     res.json({
       funFact: {
         ...aiEngagement.funFact,
-        audioUrl: ttsResult.audioUrl || null,
-        duration: ttsResult.duration || 0,
+        audioUrl: null,
+        duration: 0,
       },
       suggestedQuestions: aiEngagement.suggestedQuestions.slice(0, 3),
       fallback: false,
