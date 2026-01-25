@@ -1559,12 +1559,23 @@ const LOCAL_PROGRESS = {
   - Added `hasStartedPlayingRef` to distinguish first play from resume
   - Reset timer only on first play, preserve position on resume
 
+### Subtitle Streaming Rewrite: Left-to-Right Reveal
+
+**Problem:** Word-by-word subtitle reveal was not syncing properly with audio narration.
+
+**Solution:** Replaced with smooth left-to-right reveal animation:
+- Shows full text at 30% opacity (dimmed preview)
+- Reveals from left using `clipPath: inset(0 ${100 - progress}% 0 0)`
+- Progress synced directly to `audio.currentTime / duration`
+- Simple, reliable, and perfectly synced to audio
+
 ### Git Commits
 - 0cb5cb2: fix: TTS subtitle sync and polished loading transition
-- (pending): fix: preserve subtitle position on pause/resume
+- 6de8efd: fix: preserve subtitle position on pause/resume
+- 07aafe1: feat: left-to-right subtitle reveal synced to audio
 
 ### Context for Next Agent
-- Subtitles sync precisely with audio playback start
-- Subtitles pause and resume correctly, preserving position
+- Subtitles use left-to-right reveal synced to audio.currentTime
 - Loading screen stays visible until first slide's TTS is ready
 - Progress bar shows "Preparing narration..." at 92% before transition
+- StreamingSubtitle component simplified (~110 lines vs ~250 lines)
