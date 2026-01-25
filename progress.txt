@@ -1,6 +1,6 @@
 === TDD Progress Report ===
 Project: ShowMe
-Last Updated: 2026-01-23
+Last Updated: 2026-01-26
 
 ## Session 1: Initialization
 
@@ -1842,3 +1842,37 @@ const handlePlaying = () => {
 - Loading screen appears when TTS needs to be loaded for a topic
 - Subtitle streaming works for all navigation types once audio plays
 - Note: localStorage has ~5MB limit; for cloud persistence, consider GCS
+
+---
+
+## Session 26: Manual Slide Jump Subtitle Streaming Fix (2026-01-26)
+
+### Problem
+- After navigating to historical topics, clicking random slides plays TTS audio
+- Streaming subtitles do not start until user pauses/resumes
+
+### Root Cause
+- `isSlideNarrationPlaying` stayed true across slide changes
+- Manual navigation sets `wasManualNavRef.current = true`, so subtitles defaulted to `showAll`
+- Without a `false → true` transition, `StreamingSubtitle` never re-synced
+
+### Fix Applied
+```javascript
+// Reset playing state when slide changes so streaming restarts on audio play
+if (slideChanged) {
+  lastSlideIdRef.current = slideId
+  setIsSlideNarrationPlaying(false)
+  setIsSlideNarrationReady(false)
+  setIsSlideNarrationLoading(false)
+}
+```
+
+### Related Improvements
+- Historical topic navigation now prefetches only the first missing content slide TTS before transitioning
+- Slide narration retries once after rate-limit windows to avoid silent/unsynced starts
+
+### Files Modified
+- `frontend/src/App.jsx`
+
+### Git Commits
+- (pending): fix: restart subtitle streaming on manual slide navigation

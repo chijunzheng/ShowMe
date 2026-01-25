@@ -2560,6 +2560,7 @@ function App() {
     const slideChanged = slideId !== lastSlideIdRef.current
     if (slideChanged) {
       lastSlideIdRef.current = slideId
+      setIsSlideNarrationPlaying(false)
       setIsSlideNarrationReady(false)
       setIsSlideNarrationLoading(false)
     }
@@ -2630,6 +2631,15 @@ function App() {
 
     const playSlideAudio = async () => {
       let audioPayload = getCachedSlideAudio(currentSlide.id)
+      const getRetryDelayMs = () => {
+        const now = Date.now()
+        const backoffRemaining = Math.max(0, ttsRateLimitUntilRef.current - now)
+        const minIntervalRemaining = Math.max(
+          0,
+          TTS_PREFETCH_CONFIG.MIN_REQUEST_INTERVAL_MS - (now - lastTtsRequestTimeRef.current)
+        )
+        return Math.max(backoffRemaining, minIntervalRemaining)
+      }
 
       if (!audioPayload) {
         if (slideAudioFailureRef.current.has(currentSlide.id)) {
@@ -2639,8 +2649,34 @@ function App() {
         }
 
         setIsSlideNarrationLoading(true)
-        audioPayload = await requestSlideAudio(currentSlide)
-        if (cancelled) return
+        const maxAttempts = 2
+        let attempts = 0
+        while (!audioPayload?.audioUrl && attempts < maxAttempts) {
+          attempts += 1
+          audioPayload = await requestSlideAudio(currentSlide)
+          if (cancelled) return
+
+          if (audioPayload?.audioUrl || slideAudioFailureRef.current.has(currentSlide.id)) {
+            break
+          }
+
+          if (attempts >= maxAttempts) {
+            break
+          }
+
+          const retryDelay = getRetryDelayMs()
+          if (retryDelay <= 0) {
+            break
+          }
+
+          logger.debug('AUDIO', 'Delaying slide narration TTS retry', {
+            slideId: currentSlide.id,
+            retryMs: retryDelay,
+          })
+
+          await new Promise((resolve) => setTimeout(resolve, retryDelay))
+          if (cancelled) return
+        }
         setIsSlideNarrationLoading(false)
       }
 
@@ -4137,11 +4173,12 @@ function App() {
       !(slide.audioUrl && slide.audioUrl.startsWith('data:'))
     )
 
-    // Show loading state if any TTS needs to be fetched
-    const needsLoading = slidesNeedingTts.length > 0
+    const firstSlideNeedingTts = slidesNeedingTts[0] || null
+    // Show loading state only for the first content slide we need to narrate
+    const needsLoading = !!firstSlideNeedingTts
     if (needsLoading) {
       setIsLoadingTopicAudio(true)
-      setLoadingTopicProgress(5)
+      setLoadingTopicProgress(10)
     }
 
     setTopics((prev) => {
@@ -4168,34 +4205,31 @@ function App() {
     wasManualNavRef.current = true // CORE036: Mark as manual navigation
     setCurrentIndex(0)
 
-    // If TTS needs loading, load ALL slides before showing slideshow
-    if (needsLoading && slidesNeedingTts.length > 0) {
-      logger.info('AUDIO', 'Loading TTS for historical topic', {
+    // If TTS needs loading, load the first content slide before showing slideshow
+    if (needsLoading && firstSlideNeedingTts) {
+      logger.info('AUDIO', 'Loading initial TTS for historical topic', {
         topicId,
-        slidesCount: slidesNeedingTts.length,
+        slideId: firstSlideNeedingTts.id,
       })
 
       try {
-        // Load TTS for all slides sequentially to avoid rate limits
-        for (let i = 0; i < slidesNeedingTts.length; i++) {
-          const slide = slidesNeedingTts[i]
-          const progress = Math.round(10 + (80 * (i + 1)) / slidesNeedingTts.length)
-          setLoadingTopicProgress(progress)
-
-          try {
-            await requestSlideAudio(slide)
-          } catch (err) {
-            logger.warn('AUDIO', 'TTS load failed for slide', {
-              slideId: slide.id,
-              error: err?.message,
-            })
-            // Continue with other slides even if one fails
-          }
-        }
+        setLoadingTopicProgress(60)
+        const audioPayload = await requestSlideAudio(firstSlideNeedingTts)
         setLoadingTopicProgress(100)
-        logger.info('AUDIO', 'All TTS ready for historical topic')
+        if (!audioPayload?.audioUrl) {
+          logger.warn('AUDIO', 'Initial TTS not ready for historical topic', {
+            topicId,
+            slideId: firstSlideNeedingTts.id,
+          })
+        } else {
+          logger.info('AUDIO', 'Initial TTS ready for historical topic', {
+            topicId,
+            slideId: firstSlideNeedingTts.id,
+          })
+        }
       } catch (err) {
-        logger.warn('AUDIO', 'TTS batch load failed', {
+        logger.warn('AUDIO', 'TTS load failed for historical topic', {
+          slideId: firstSlideNeedingTts.id,
           error: err?.message,
         })
       }

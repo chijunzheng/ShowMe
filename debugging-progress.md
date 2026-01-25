@@ -1249,3 +1249,32 @@ Simple linear mapping: 50% audio = 50% characters revealed. Perfect sync.
 **Tradeoffs:**
 - Sacrificed weighted timing (speech rhythm matching)
 - Gained perfect audio sync and no visual artifacts
+
+---
+
+## Session 9: 2026-01-26
+
+### Issue 1: Subtitle Streaming Doesn't Start After Manual Slide Jumps
+
+**Symptoms:**
+- After navigating historical topics, clicking random slides plays TTS audio
+- Subtitle streaming stays static until user pauses/resumes
+- Pausing and resuming immediately starts streaming
+
+**Root Cause:**
+- `isSlideNarrationPlaying` remained `true` across slide changes
+- Manual navigation sets `wasManualNavRef.current = true`, so subtitles defaulted to `showAll`
+- Without a `false → true` transition, `StreamingSubtitle` never re-synced
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// Reset playing state when slide changes so streaming restarts on audio play
+if (slideChanged) {
+  lastSlideIdRef.current = slideId
+  setIsSlideNarrationPlaying(false)
+  setIsSlideNarrationReady(false)
+  setIsSlideNarrationLoading(false)
+}
+```
+
+**Result:** Manual slide clicks now reliably trigger streaming subtitles without pause/resume.
