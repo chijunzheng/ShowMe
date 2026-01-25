@@ -5,12 +5,14 @@
  * T010: Smooth transitions between Socratic states
  */
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import SocraticQuestion from './SocraticQuestion'
 import AnswerRecorder from './AnswerRecorder'
 import SocraticFeedback from './SocraticFeedback'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
+const MAX_SOCRATIC_SLIDES = 12
+const MAX_SLIDE_TEXT_CHARS = 400
 
 // Internal states for Socratic flow
 const SOCRATIC_STATE = {
@@ -38,17 +40,35 @@ export default function SocraticMode({
   const [isQuestionPlaying, setIsQuestionPlaying] = useState(false)
   const [feedback, setFeedback] = useState(null)
   const [error, setError] = useState(null)
+  const sanitizedSlides = useMemo(() => {
+    const trimmedSlides = []
+    for (const slide of slides || []) {
+      const subtitle = typeof slide?.subtitle === 'string' ? slide.subtitle.trim() : ''
+      const script = typeof slide?.script === 'string' ? slide.script.trim() : ''
+      const cleanedSubtitle = subtitle.slice(0, MAX_SLIDE_TEXT_CHARS)
+      const cleanedScript = script.slice(0, MAX_SLIDE_TEXT_CHARS)
+      if (!cleanedSubtitle && !cleanedScript) continue
+      trimmedSlides.push({ subtitle: cleanedSubtitle, script: cleanedScript })
+      if (trimmedSlides.length >= MAX_SOCRATIC_SLIDES) break
+    }
+    if (trimmedSlides.length > 0) return trimmedSlides
+    const fallback = typeof topicName === 'string' ? topicName.trim() : ''
+    return fallback ? [{ subtitle: fallback.slice(0, MAX_SLIDE_TEXT_CHARS) }] : []
+  }, [slides, topicName])
 
   // Fetch Socratic question on mount
   useEffect(() => {
     const fetchQuestion = async () => {
       try {
         setState(SOCRATIC_STATE.LOADING_QUESTION)
+        if (sanitizedSlides.length === 0) {
+          throw new Error('No slide text available for Socratic question')
+        }
 
         const response = await fetch(`${API_BASE}/api/socratic/question`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ slides, topicName, language })
+          body: JSON.stringify({ slides: sanitizedSlides, topicName, language })
         })
 
         if (!response.ok) {
@@ -83,7 +103,7 @@ export default function SocraticMode({
     }
 
     fetchQuestion()
-  }, [slides, topicName, language, onSkip])
+  }, [sanitizedSlides, topicName, language, onSkip])
 
   // Handle question TTS completion
   const handleQuestionSpoken = useCallback(() => {
@@ -119,7 +139,7 @@ export default function SocraticMode({
           answer: answerText,
           question,
           expectedTopics,
-          slideContext: slides[0] || {},
+          slideContext: sanitizedSlides[0] || {},
           language,
           generateAudio: true
         })
@@ -145,7 +165,7 @@ export default function SocraticMode({
       })
       setState(SOCRATIC_STATE.SHOWING_FEEDBACK)
     }
-  }, [question, expectedTopics, slides, language])
+  }, [question, expectedTopics, sanitizedSlides, language])
 
   // Handle skip
   const handleSkip = useCallback(() => {

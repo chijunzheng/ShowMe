@@ -2002,3 +2002,26 @@ if (source !== 'voice' && uiState === UI_STATE.SLIDESHOW) {
   - `activeTopic` changing and cancelling the timer
   - `questionQueue.length` not being 0
   - Other state conditions blocking the effect
+
+---
+
+## Session 29: Socratic Payload Size + Manual End Trigger (2026-01-26)
+
+### Problem
+- Socratic question request returned 413 (Payload Too Large) and the mode aborted.
+- Socratic mode did not trigger when users paused on the final slide after manual navigation.
+
+### Root Cause
+- Socratic request sent full slide objects (including base64 image data), exceeding the 10kb JSON limit.
+- Finish signal was only emitted by autoplay end; manual stop on the last slide never marked completion.
+
+### Fix Applied
+- Sanitized Socratic request payload to send only trimmed subtitle/script text.
+- Added manual end-of-slideshow detection to trigger Socratic when paused on the final slide.
+
+### Files Modified
+- `frontend/src/components/SocraticMode/index.jsx`
+- `frontend/src/App.jsx`
+
+### Git Commits
+- (pending): fix: shrink socratic payload and trigger on manual end

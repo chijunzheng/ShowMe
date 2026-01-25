@@ -139,6 +139,7 @@ const HOME_HEADLINES = [
 // Pause duration between slide transitions (ms)
 // This gives users a brief mental break between concepts
 const SLIDE_TRANSITION_PAUSE_MS = 400
+const MANUAL_FINISH_GRACE_MS = 500
 
 // Audio configuration constants
 const AUDIO_CONFIG = {
@@ -1179,6 +1180,10 @@ function App() {
     if (topics.length === 0 || !activeTopicId) return null
     return topics.find((topic) => topic.id === activeTopicId) || null
   }, [topics, activeTopicId])
+  const activeTopicRef = useRef(activeTopic)
+  useEffect(() => {
+    activeTopicRef.current = activeTopic
+  }, [activeTopic])
 
   /**
    * Slides to display in the main content (current topic only).
@@ -1475,6 +1480,11 @@ function App() {
   const hasFinishedSlideshowRef = useRef(false)
   // State version to trigger re-renders for Socratic mode
   const [slideshowFinished, setSlideshowFinished] = useState(false)
+  const triggerSlideshowFinished = useCallback(() => {
+    if (hasFinishedSlideshowRef.current) return
+    hasFinishedSlideshowRef.current = true
+    setSlideshowFinished(true)
+  }, [])
 
   // Voice agent queue state
   const [voiceAgentQueue, setVoiceAgentQueue] = useState([])
@@ -1511,6 +1521,7 @@ function App() {
   const pauseAfterCurrentSlideRef = useRef(false)
   // Track the transition timeout for cleanup when slide changes or unmounts
   const slideTransitionTimeoutRef = useRef(null)
+  const manualFinishTimeoutRef = useRef(null)
   // CORE036: Track if the last navigation was manual (for streaming subtitles)
   const wasManualNavRef = useRef(false)
 
@@ -2465,9 +2476,8 @@ function App() {
         // If we reach the end, stop playing and mark slideshow as finished (F048)
         if (nextIndex >= visibleSlides.length) {
           setIsPlaying(false)
-          hasFinishedSlideshowRef.current = true
           // Trigger state update outside setter for Socratic mode
-          setTimeout(() => setSlideshowFinished(true), 0)
+          setTimeout(() => triggerSlideshowFinished(), 0)
           return prev
         }
         setCurrentChildIndex(null) // Reset child index when moving to next parent
@@ -2489,6 +2499,7 @@ function App() {
     visibleSlides,
     displayedSlide,
     getSlideDuration,
+    triggerSlideshowFinished,
   ])
 
   // Keyboard navigation for slideshow
@@ -2547,6 +2558,58 @@ function App() {
       setIsPlaying(true)
     }
   }, [uiState, visibleSlides.length])
+
+  // Mark slideshow finished when user manually pauses on the final slide.
+  useEffect(() => {
+    if (manualFinishTimeoutRef.current) {
+      clearTimeout(manualFinishTimeoutRef.current)
+      manualFinishTimeoutRef.current = null
+    }
+
+    if (uiState !== UI_STATE.SLIDESHOW || slideshowFinished) {
+      return
+    }
+
+    if (isPlaying || isSlideNarrationPlaying || visibleSlides.length === 0) {
+      return
+    }
+
+    const isAtLastParent = currentIndex >= visibleSlides.length - 1
+    if (!isAtLastParent) {
+      return
+    }
+
+    const hasChildren = activeChildSlides.length > 0
+    const isAtLastChild = hasChildren
+      ? currentChildIndex !== null && currentChildIndex >= activeChildSlides.length - 1
+      : currentChildIndex === null
+
+    if (!isAtLastChild) {
+      return
+    }
+
+    manualFinishTimeoutRef.current = setTimeout(() => {
+      manualFinishTimeoutRef.current = null
+      triggerSlideshowFinished()
+    }, MANUAL_FINISH_GRACE_MS)
+
+    return () => {
+      if (manualFinishTimeoutRef.current) {
+        clearTimeout(manualFinishTimeoutRef.current)
+        manualFinishTimeoutRef.current = null
+      }
+    }
+  }, [
+    uiState,
+    slideshowFinished,
+    isPlaying,
+    isSlideNarrationPlaying,
+    currentIndex,
+    currentChildIndex,
+    activeChildSlides.length,
+    visibleSlides.length,
+    triggerSlideshowFinished,
+  ])
 
   // Prefetch TTS for upcoming slides (limited to avoid rate limits)
   useEffect(() => {
@@ -2816,9 +2879,8 @@ function App() {
               // If we reach the end, stop playing and mark slideshow as finished
               if (nextIndex >= visibleSlides.length) {
                 setIsPlaying(false)
-                hasFinishedSlideshowRef.current = true
                 // Trigger state update outside setter for Socratic mode
-                setTimeout(() => setSlideshowFinished(true), 0)
+                setTimeout(() => triggerSlideshowFinished(), 0)
                 return prev
               }
               setCurrentChildIndex(null)
@@ -2873,6 +2935,7 @@ function App() {
     prefetchSlideAudio,
     getCachedSlideAudio,
     enqueueVoiceAgentMessage,
+    triggerSlideshowFinished,
   ])
 
   // Auto-trigger queued questions after slideshow ends (F048)
@@ -2880,7 +2943,7 @@ function App() {
   // during generation and have them automatically explored
   useEffect(() => {
     // Only trigger when slideshow just finished and there are queued questions
-    if (!hasFinishedSlideshowRef.current || questionQueue.length === 0) {
+    if (!slideshowFinished || questionQueue.length === 0) {
       return
     }
 
@@ -2904,7 +2967,7 @@ function App() {
     }, 1500) // 1.5 second delay for natural transition
 
     return () => clearTimeout(timer)
-  }, [questionQueue])
+  }, [slideshowFinished, questionQueue])
 
   // SOCRATIC-003: Trigger Socratic mode when slideshow finishes (no queued questions)
   useEffect(() => {
@@ -2914,7 +2977,7 @@ function App() {
     }
 
     // Don't trigger if we don't have an active topic
-    if (!activeTopic) {
+    if (!activeTopicId) {
       return
     }
 
@@ -2927,13 +2990,16 @@ function App() {
     // Delay before transitioning to Socratic mode
     const timer = setTimeout(() => {
       // Prepare Socratic mode data (use ref for latest slides)
+      const topic = activeTopicRef.current
+      if (!topic || topic.id !== activeTopicId) return
+
       const currentSlides = visibleSlidesRef.current
       if (!currentSlides || currentSlides.length === 0) return
 
       const contentSlides = currentSlides.filter(s => s.type !== 'header')
       if (contentSlides.length > 0) {
         setSocraticSlides(contentSlides)
-        setSocraticTopicName(activeTopic.name || 'this topic')
+        setSocraticTopicName(topic.name || 'this topic')
         // Detect language from first slide subtitle
         const firstSubtitle = contentSlides[0]?.subtitle || ''
         const hasChineseChars = /[\u4e00-\u9fff]/.test(firstSubtitle)
@@ -2947,7 +3013,7 @@ function App() {
     }, 2000) // 2 second delay to let user absorb final slide
 
     return () => clearTimeout(timer)
-  }, [slideshowFinished, questionQueue, activeTopic]) // Removed visibleSlides - using ref instead
+  }, [slideshowFinished, questionQueue.length, activeTopicId]) // Removed visibleSlides - using ref instead
 
   // SOCRATIC-003: Handle Socratic mode completion
   const handleSocraticComplete = useCallback(() => {

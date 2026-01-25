@@ -1304,3 +1304,30 @@ if (source !== 'voice' && uiState === UI_STATE.SLIDESHOW) {
 ```
 
 **Result:** Typed follow-ups now reliably submit during narration and trigger generation.
+
+---
+
+## Session 11: 2026-01-26
+
+### Issue 1: Socratic Question Request Fails with 413 Payload Too Large
+
+**Symptoms:**
+- After slideshow ends, UI transitions to Socratic mode then immediately returns to Home
+- Network shows `POST /api/socratic/question` returning 413 (Payload Too Large)
+- Console logs: "Failed to fetch Socratic question"
+
+**Root Cause:**
+- Socratic question request sent full slide objects, including base64 image data
+- Backend JSON body limit for non-slide endpoints is 10kb, so the payload was rejected
+
+**Fix Applied:** `frontend/src/components/SocraticMode/index.jsx`
+```javascript
+// Send only trimmed text context to Socratic endpoint
+const sanitizedSlides = useMemo(() => {
+  // Keep subtitle/script only, cap slide count and chars
+}, [slides, topicName])
+
+body: JSON.stringify({ slides: sanitizedSlides, topicName, language })
+```
+
+**Result:** Socratic question generation succeeds without 413 errors.
