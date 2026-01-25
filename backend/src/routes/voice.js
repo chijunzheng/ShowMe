@@ -1,5 +1,5 @@
 import express from 'express'
-import { generateTTS, isGeminiAvailable, detectLanguage } from '../services/gemini.js'
+import { generateTTS, detectLanguage } from '../services/gemini.js'
 import { sanitizeQuery } from '../utils/sanitize.js'
 
 const router = express.Router()
@@ -30,15 +30,6 @@ router.post('/speak', async (req, res) => {
       })
     }
 
-    if (!isGeminiAvailable()) {
-      return res.json({
-        audioUrl: null,
-        duration: 0,
-        text: sanitized,
-        available: false,
-      })
-    }
-
     // Detect language from text for multi-language TTS support
     const language = detectLanguage(sanitized)
 
@@ -48,7 +39,9 @@ router.post('/speak', async (req, res) => {
     })
 
     if (ttsResult.error) {
+      console.warn('[Voice] TTS error:', ttsResult.error)
       if (ttsResult.error === 'RATE_LIMITED') {
+        console.warn('[Voice] Rate limited by Cloud TTS API')
         return res.status(429).json({
           error: 'Rate limit exceeded. Please try again later.',
           retryAfter: 60,

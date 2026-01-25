@@ -3,14 +3,13 @@
  * F027a: Backend STT endpoint
  *
  * POST /api/transcribe - Accepts audio blob and returns transcription
- * Uses Chirp 3 (Google's latest ASR model) as primary, Gemini as fallback
+ * Uses Gemini 3 Flash for speech recognition
  * Supports audio/webm and audio/wav formats
  */
 
 import express from 'express'
 import multer from 'multer'
 import logger from '../utils/logger.js'
-import { isChirp3Available, transcribeWithChirp3 } from '../services/speechToText.js'
 import { isGeminiAvailable, transcribeAudio } from '../services/gemini.js'
 
 const router = express.Router()
@@ -48,12 +47,11 @@ const upload = multer({
 })
 
 // Log service availability on startup
-logger.info('API', `[Transcribe] Chirp 3 available: ${isChirp3Available()}`)
-logger.info('API', `[Transcribe] Gemini fallback available: ${isGeminiAvailable()}`)
+logger.info('API', `[Transcribe] Gemini available: ${isGeminiAvailable()}`)
 
 /**
  * POST /api/transcribe
- * Transcribe audio blob to text using Chirp 3 (primary) or Gemini (fallback)
+ * Transcribe audio blob to text using Gemini 3 Flash
  *
  * Request: multipart/form-data with 'audio' field containing audio file
  * Response: { transcription: "text here", model: "chirp3" | "gemini" }
@@ -100,23 +98,9 @@ router.post('/', upload.single('audio'), async (req, res) => {
     let result
     let modelUsed
 
-    // Try Chirp 3 first (faster, more accurate)
-    if (isChirp3Available()) {
-      logger.info('API', '[Transcribe] Using Chirp 3')
-      result = await transcribeWithChirp3(buffer, normalizedMimeType)
-      modelUsed = 'chirp3'
-
-      // If Chirp 3 fails with permission/config error, fall back to Gemini
-      if (result.error && ['PERMISSION_DENIED', 'RECOGNIZER_NOT_FOUND', 'SPEECH_CLIENT_NOT_AVAILABLE'].includes(result.error)) {
-        logger.warn('API', '[Transcribe] Chirp 3 unavailable, falling back to Gemini', { error: result.error })
-        result = null
-        modelUsed = null
-      }
-    }
-
-    // Fallback to Gemini if Chirp 3 not available or failed
-    if (!result && isGeminiAvailable()) {
-      logger.info('API', '[Transcribe] Using Gemini fallback')
+    // Use Gemini 3 Flash directly for speech recognition (skip Chirp 3)
+    if (isGeminiAvailable()) {
+      logger.info('API', '[Transcribe] Using Gemini 3 Flash')
       result = await transcribeAudio(buffer, normalizedMimeType)
       modelUsed = 'gemini'
     }

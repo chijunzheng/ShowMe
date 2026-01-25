@@ -759,3 +759,143 @@ prefetchSlideNarrationBatch(allTopicSlides)
 // Configurable concurrency + delay to avoid rate limits
 const TTS_PREFETCH_CONFIG = { MAX_CONCURRENCY: 2, DELAY_MS: 150 }
 ```
+
+---
+
+## Session 7: 2026-01-24
+
+### Issue 1: TTS 429 Rate Limit Errors
+
+**Symptoms:**
+- Multiple concurrent TTS requests causing 429 "Too Many Requests" errors
+- Logs showed requests within milliseconds of each other (18.809, 18.866)
+- Same slides being retried repeatedly
+
+**Root Cause:**
+- TTS prefetch was too aggressive (2 concurrent, 150ms delay)
+- Multiple code paths (`requestSlideAudio`, `fetchTtsForItem`) making requests
+- `skipRateLimitCheck` option was defeating backoff logic
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+const TTS_PREFETCH_CONFIG = {
+  MAX_CONCURRENCY: 1,
+  DELAY_MS: 2000,
+  MAX_PREFETCH_AHEAD: 1,
+  RATE_LIMIT_BACKOFF_MS: 10000,
+  MIN_REQUEST_INTERVAL_MS: 3000,  // New: minimum time between any TTS requests
+}
+
+// Added tracking refs
+const lastTtsRequestTimeRef = useRef(0)
+const ttsRateLimitUntilRef = useRef(0)
+
+// Both TTS functions now check rate limits before requesting
+```
+
+---
+
+### Issue 2: StreamingSubtitle Shows No Words When TTS Fails
+
+**Symptoms:**
+- Slides generated successfully but no subtitles visible
+- `revealedCount` stayed at 0
+- Words only revealed when `isSlideNarrationPlaying` is true
+
+**Root Cause:**
+- StreamingSubtitle component depended entirely on TTS playing to reveal words
+- When TTS failed (429, etc.), narration never played, so words stayed hidden
+
+**Fix Applied:** `frontend/src/components/StreamingSubtitle.jsx`
+```javascript
+// Added 500ms fallback timeout to show all words if audio doesn't start
+useEffect(() => {
+  const fallbackTimeout = setTimeout(() => {
+    if (revealedCount === 0 && words.length > 0) {
+      setRevealedCount(words.length)
+    }
+  }, 500)
+  return () => clearTimeout(fallbackTimeout)
+}, [words, revealedCount])
+```
+
+---
+
+### Issue 3: 403 Permission Denied from Cloud TTS API
+
+**Symptoms:**
+```
+[TTS] API error: { status: 403, message: 'Caller does not have required permission to use project' }
+```
+
+**Root Cause:**
+- gcloud was logged in as wrong account
+- Application Default Credentials (ADC) were stale
+
+**Fix Applied:** Terminal commands
+```bash
+gcloud config set account jasonchi55@gmail.com
+gcloud config set project project-a23ec95e-0a5a-443a-a7a
+gcloud auth application-default login --project project-a23ec95e-0a5a-443a-a7a
+```
+
+Also added to `backend/.env`:
+```
+GOOGLE_CLOUD_PROJECT=project-a23ec95e-0a5a-443a-a7a
+```
+
+---
+
+### Issue 4: Chirp 3 Model Not Available
+
+**Symptoms:**
+```
+[Chirp3] Transcription error after 690ms: 3 INVALID_ARGUMENT: The model "chirp_3" does not exist in the location named "us-central1"
+```
+
+**Root Cause:**
+- Chirp 3 model was not available in the us-central1 region
+
+**Fix Applied:** `backend/src/routes/transcribe.js`
+```javascript
+// BEFORE: Tried Chirp 3 first, then Gemini
+import { isChirp3Available, transcribeWithChirp3 } from '../services/speechToText.js'
+
+// AFTER: Use Gemini directly
+import { isGeminiAvailable, transcribeAudio } from '../services/gemini.js'
+
+// Skip Chirp 3, use Gemini 3 Flash only
+if (isGeminiAvailable()) {
+  result = await transcribeAudio(buffer, normalizedMimeType)
+  modelUsed = 'gemini'
+}
+```
+
+---
+
+### Issue 5: "LLM" Transcription Rejected as Trivial
+
+**Symptoms:**
+```
+[AUDIO] Trivial transcription ignored { transcription: 'LLM' }
+```
+- Valid 3-letter acronym was being filtered out
+
+**Root Cause:**
+- `isTrivialTranscription()` filtered single tokens with `<= 3` characters
+- Intended to catch noise like "um", "uh" but was too aggressive
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// BEFORE (too aggressive):
+if (tokens.length === 1 && tokens[0].length <= 3 && !SHORT_QUESTION_WORDS.has(tokens[0])) {
+  return true
+}
+
+// AFTER (only filter single chars):
+// Only filter single-character transcriptions (likely noise)
+// Allow 2-3 char words as they can be valid acronyms (LLM, API, GPU) or short words
+if (tokens.length === 1 && tokens[0].length <= 1) {
+  return true
+}
+```

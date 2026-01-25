@@ -1330,3 +1330,53 @@ Visual "chapter marker" cards that appear before follow-up slides to clearly sep
 - Section dividers create clear visual breaks between follow-up sections
 - Users can see their learning journey at a glance via progress dot shapes
 - Judges will see "chapter markers" showing the exploration path
+
+---
+
+## Session 19: TTS Rate Limiting + Cloud TTS API + Transcription Fixes (2026-01-24)
+
+### Completed Fixes
+
+#### TTS Rate Limiting Improvements
+- Added `MIN_REQUEST_INTERVAL_MS` (3s) to prevent request bursts
+- Reduced prefetch aggressiveness: `MAX_PREFETCH_AHEAD: 1`, `DELAY_MS: 2000`
+- Added rate limit checking to both `requestSlideAudio` and `fetchTtsForItem`
+- Added `lastTtsRequestTimeRef` and `ttsRateLimitUntilRef` for tracking
+
+#### Cloud TTS API Migration
+- Switched from Gemini GenAI SDK TTS to Google Cloud Text-to-Speech API
+- Using `gemini-2.5-flash-tts` GA model (150 QPM limit)
+- Fixed 403 permission errors by refreshing ADC credentials
+- Added `GOOGLE_CLOUD_PROJECT` env var for quota tracking
+
+#### StreamingSubtitle Fallback
+- Added 500ms fallback timeout to show all words when TTS fails
+- Prevents subtitles from staying invisible when `isSlideNarrationPlaying` is false
+
+#### Removed Chirp 3 STT
+- Chirp 3 model was unavailable in us-central1
+- Transcription now uses Gemini 3 Flash directly
+- Simplified `transcribe.js` to only import from `gemini.js`
+
+#### Trivial Transcription Filter Fix
+- Changed filter threshold from `<= 3` to `<= 1` characters
+- Allows valid short terms like "LLM", "API", "GPU" to be accepted
+- Only filters single-character noise
+
+### Files Modified
+- `frontend/src/App.jsx`: TTS rate limiting, prefetch config
+- `frontend/src/components/StreamingSubtitle.jsx`: Fallback timeout
+- `backend/src/services/gemini.js`: Cloud TTS API integration
+- `backend/src/routes/transcribe.js`: Removed Chirp 3, use Gemini only
+- `backend/src/routes/voice.js`: Added TTS error logging
+- `backend/src/index.js`: Increased rate limit to 300/15min
+- `backend/package.json`: Added dependencies for Cloud TTS
+
+### Git Commits
+- (pending): fix: TTS rate limiting, Cloud TTS API, and transcription improvements
+
+### Context for Next Agent
+- TTS uses Cloud Text-to-Speech API with GA model (150 QPM)
+- Rate limiting enforces 3s minimum between TTS requests
+- Speech recognition uses Gemini 3 Flash directly (no Chirp 3)
+- Short transcriptions (2-3 chars) are now accepted as valid queries

@@ -12,6 +12,7 @@
  */
 
 import { GoogleGenAI } from '@google/genai'
+import { GoogleAuth } from 'google-auth-library'
 
 // Configuration constants
 const TEXT_MODEL = 'gemini-3-flash-preview'
@@ -21,10 +22,16 @@ const IMAGE_MODEL_FALLBACKS = [
 ]
 
 const FAST_MODEL = 'gemini-2.5-flash-lite'
-const TTS_MODEL = 'gemini-2.5-flash-preview-tts'
-const TTS_FALLBACK_MODEL = 'gemini-2.5-pro-preview-tts'
 
-// Default TTS voice - Kore is a clear, engaging voice suitable for education
+// Gemini-TTS defaults for Cloud Text-to-Speech API
+// Use GA model for higher quota (150 QPM vs unknown for preview)
+const DEFAULT_TTS_MODEL = process.env.GEMINI_TTS_MODEL || 'gemini-2.5-flash-tts'
+const DEFAULT_TTS_AUDIO_ENCODING = process.env.GEMINI_TTS_AUDIO_ENCODING || 'MP3'
+const DEFAULT_TTS_REGION = process.env.GOOGLE_CLOUD_REGION || 'global'
+const TTS_SCOPE = 'https://www.googleapis.com/auth/cloud-platform'
+let ttsAuthClientPromise = null
+
+// Default TTS voice - Kore is a clear, engaging voice suitable for education.
 const DEFAULT_VOICE = 'Kore'
 
 /**
@@ -662,26 +669,52 @@ ${topic ? `- Topic context: ${topic}` : ''}`
 
 function normalizeTtsError(error) {
   const message = error?.message || ''
-  if (message.includes('quota') || message.includes('rate') || message.includes('429')) {
+  const status = error?.status
+  if (
+    status === 429 ||
+    message.includes('RESOURCE_EXHAUSTED') ||
+    message.includes('quota') ||
+    message.includes('rate') ||
+    message.includes('429')
+  ) {
     return 'RATE_LIMITED'
   }
   return message || 'UNKNOWN_ERROR'
 }
 
-function extractInlineAudio(response) {
-  const resolved = response?.response || response
-  const parts = resolved?.candidates?.[0]?.content?.parts || []
+function getTtsLanguageCode(language) {
+  return language === 'zh' ? 'cmn-CN' : 'en-US'
+}
 
-  for (const part of parts) {
-    if (part?.inlineData?.data) {
-      return {
-        data: part.inlineData.data,
-        mimeType: part.inlineData.mimeType,
-      }
-    }
+function getTtsEndpoint() {
+  if (DEFAULT_TTS_REGION && DEFAULT_TTS_REGION !== 'global') {
+    return `https://${DEFAULT_TTS_REGION}-texttospeech.googleapis.com`
+  }
+  return 'https://texttospeech.googleapis.com'
+}
+
+function getTtsMimeType(audioEncoding) {
+  const normalized = String(audioEncoding || '').toUpperCase()
+  if (normalized === 'MP3') return 'audio/mpeg'
+  if (normalized === 'OGG_OPUS') return 'audio/ogg'
+  return 'audio/pcm'
+}
+
+async function getTtsAccessToken() {
+  if (!ttsAuthClientPromise) {
+    const auth = new GoogleAuth({ scopes: [TTS_SCOPE] })
+    ttsAuthClientPromise = auth.getClient()
   }
 
-  return null
+  try {
+    const client = await ttsAuthClientPromise
+    const tokenResponse = await client.getAccessToken()
+    if (typeof tokenResponse === 'string') return tokenResponse
+    return tokenResponse?.token || null
+  } catch (error) {
+    console.error('[TTS] Failed to acquire access token:', error.message)
+    return null
+  }
 }
 
 function estimatePcmDurationMs(pcmBuffer, sampleRate = 24000, numChannels = 1, bitsPerSample = 16) {
@@ -765,30 +798,6 @@ function buildAudioResult(inlineData) {
   return { audioUrl, duration: 0, error: null }
 }
 
-async function generateTtsWithGenAI(ai, model, prompt, voice) {
-  try {
-    const response = await ai.models.generateContent({
-      model,
-      contents: [{ parts: [{ text: prompt }] }],
-      config: {
-        responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: voice },
-          },
-        },
-      },
-    })
-
-    const inlineData = extractInlineAudio(response)
-    return buildAudioResult(inlineData)
-  } catch (error) {
-    console.error('[Gemini] TTS generation error:', error.message)
-    return { audioUrl: null, duration: 0, error: normalizeTtsError(error) }
-  }
-}
-
-
 /**
  * Generate TTS audio from text
  *
@@ -799,36 +808,73 @@ async function generateTtsWithGenAI(ai, model, prompt, voice) {
  * @returns {Promise<{audioUrl: string|null, duration: number, error: string|null}>}
  */
 export async function generateTTS(text, options = {}) {
-  const { voice = DEFAULT_VOICE, language = 'en' } = options
+  const {
+    voice = DEFAULT_VOICE,
+    language = 'en',
+    model = DEFAULT_TTS_MODEL,
+    audioEncoding = DEFAULT_TTS_AUDIO_ENCODING,
+  } = options
 
-  // Prepare text with speaking instructions for natural delivery
-  // Use language-appropriate prompt for better TTS quality
-  const speakingPrompt = language === 'zh'
-    ? `用清晰、生动的方式朗读以下内容，就像在教导一个好奇的学生: ${text}`
-    : `Speak clearly and engagingly, as if teaching a curious student: ${text}`
+  // Use prompt field for style control; keep text clean for speech synthesis.
+  const prompt = language === 'zh'
+    ? '用清晰、生动的方式朗读以下内容，就像在教导一个好奇的学生。'
+    : 'Speak clearly and engagingly, as if teaching a curious student.'
 
-  const ai = getAIClient()
-  if (!ai) {
+  const accessToken = await getTtsAccessToken()
+  if (!accessToken) {
     return { audioUrl: null, duration: 0, error: 'API_NOT_AVAILABLE' }
   }
 
-  // Try primary TTS model
-  const primaryResult = await generateTtsWithGenAI(ai, TTS_MODEL, speakingPrompt, voice)
-  if (!primaryResult.error) {
-    return primaryResult
-  }
-  if (primaryResult.error === 'RATE_LIMITED') {
-    return primaryResult
+  const voiceConfig = {
+    languageCode: getTtsLanguageCode(language),
+    model_name: model,
+    ...(voice ? { name: voice } : {}),
   }
 
-  // Fallback to preview model if primary fails
-  const fallbackResult = await generateTtsWithGenAI(ai, TTS_FALLBACK_MODEL, speakingPrompt, voice)
-  if (!fallbackResult.error) {
-    console.warn('[Gemini] TTS fell back to preview model')
-    return fallbackResult
+  const requestBody = {
+    input: { text, prompt },
+    voice: voiceConfig,
+    audioConfig: { audioEncoding },
   }
 
-  return primaryResult
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT
+  const endpoint = `${getTtsEndpoint()}/v1/text:synthesize`
+
+  console.log('[TTS] Request:', { model, endpoint, voice: voiceConfig })
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        ...(projectId ? { 'x-goog-user-project': projectId } : {}),
+      },
+      body: JSON.stringify(requestBody),
+    })
+
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      const message = data?.error?.message || `HTTP_${response.status}`
+      console.error('[TTS] API error:', { status: response.status, message, model })
+      return { audioUrl: null, duration: 0, error: normalizeTtsError({ message, status: response.status }) }
+    }
+
+    const audioContent = data?.audioContent || data?.audio_content
+    if (!audioContent) {
+      console.error('[TTS] No audio content in response:', JSON.stringify(data).slice(0, 200))
+      return { audioUrl: null, duration: 0, error: 'NO_AUDIO_GENERATED' }
+    }
+
+    console.log('[TTS] Success - audio content length:', audioContent.length)
+    const mimeType = getTtsMimeType(audioEncoding)
+    const result = buildAudioResult({ data: audioContent, mimeType })
+    console.log('[TTS] Audio URL length:', result.audioUrl?.length || 0, 'duration:', result.duration)
+    return result
+  } catch (error) {
+    console.error('[TTS] Cloud Text-to-Speech request failed:', error.message)
+    return { audioUrl: null, duration: 0, error: normalizeTtsError(error) }
+  }
 }
 
 /**

@@ -154,8 +154,11 @@ const AUDIO_CONFIG = {
 }
 
 const TTS_PREFETCH_CONFIG = {
-  MAX_CONCURRENCY: 2,
-  DELAY_MS: 150,
+  MAX_CONCURRENCY: 1,        // Reduced from 2 to avoid rate limits
+  DELAY_MS: 2000,            // Increased to 2s between requests for 20 RPM (10 per model)
+  MAX_PREFETCH_AHEAD: 1,     // Only prefetch next 1 slide to minimize concurrent requests
+  RATE_LIMIT_BACKOFF_MS: 10000, // Wait 10s after rate limit before retrying
+  MIN_REQUEST_INTERVAL_MS: 3000, // Minimum 3s between any TTS requests (20 RPM = 3s/request)
 }
 
 // Voice agent script templates
@@ -171,16 +174,7 @@ const VOICE_AGENT_SCRIPT = {
     }
     return "Your explanation is ready."
   },
-  // Suggestions slide messages - randomly selected for variety
-  SUGGESTIONS_MESSAGES: [
-    "Want to learn more? Here are some questions you might enjoy.",
-    "Curious for more? Try one of these questions.",
-    "Ready to keep exploring? Here are some ideas.",
-  ],
-  getRandomSuggestionsMessage: () => {
-    const messages = VOICE_AGENT_SCRIPT.SUGGESTIONS_MESSAGES
-    return messages[Math.floor(Math.random() * messages.length)]
-  },
+  // Suggestions slide TTS disabled to conserve quota.
 }
 
 /**
@@ -991,7 +985,9 @@ function isTrivialTranscription(text) {
   const tokens = normalized.split(/\s+/).filter(Boolean)
   if (!tokens.length) return true
   if (tokens.every((token) => TRIVIAL_TRANSCRIPT_TOKENS.has(token))) return true
-  if (tokens.length === 1 && tokens[0].length <= 3 && !SHORT_QUESTION_WORDS.has(tokens[0])) {
+  // Only filter single-character transcriptions (likely noise)
+  // Allow 2-3 char words as they can be valid acronyms (LLM, API, GPU) or short words
+  if (tokens.length === 1 && tokens[0].length <= 1) {
     return true
   }
   return false
@@ -1451,8 +1447,6 @@ function App() {
   const spokenFunFactRef = useRef(null)
   // JIT TTS: Pre-fetched audio URLs keyed by queue item id
   const prefetchedTtsRef = useRef(new Map())
-  // Track which suggestions slide we've already spoken for (to avoid repeating)
-  const spokenSuggestionsSlideRef = useRef(null)
 
   useEffect(() => {
     voiceAgentQueueRef.current = voiceAgentQueue
@@ -1467,6 +1461,10 @@ function App() {
   const slideAudioCacheRef = useRef(new Map())
   const slideAudioRequestRef = useRef(new Map())
   const slideAudioFailureRef = useRef(new Set())
+  // Track rate limit backoff - timestamp when we can retry after rate limit
+  const ttsRateLimitUntilRef = useRef(0)
+  // Track last TTS request time - enforce minimum interval between requests
+  const lastTtsRequestTimeRef = useRef(0)
 
   // Track if we should pause after the current slide (raise-hand flow)
   const pauseAfterCurrentSlideRef = useRef(false)
@@ -1566,11 +1564,34 @@ function App() {
     if (!slide.subtitle || typeof slide.subtitle !== 'string') return null
     if (slideAudioFailureRef.current.has(slide.id)) return null
 
+    // Check rate limit backoff - ALWAYS check, no exceptions
+    const now = Date.now()
+    if (now < ttsRateLimitUntilRef.current) {
+      logger.debug('AUDIO', 'Skipping TTS request due to rate limit backoff', {
+        slideId: slide.id,
+        retryAfter: Math.ceil((ttsRateLimitUntilRef.current - now) / 1000),
+      })
+      return null
+    }
+
+    // Enforce minimum interval between requests (prevents burst requests)
+    const timeSinceLastRequest = now - lastTtsRequestTimeRef.current
+    if (timeSinceLastRequest < TTS_PREFETCH_CONFIG.MIN_REQUEST_INTERVAL_MS) {
+      logger.debug('AUDIO', 'Skipping TTS request - too soon after last request', {
+        slideId: slide.id,
+        waitMs: TTS_PREFETCH_CONFIG.MIN_REQUEST_INTERVAL_MS - timeSinceLastRequest,
+      })
+      return null
+    }
+
     const cached = getCachedSlideAudio(slide.id)
     if (cached) return cached
 
     const inFlight = slideAudioRequestRef.current.get(slide.id)
     if (inFlight) return inFlight
+
+    // Update last request time BEFORE making request to prevent concurrent requests
+    lastTtsRequestTimeRef.current = now
 
     const requestPromise = (async () => {
       try {
@@ -1579,6 +1600,17 @@ function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: slide.subtitle }),
         })
+
+        // Handle rate limiting - don't permanently fail, just backoff
+        if (response.status === 429) {
+          ttsRateLimitUntilRef.current = Date.now() + TTS_PREFETCH_CONFIG.RATE_LIMIT_BACKOFF_MS
+          logger.warn('AUDIO', 'TTS rate limited, backing off', {
+            slideId: slide.id,
+            backoffMs: TTS_PREFETCH_CONFIG.RATE_LIMIT_BACKOFF_MS,
+          })
+          // Don't add to failure set - can retry after backoff
+          return null
+        }
 
         if (!response.ok) {
           slideAudioFailureRef.current.add(slide.id)
@@ -1591,6 +1623,12 @@ function App() {
 
         const data = await response.json()
         if (!data?.audioUrl) {
+          // Check if the response indicates rate limiting from upstream API
+          if (data?.error?.includes('Rate limit') || data?.error?.includes('rate')) {
+            ttsRateLimitUntilRef.current = Date.now() + TTS_PREFETCH_CONFIG.RATE_LIMIT_BACKOFF_MS
+            logger.warn('AUDIO', 'TTS upstream rate limited, backing off', { slideId: slide.id })
+            return null
+          }
           slideAudioFailureRef.current.add(slide.id)
           return null
         }
@@ -1743,12 +1781,42 @@ function App() {
       return prefetched
     }
 
+    // Check rate limit backoff
+    const now = Date.now()
+    if (now < ttsRateLimitUntilRef.current) {
+      logger.debug('AUDIO', 'Skipping voice agent TTS due to rate limit backoff', {
+        itemId: item.id,
+      })
+      return null
+    }
+
+    // Enforce minimum interval between requests
+    const timeSinceLastRequest = now - lastTtsRequestTimeRef.current
+    if (timeSinceLastRequest < TTS_PREFETCH_CONFIG.MIN_REQUEST_INTERVAL_MS) {
+      logger.debug('AUDIO', 'Skipping voice agent TTS - too soon after last request', {
+        itemId: item.id,
+      })
+      return null
+    }
+
+    // Update last request time BEFORE making request
+    lastTtsRequestTimeRef.current = now
+
     try {
       const response = await fetch('/api/voice/speak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: item.text }),
       })
+
+      // Handle rate limiting
+      if (response.status === 429) {
+        ttsRateLimitUntilRef.current = Date.now() + TTS_PREFETCH_CONFIG.RATE_LIMIT_BACKOFF_MS
+        logger.warn('AUDIO', 'Voice agent TTS rate limited, backing off', {
+          itemId: item.id,
+        })
+        return null
+      }
 
       if (!response.ok) {
         logger.warn('AUDIO', 'Voice agent TTS request failed', {
@@ -1760,6 +1828,11 @@ function App() {
 
       const data = await response.json()
       if (!data?.audioUrl) {
+        // Check for upstream rate limiting
+        if (data?.error?.includes('Rate limit') || data?.error?.includes('rate')) {
+          ttsRateLimitUntilRef.current = Date.now() + TTS_PREFETCH_CONFIG.RATE_LIMIT_BACKOFF_MS
+          return null
+        }
         return null
       }
 
@@ -2197,19 +2270,18 @@ function App() {
   }, [uiState, clearFunFactRefresh])
 
   /**
-   * Speak fun facts using pre-generated audio from engagement endpoint.
-   * Audio is generated server-side to eliminate the round-trip to /api/voice/speak.
+   * Speak fun facts using pre-generated audio from engagement endpoint when available.
    * Uses TTS-driven refresh: next fun fact fetched only after current audio finishes.
    */
   useEffect(() => {
     if (!engagement) return
 
-    if (engagement.funFact?.text && !spokenFunFactRef.current) {
+    if (engagement.funFact?.text && engagement.funFact?.audioUrl && !spokenFunFactRef.current) {
       spokenFunFactRef.current = engagement.funFact.text
-      // Use pre-generated audio if available, otherwise fall back to TTS fetch
+      // Only speak when pre-generated audio is provided (avoid extra TTS calls).
       // When audio finishes, wait 60s before refreshing to get next fun fact
       enqueueVoiceAgentMessage(`Fun fact: ${engagement.funFact.text}`, {
-        audioUrl: engagement.funFact.audioUrl || null,
+        audioUrl: engagement.funFact.audioUrl,
         onComplete: () => {
           setTimeout(refreshFunFact, GENERATION_TIMEOUT.FUN_FACT_REFRESH_DELAY_MS)
         },
@@ -2222,7 +2294,7 @@ function App() {
 
   // Auto-advance slideshow for non-audio slides (F044)
   // - Header slides: advance after 2 seconds (no audio)
-  // - Suggestions slides: advance after duration (voice agent handles audio separately)
+  // - Suggestions slides: advance after duration (no audio)
   // - Regular slides with audio: handled by audio onended, NOT this timer
   // - Regular slides with failed audio: fallback timer advancement
   useEffect(() => {
@@ -2363,11 +2435,15 @@ function App() {
     }
   }, [uiState, visibleSlides.length])
 
+  // Prefetch TTS for upcoming slides (limited to avoid rate limits)
   useEffect(() => {
     if (!activeTopic || allTopicSlides.length === 0) return
     if (uiState !== UI_STATE.SLIDESHOW && uiState !== UI_STATE.GENERATING) return
-    prefetchSlideNarrationBatch(allTopicSlides)
-  }, [activeTopic, allTopicSlides, uiState, prefetchSlideNarrationBatch])
+    // Only prefetch next few slides from current position to avoid rate limits
+    const startIndex = Math.max(0, currentIndex)
+    const slidesToPrefetch = allTopicSlides.slice(startIndex, startIndex + TTS_PREFETCH_CONFIG.MAX_PREFETCH_AHEAD + 1)
+    prefetchSlideNarrationBatch(slidesToPrefetch)
+  }, [activeTopic, allTopicSlides, uiState, currentIndex, prefetchSlideNarrationBatch])
 
   /**
    * F037: Restart audio when navigating to a new slide
@@ -2445,15 +2521,10 @@ function App() {
       return
     }
 
-    // Suggestions slide - play random TTS message via voice agent
+    // Suggestions slide - no TTS to conserve quota
     if (currentSlide?.type === 'suggestions') {
       setIsSlideNarrationPlaying(false)
       setIsSlideNarrationReady(true)
-      // Only speak once per suggestions slide (check by slide ID)
-      if (isPlaying && spokenSuggestionsSlideRef.current !== currentSlide.id) {
-        spokenSuggestionsSlideRef.current = currentSlide.id
-        enqueueVoiceAgentMessage(VOICE_AGENT_SCRIPT.getRandomSuggestionsMessage())
-      }
       return
     }
 
@@ -2513,6 +2584,8 @@ function App() {
       if (!audioPayload?.audioUrl) {
         setIsSlideNarrationPlaying(false)
         setIsSlideNarrationReady(true)
+        // Force showAll for subtitles when TTS audio fails to load
+        wasManualNavRef.current = true
         return
       }
 
@@ -3583,7 +3656,6 @@ function App() {
       setEngagement(null)
       setVoiceAgentQueue([])
       spokenFunFactRef.current = null
-      spokenSuggestionsSlideRef.current = null
       clearFunFactRefresh()
       currentQueryRef.current = trimmedQuery // Store query for TTS-driven fun fact refresh
       setIsColdStart(false)

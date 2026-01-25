@@ -115,10 +115,11 @@ app.use((req, res, next) => {
 // F077: Request logging middleware - logs all requests with timing
 app.use(requestLogger)
 
-// F003: Rate limiting - 100 requests per 15 minutes for /api/* endpoints
+// F003: Rate limiting - 300 requests per 15 minutes for /api/* endpoints
+// Increased from 100 to support TTS-heavy slideshow experience
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // 100 requests per 15 minutes
+  max: 300, // 300 requests per 15 minutes (~20/min)
   message: {
     error: 'Too many requests, please try again later.',
     retryAfter: '15 minutes'

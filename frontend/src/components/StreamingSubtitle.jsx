@@ -102,6 +102,25 @@ function StreamingSubtitle({ text, duration, isPlaying, showAll = false, onCompl
     }
   }, [showAll, wordData.length])
 
+  // Fallback timeout: if audio doesn't start playing within 500ms, show all words
+  // This ensures subtitles are always visible even when TTS fails
+  useEffect(() => {
+    // Only set fallback if we have words, audio isn't playing, showAll is false, and no words revealed yet
+    if (wordData.length > 0 && !isPlaying && !showAll && revealedCount === 0) {
+      const fallbackTimeout = setTimeout(() => {
+        // After 500ms, if still no words revealed, show all as fallback
+        setRevealedCount(prev => {
+          if (prev === 0) {
+            return wordData.length
+          }
+          return prev
+        })
+      }, 500)
+
+      return () => clearTimeout(fallbackTimeout)
+    }
+  }, [wordData.length, isPlaying, showAll, revealedCount])
+
   // Animation loop for progressive reveal
   const tick = useCallback((timestamp) => {
     if (!isPlaying || showAll) {
