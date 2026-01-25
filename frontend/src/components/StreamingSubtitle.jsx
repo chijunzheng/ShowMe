@@ -24,6 +24,8 @@ function StreamingSubtitle({ text, duration, isPlaying, showAll = false, onCompl
   const completedRef = useRef(false)
   // Track previous isPlaying state to detect transitions
   const prevIsPlayingRef = useRef(isPlaying)
+  // Track if we've started playing this text (to distinguish first play from resume)
+  const hasStartedPlayingRef = useRef(false)
 
   // Parse text into words with their timing weights
   // Punctuation after words adds extra pause time
@@ -89,23 +91,32 @@ function StreamingSubtitle({ text, duration, isPlaying, showAll = false, onCompl
     })
   }, [wordData, duration])
 
-  // Reset state when text or duration changes
+  // Reset state when text or duration changes (new slide)
   useEffect(() => {
     setRevealedCount(0)
     elapsedTimeRef.current = 0
     lastTickRef.current = null
     completedRef.current = false
+    hasStartedPlayingRef.current = false // Reset for new text
   }, [text, duration])
 
-  // SYNC FIX: Reset timer when transitioning from not-playing to playing
-  // This ensures subtitle animation starts fresh when audio actually begins
+  // SYNC FIX: Reset timer only on FIRST play, not on resume after pause
+  // This ensures subtitle animation starts fresh when audio first begins,
+  // but preserves position when pausing and resuming
   useEffect(() => {
     if (isPlaying && !prevIsPlayingRef.current) {
-      // Transition from not-playing to playing - reset timer for fresh sync
-      elapsedTimeRef.current = 0
+      // Transition from not-playing to playing
+      if (!hasStartedPlayingRef.current) {
+        // First time playing this text - reset timer for fresh sync
+        elapsedTimeRef.current = 0
+        lastTickRef.current = null
+        setRevealedCount(0)
+        completedRef.current = false
+        hasStartedPlayingRef.current = true
+      }
+      // On resume: don't reset, just continue from where we left off
+      // lastTickRef is set to null so delta calculation restarts cleanly
       lastTickRef.current = null
-      setRevealedCount(0)
-      completedRef.current = false
     }
     prevIsPlayingRef.current = isPlaying
   }, [isPlaying])

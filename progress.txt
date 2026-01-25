@@ -1538,6 +1538,16 @@ const LOCAL_PROGRESS = {
 3. **Progress bar flow:**
    - 10% → 35% → 65% → 85% → **92% (Preparing narration...)** → 100%
 
+### Bug Fix: Subtitle Pause/Resume
+
+**Problem:** When slides were paused and resumed, subtitle animation restarted from the beginning instead of continuing.
+
+**Root Cause:** The sync fix reset timer on every false→true `isPlaying` transition, including resume.
+
+**Fix:** Added `hasStartedPlayingRef` to distinguish first play from resume:
+- First play: reset timer for fresh sync
+- Resume: continue from where we left off
+
 ### Files Modified
 - `frontend/src/App.jsx`:
   - Added `LOCAL_PROGRESS.TTS_LOADING` constant at 92%
@@ -1546,13 +1556,15 @@ const LOCAL_PROGRESS = {
   - Updated callers to await the transition
 - `frontend/src/components/StreamingSubtitle.jsx`:
   - Added `prevIsPlayingRef` to track play state transitions
-  - Reset timer when transitioning from not-playing to playing
+  - Added `hasStartedPlayingRef` to distinguish first play from resume
+  - Reset timer only on first play, preserve position on resume
 
 ### Git Commits
-- (pending): fix: TTS subtitle sync and polished loading transition
+- 0cb5cb2: fix: TTS subtitle sync and polished loading transition
+- (pending): fix: preserve subtitle position on pause/resume
 
 ### Context for Next Agent
-- Subtitles now sync precisely with audio playback start
+- Subtitles sync precisely with audio playback start
+- Subtitles pause and resume correctly, preserving position
 - Loading screen stays visible until first slide's TTS is ready
 - Progress bar shows "Preparing narration..." at 92% before transition
-- Users see a polished experience where narration starts immediately with slides

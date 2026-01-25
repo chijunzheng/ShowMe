@@ -964,3 +964,68 @@ const requestSlideAudio = async (slide) => {
 ```
 
 Now duplicate requests for the same slide properly await the existing in-flight request instead of returning null.
+
+---
+
+## Session: 2026-01-25
+
+### Issue: Subtitle Animation Resets on Pause/Resume
+
+**Symptoms:**
+- When slides are narrating and user pauses, then resumes
+- The subtitle streaming animation restarts from the beginning
+- Expected: subtitles should continue from where they left off
+
+**Root Cause:** `frontend/src/components/StreamingSubtitle.jsx`
+
+The sync fix added earlier reset the timer on EVERY false→true transition of `isPlaying`:
+
+```javascript
+// BEFORE (buggy):
+useEffect(() => {
+  if (isPlaying && !prevIsPlayingRef.current) {
+    // This runs on EVERY resume, not just first play!
+    elapsedTimeRef.current = 0
+    lastTickRef.current = null
+    setRevealedCount(0)
+    completedRef.current = false
+  }
+  prevIsPlayingRef.current = isPlaying
+}, [isPlaying])
+```
+
+This didn't distinguish between:
+1. First play of a new slide (should reset)
+2. Resume after pause (should NOT reset)
+
+**Fix Applied:** `frontend/src/components/StreamingSubtitle.jsx`
+
+Added `hasStartedPlayingRef` to track whether we've already started playing this text:
+
+```javascript
+// Track if we've started playing this text (to distinguish first play from resume)
+const hasStartedPlayingRef = useRef(false)
+
+// Reset when text changes (new slide)
+useEffect(() => {
+  // ... other resets ...
+  hasStartedPlayingRef.current = false // Reset for new text
+}, [text, duration])
+
+// Only reset on FIRST play, not on resume
+useEffect(() => {
+  if (isPlaying && !prevIsPlayingRef.current) {
+    if (!hasStartedPlayingRef.current) {
+      // First time playing this text - reset timer
+      elapsedTimeRef.current = 0
+      setRevealedCount(0)
+      hasStartedPlayingRef.current = true
+    }
+    // On resume: don't reset, just continue from where we left off
+    lastTickRef.current = null // Clean delta calculation restart
+  }
+  prevIsPlayingRef.current = isPlaying
+}, [isPlaying])
+```
+
+**Result:** Subtitles now pause and resume correctly, preserving position.
