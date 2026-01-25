@@ -1678,7 +1678,7 @@ return (
 ```
 
 ### Git Commits
-- (pending): fix: subtitle streaming rewrite with character-weighted gradient fade
+- c39c275: fix: subtitle streaming rewrite with character-weighted gradient fade
 
 ### Context for Next Agent
 - Subtitles now use character-weighted reveal with gradient fade at edge
@@ -1686,3 +1686,75 @@ return (
 - Gradient fade (4 chars) creates smooth visual transition
 - Exact 1:1 timing sync with audio (no 0.95 multiplier)
 - Invisible placeholder maintains text centering
+
+---
+
+## Session 24: Subtitle Streaming Optimization - Flashing Fix & Linear Sync (2026-01-25)
+
+### Problem 1: Gradient Fade Causing Visual Flashing
+- Per-character spans were being created/destroyed as characters moved between solid and fade zones
+- React DOM churn caused visible flashing artifacts
+
+### Solution: Render All Characters Upfront
+- All characters now rendered as spans from the start with stable `key={i}`
+- Only opacity changes via CSS transitions - no DOM elements created/destroyed
+- Each character's opacity determined by its position relative to reveal edge
+
+```javascript
+{characters.map((char, i) => {
+  const isRevealed = i < charsToShow
+  const distanceFromEdge = charsToShow - 1 - i
+
+  let opacity
+  if (!isRevealed) opacity = 0
+  else if (distanceFromEdge < FADE_CHARS) opacity = fadeOpacities[distanceFromEdge]
+  else opacity = 1
+
+  return <span key={i} style={{ opacity, transition: 'opacity 80ms linear' }}>{char}</span>
+})}
+```
+
+### Problem 2: Fade Gradient Direction Wrong
+- Fade was appearing before the end of revealed text, not at the edge
+- `fadeOpacities` array was inverted
+
+### Solution: Fix Opacity Array Order
+```javascript
+// Index 0 = last revealed char (faintest), index 3 = 4th from edge (almost solid)
+const fadeOpacities = [0.15, 0.4, 0.7, 0.9]
+```
+
+### Problem 3: Subtitles Lagging Behind Audio
+- Weighted timing (longer words = more time) didn't match actual TTS timing
+- Caused subtitles to drift behind speech
+
+### Solution: Remove Weighted Timing, Use Linear Sync
+- Removed complex word-weight calculation
+- Simple linear mapping: `charsToShow = (audioProgress%) × totalChars`
+- 50% audio played = 50% characters revealed
+- Perfect sync with audio timeline
+
+```javascript
+// Before (weighted - caused drift)
+const targetWeight = (displayProgress / 100) * totalWeight
+// complex loop to find charsToShow based on cumulative weights
+
+// After (linear - perfect sync)
+const charsToShow = Math.round((displayProgress / 100) * totalChars)
+```
+
+### Files Modified
+- `frontend/src/components/StreamingSubtitle.jsx`:
+  - Render all characters as spans upfront (no DOM churn)
+  - Fixed fade opacity array order
+  - Removed weighted timing, use linear character reveal
+  - Simplified from ~175 lines to ~115 lines
+
+### Git Commits
+- (pending): fix: subtitle streaming optimization - flashing fix and linear sync
+
+### Context for Next Agent
+- Subtitles use linear sync (audio progress % = character reveal %)
+- All characters rendered upfront with stable keys
+- Gradient fade via CSS opacity transitions (no DOM churn)
+- No weighted timing - prioritizes sync accuracy over speech rhythm matching

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 /**
  * StreamingSubtitle - Karaoke-style subtitle display with smooth gradient reveal
@@ -17,43 +17,8 @@ function StreamingSubtitle({ text, duration, isPlaying, showAll = false, audioRe
   // Animation frame ID for cleanup
   const animationFrameRef = useRef(null)
 
-  // Calculate cumulative weights for each CHARACTER for smooth reveal
-  // Word weights are spread across their characters for natural pacing
-  const { charWeights, totalWeight } = useMemo(() => {
-    if (!text) return { charWeights: [], totalWeight: 0 }
-
-    const weights = []
-    let cumWeight = 0
-
-    // Split into words while preserving spaces
-    const wordList = text.split(/(\s+)/).filter(w => w.length > 0)
-
-    for (const word of wordList) {
-      let wordWeight
-
-      // Whitespace has minimal weight
-      if (/^\s+$/.test(word)) {
-        wordWeight = 0.3
-      } else {
-        // Base weight: character count (proxy for syllables/pronunciation time)
-        wordWeight = word.length
-
-        // Add weight for punctuation pauses (natural speech rhythm)
-        if (/[.!?]$/.test(word)) wordWeight += 4        // Full stop - longer pause
-        else if (/\.\.\./.test(word)) wordWeight += 6   // Ellipsis - dramatic pause
-        else if (/[,;:]$/.test(word)) wordWeight += 2   // Comma - short pause
-      }
-
-      // Spread word weight across its characters for smooth reveal
-      const weightPerChar = wordWeight / word.length
-      for (let i = 0; i < word.length; i++) {
-        cumWeight += weightPerChar
-        weights.push(cumWeight)
-      }
-    }
-
-    return { charWeights: weights, totalWeight: cumWeight }
-  }, [text])
+  // Total character count for linear progress calculation
+  const totalChars = text ? text.length : 0
 
   // Reset progress when text changes (new slide)
   useEffect(() => {
@@ -122,52 +87,48 @@ function StreamingSubtitle({ text, duration, isPlaying, showAll = false, audioRe
 
   const displayProgress = showAll ? 100 : progress
 
-  // Character-based reveal: find how many chars to show based on weighted progress
-  const targetWeight = (displayProgress / 100) * totalWeight
-  let charsToShow = 0
+  // Linear character reveal: directly map audio progress to character count
+  const charsToShow = Math.round((displayProgress / 100) * totalChars)
 
-  for (let i = 0; i < charWeights.length; i++) {
-    if (charWeights[i] <= targetWeight) {
-      charsToShow = i + 1
-    } else {
-      break
-    }
-  }
+  // Gradient fade configuration
+  // Index 0 = last revealed char (faintest), index 3 = 4th from edge (almost solid)
+  const FADE_CHARS = 4
+  const fadeOpacities = [0.15, 0.4, 0.7, 0.9]
 
-  // Gradient fade: split revealed text into solid + fading edge
-  const FADE_CHARS = 4 // Number of characters in the fade gradient
-  const solidEnd = Math.max(0, charsToShow - FADE_CHARS)
-  const solidText = text.slice(0, solidEnd)
-
-  // Fading characters with decreasing opacity
-  const fadeChars = text.slice(solidEnd, charsToShow).split('')
-  const fadeOpacities = [0.85, 0.6, 0.35, 0.15] // Gradient from visible to faint
-
-  const unrevealedText = text.slice(charsToShow)
-
-  // When showing all or near end, no fade needed
-  if (showAll || charsToShow >= text.length - 2) {
-    return (
-      <span>
-        {text.slice(0, charsToShow)}
-        <span className="invisible">{unrevealedText}</span>
-      </span>
-    )
-  }
+  // Pre-split text into characters (memoized via useMemo would be better for perf)
+  const characters = text.split('')
 
   return (
     <span>
-      {solidText}
-      {fadeChars.map((char, i) => (
-        <span
-          key={i}
-          style={{ opacity: fadeOpacities[i] || 0.15 }}
-        >
-          {char}
-        </span>
-      ))}
-      {/* Invisible placeholder to maintain full text width for proper centering */}
-      <span className="invisible">{unrevealedText}</span>
+      {characters.map((char, i) => {
+        // Determine character state: revealed (solid), fading, or hidden
+        const isRevealed = i < charsToShow
+        const distanceFromEdge = charsToShow - 1 - i // 0 = last revealed, 1 = second last, etc.
+
+        let opacity
+        if (!isRevealed) {
+          // Hidden - use visibility instead of opacity for better perf
+          opacity = 0
+        } else if (distanceFromEdge < FADE_CHARS && charsToShow < text.length) {
+          // In fade zone (near the reveal edge)
+          opacity = fadeOpacities[distanceFromEdge] ?? 0.15
+        } else {
+          // Fully revealed
+          opacity = 1
+        }
+
+        return (
+          <span
+            key={i}
+            style={{
+              opacity,
+              transition: 'opacity 80ms linear',
+            }}
+          >
+            {char}
+          </span>
+        )
+      })}
     </span>
   )
 }

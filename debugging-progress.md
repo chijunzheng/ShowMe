@@ -1148,3 +1148,104 @@ const newProgress = Math.min(100, (currentMs / duration) * 100)
 - Respects speech rhythm (longer words = slower reveal)
 - Has soft gradient fade at reveal edge
 - Syncs exactly with audio narration
+
+---
+
+### Issue 5: Gradient Fade Causing Visual Flashing
+
+**Symptoms:**
+- Visible flashing/flickering during subtitle streaming
+- Occurred at the fade edge where characters transition from solid to fading
+
+**Root Cause:**
+- Characters were moving between `solidText` (string) and `fadeChars` (array of spans)
+- React was creating/destroying DOM elements on every frame
+- Even with stable keys, the DOM churn caused visual artifacts
+
+**Fix Applied:** `frontend/src/components/StreamingSubtitle.jsx`
+```javascript
+// Render ALL characters as spans from the start
+{characters.map((char, i) => {
+  const isRevealed = i < charsToShow
+  const distanceFromEdge = charsToShow - 1 - i
+
+  let opacity = isRevealed
+    ? (distanceFromEdge < FADE_CHARS ? fadeOpacities[distanceFromEdge] : 1)
+    : 0
+
+  return (
+    <span key={i} style={{ opacity, transition: 'opacity 80ms linear' }}>{char}</span>
+  )
+})}
+```
+
+No DOM elements created/destroyed - only opacity changes via CSS transitions.
+
+---
+
+### Issue 6: Fade Gradient Direction Inverted
+
+**Symptoms:**
+- Fade appeared in the middle of revealed text, not at the edge
+- Characters before the last revealed char were fading instead of after
+
+**Root Cause:**
+- `fadeOpacities` array had wrong order: `[1, 0.7, 0.4, 0.15]`
+- Index 0 (last char) was getting opacity 1 (brightest) instead of 0.15 (faintest)
+
+**Fix Applied:** `frontend/src/components/StreamingSubtitle.jsx`
+```javascript
+// BEFORE (wrong):
+const fadeOpacities = [1, 0.7, 0.4, 0.15]
+
+// AFTER (correct):
+// Index 0 = last revealed char (faintest), index 3 = 4th from edge (almost solid)
+const fadeOpacities = [0.15, 0.4, 0.7, 0.9]
+```
+
+---
+
+### Issue 7: Subtitles Lagging Behind TTS Audio
+
+**Symptoms:**
+- Subtitles consistently behind spoken words
+- Audio says word before subtitle reveals it
+- Tried 1:1 sync but still lagged
+
+**Root Cause:**
+- Weighted timing calculation assumed longer words take proportionally longer
+- TTS doesn't follow these exact timings
+- Weight drift accumulated over the subtitle duration
+
+**Fix Applied:** `frontend/src/components/StreamingSubtitle.jsx`
+```javascript
+// BEFORE (weighted - caused drift):
+const { charWeights, totalWeight } = useMemo(() => {
+  // Complex word weight calculation with punctuation pauses
+  // ...
+}, [text])
+const targetWeight = (displayProgress / 100) * totalWeight
+// Loop to find charsToShow based on cumulative weights
+
+// AFTER (linear - perfect sync):
+const totalChars = text ? text.length : 0
+const charsToShow = Math.round((displayProgress / 100) * totalChars)
+```
+
+Simple linear mapping: 50% audio = 50% characters revealed. Perfect sync.
+
+---
+
+### Summary of Final StreamingSubtitle Implementation
+
+| Aspect | Implementation |
+|--------|----------------|
+| Character reveal | Linear (audio% = chars%) |
+| DOM strategy | All chars rendered upfront, stable keys |
+| Fade effect | CSS opacity transitions (80ms linear) |
+| Fade gradient | Last 4 chars: 0.15 → 0.4 → 0.7 → 0.9 |
+| Sync method | Direct audio.currentTime / duration |
+
+**Tradeoffs:**
+- Sacrificed weighted timing (speech rhythm matching)
+- Gained perfect audio sync and no visual artifacts
