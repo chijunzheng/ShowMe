@@ -3552,6 +3552,12 @@ function App() {
     if (!trimmedQuery) return
     const { source = 'text' } = options
 
+    if (source !== 'voice' && uiState === UI_STATE.SLIDESHOW) {
+      pauseAfterCurrentSlideRef.current = false
+      interruptActiveAudio()
+      setIsPlaying(false)
+    }
+
     // Lower the hand after a question so listening only resumes on explicit raise.
     raiseHandRequestRef.current = false
     if (isRaiseHandPending) {

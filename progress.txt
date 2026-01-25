@@ -1876,3 +1876,29 @@ if (slideChanged) {
 
 ### Git Commits
 - (pending): fix: restart subtitle streaming on manual slide navigation
+
+---
+
+## Session 27: Typed Follow-up Submission During Narration (2026-01-26)
+
+### Problem
+When narration was playing, typing a follow-up question and submitting it did nothing. The query appeared to be ignored.
+
+### Root Cause
+Text submissions during slideshow mode did not interrupt narration, leaving the slideshow in a playing state and preventing the follow-up request from advancing.
+
+### Fix Applied
+```javascript
+// Interrupt narration when submitting a typed follow-up during slideshow
+if (source !== 'voice' && uiState === UI_STATE.SLIDESHOW) {
+  pauseAfterCurrentSlideRef.current = false
+  interruptActiveAudio()
+  setIsPlaying(false)
+}
+```
+
+### Files Modified
+- `frontend/src/App.jsx`
+
+### Git Commits
+- (pending): fix: allow typed follow-ups during narration

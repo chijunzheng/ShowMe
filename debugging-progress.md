@@ -1278,3 +1278,29 @@ if (slideChanged) {
 ```
 
 **Result:** Manual slide clicks now reliably trigger streaming subtitles without pause/resume.
+
+---
+
+## Session 10: 2026-01-26
+
+### Issue 1: Typed Follow-up Ignored During Narration
+
+**Symptoms:**
+- While slide narration was playing, typing a follow-up question and pressing Enter did nothing
+- No new generation started, and the query appeared to be ignored
+
+**Root Cause:**
+- Text submissions in slideshow mode did not interrupt active narration
+- The slideshow remained in a playing state, so the follow-up submission never advanced the flow
+
+**Fix Applied:** `frontend/src/App.jsx`
+```javascript
+// Interrupt narration when submitting a typed follow-up during slideshow
+if (source !== 'voice' && uiState === UI_STATE.SLIDESHOW) {
+  pauseAfterCurrentSlideRef.current = false
+  interruptActiveAudio()
+  setIsPlaying(false)
+}
+```
+
+**Result:** Typed follow-ups now reliably submit during narration and trigger generation.
