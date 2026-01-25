@@ -1758,3 +1758,87 @@ const charsToShow = Math.round((displayProgress / 100) * totalChars)
 - All characters rendered upfront with stable keys
 - Gradient fade via CSS opacity transitions (no DOM churn)
 - No weighted timing - prioritizes sync accuracy over speech rhythm matching
+
+---
+
+## Session 25: TTS Audio Persistence & Historical Slide Loading (2026-01-25)
+
+### Problem
+When clicking on historical slides (from localStorage), TTS audio had to be re-fetched from the server (~1-2s per slide), causing:
+1. Slides and subtitles appeared but no audio
+2. Subtitle streaming didn't work for manually clicked slides
+
+### Root Cause Found
+`sanitizeSlidesForStorage()` was intentionally stripping `audioUrl` on line 245:
+```javascript
+// audioUrl intentionally omitted to reduce storage size  ← BUG!
+```
+
+### Fixes Applied
+
+#### 1. Persist audioUrl with slides (`App.jsx:245-250`)
+```javascript
+// Persist audioUrl for instant playback of historical slides
+...(slide.audioUrl && { audioUrl: slide.audioUrl }),
+// Also preserve type and parentId for special slides
+...(slide.type && { type: slide.type }),
+...(slide.parentId && { parentId: slide.parentId }),
+```
+
+#### 2. Check for persisted audioUrl before fetching TTS (`App.jsx:1575-1582`)
+```javascript
+// If slide already has audioUrl saved, use it directly (no fetch needed)
+if (slide.audioUrl && slide.audioUrl.startsWith('data:')) {
+  const persistedPayload = { audioUrl: slide.audioUrl, duration: slide.duration }
+  slideAudioCacheRef.current.set(slide.id, persistedPayload)
+  return persistedPayload
+}
+```
+
+#### 3. Persist audioUrl after TTS fetch (`App.jsx:1563-1599, 1697-1700`)
+- Added `persistSlideAudio(slideId, audioUrl, duration)` function
+- Updates slide in topics state with audioUrl
+- Calls `persistTopicSlides()` to save to localStorage
+- Called automatically after each TTS fetch succeeds
+
+#### 4. Loading screen for historical topics (`App.jsx:4875-4899`)
+When clicking a topic that needs TTS loading:
+- Shows header slide with progress bar overlay
+- Text: "Preparing narration... 45%"
+- Loads ALL slides' TTS sequentially before showing slideshow
+- Progress updates as each slide loads
+
+#### 5. Fix subtitle streaming after manual navigation (`App.jsx:2610, 2616, 2673`)
+Problem: `wasManualNavRef.current = true` caused `showAll` to be true, preventing streaming
+Fix: Reset `wasManualNavRef.current = false` when audio starts playing:
+```javascript
+const handlePlaying = () => {
+  wasManualNavRef.current = false  // Reset so streaming works
+  setIsSlideNarrationPlaying(true)
+}
+```
+
+### Files Modified
+- `frontend/src/App.jsx`:
+  - Fixed `sanitizeSlidesForStorage` to preserve audioUrl
+  - Added `persistSlideAudio` function and ref
+  - Added `isLoadingTopicAudio` and `loadingTopicProgress` states
+  - Modified `handleNavigateToTopic` to load ALL slides' TTS
+  - Added loading screen UI for historical topic navigation
+  - Reset `wasManualNavRef` when audio starts playing
+
+### Result
+- **First time viewing slides**: TTS is fetched, then persisted to localStorage
+- **Subsequent views**: Instant playback from localStorage (no server fetch)
+- **Manual slide clicks**: Streaming subtitles now work after audio starts
+- **Loading screen**: Shows progress while preparing narration for historical topics
+
+### Git Commits
+- (pending): fix: TTS audio persistence and historical slide loading
+
+### Context for Next Agent
+- TTS audioUrl is now persisted with slides in localStorage
+- Historical slides play instantly without re-fetching TTS
+- Loading screen appears when TTS needs to be loaded for a topic
+- Subtitle streaming works for all navigation types once audio plays
+- Note: localStorage has ~5MB limit; for cloud persistence, consider GCS

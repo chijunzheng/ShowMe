@@ -242,7 +242,12 @@ function sanitizeSlidesForStorage(slides, topicId) {
       topicId: slide.topicId || topicId,
       // F091: Preserve conclusion slide marker
       ...(slide.isConclusion && { isConclusion: true }),
-      // audioUrl intentionally omitted to reduce storage size
+      // Persist audioUrl for instant playback of historical slides
+      ...(slide.audioUrl && { audioUrl: slide.audioUrl }),
+      // Preserve slide type for section dividers and other special slides
+      ...(slide.type && { type: slide.type }),
+      // Preserve parent relationship for follow-up slides
+      ...(slide.parentId && { parentId: slide.parentId }),
     }))
     // Only filter out completely invalid slides (no content at all)
     .filter((slide) => slide.id && (slide.subtitle || slide.imageUrl))
@@ -1040,6 +1045,9 @@ function App() {
   const [isStillWorking, setIsStillWorking] = useState(false)
   const [isPreparingFollowUp, setIsPreparingFollowUp] = useState(false)
   const [isSlideRevealPending, setIsSlideRevealPending] = useState(false)
+  // Loading state for historical topic navigation (waiting for TTS)
+  const [isLoadingTopicAudio, setIsLoadingTopicAudio] = useState(false)
+  const [loadingTopicProgress, setLoadingTopicProgress] = useState(0)
   const abortControllerRef = useRef(null)
   const stillWorkingTimerRef = useRef(null)
   const currentQueryRef = useRef(null) // Track current query for fun fact refresh
@@ -1465,6 +1473,8 @@ function App() {
   const slideAudioCacheRef = useRef(new Map())
   const slideAudioRequestRef = useRef(new Map())
   const slideAudioFailureRef = useRef(new Set())
+  // Callback ref to persist audioUrl back to slide (set later to avoid circular deps)
+  const persistSlideAudioRef = useRef(null)
   // Track rate limit backoff - timestamp when we can retry after rate limit
   const ttsRateLimitUntilRef = useRef(0)
   // Track last TTS request time - enforce minimum interval between requests
@@ -1558,6 +1568,44 @@ function App() {
     })
   }, [getActiveAudioElement])
 
+  /**
+   * Persist audioUrl back to slide in topics state and localStorage.
+   * This allows historical slides to play instantly without re-fetching TTS.
+   */
+  const persistSlideAudio = useCallback((slideId, audioUrl, duration) => {
+    if (!slideId || !audioUrl) return
+
+    setTopics((prev) => {
+      let updated = false
+      const newTopics = prev.map((topic) => {
+        if (!topic.slides) return topic
+        const slideIndex = topic.slides.findIndex((s) => s.id === slideId)
+        if (slideIndex === -1) return topic
+
+        // Update the slide with audioUrl
+        updated = true
+        const newSlides = [...topic.slides]
+        newSlides[slideIndex] = {
+          ...newSlides[slideIndex],
+          audioUrl,
+          duration: duration || newSlides[slideIndex].duration,
+        }
+
+        // Also persist to localStorage
+        const versionId = topic.versions?.[topic.currentVersionIndex ?? 0]?.id
+        persistTopicSlides(topic.id, newSlides, versionId)
+
+        return { ...topic, slides: newSlides }
+      })
+      return updated ? newTopics : prev
+    })
+  }, [])
+
+  // Set persist callback ref so requestSlideAudio can call it
+  useEffect(() => {
+    persistSlideAudioRef.current = persistSlideAudio
+  }, [persistSlideAudio])
+
   const getCachedSlideAudio = useCallback((slideId) => {
     if (!slideId) return null
     return slideAudioCacheRef.current.get(slideId) || null
@@ -1571,6 +1619,15 @@ function App() {
     // Check cache first - if already fetched, return immediately
     const cached = getCachedSlideAudio(slide.id)
     if (cached) return cached
+
+    // Check if slide already has persisted audioUrl (from localStorage)
+    // This means we've fetched TTS before and saved it with the slide
+    if (slide.audioUrl && typeof slide.audioUrl === 'string' && slide.audioUrl.startsWith('data:')) {
+      const persistedPayload = { audioUrl: slide.audioUrl, duration: slide.duration || DEFAULT_SLIDE_DURATION }
+      slideAudioCacheRef.current.set(slide.id, persistedPayload)
+      logger.debug('AUDIO', 'Using persisted audioUrl from slide', { slideId: slide.id })
+      return persistedPayload
+    }
 
     // Check if request is already in flight - return that promise to await it
     const inFlight = slideAudioRequestRef.current.get(slide.id)
@@ -1644,6 +1701,12 @@ function App() {
           : (slide.duration || DEFAULT_SLIDE_DURATION)
         const audioPayload = { audioUrl: data.audioUrl, duration }
         slideAudioCacheRef.current.set(slide.id, audioPayload)
+
+        // Persist audioUrl back to slide so historical slides play instantly
+        if (persistSlideAudioRef.current) {
+          persistSlideAudioRef.current(slide.id, data.audioUrl, duration)
+        }
+
         return audioPayload
       } catch (error) {
         slideAudioFailureRef.current.add(slide.id)
@@ -2544,11 +2607,13 @@ function App() {
     if (slideAudioRef.current && !slideChanged) {
       setIsSlideNarrationReady(true)
       if (!slideAudioRef.current.paused && !slideAudioRef.current.ended) {
+        wasManualNavRef.current = false // Reset so streaming works
         setIsSlideNarrationPlaying(true)
         return
       }
       if (!slideAudioRef.current.ended) {
         slideAudioRef.current.play().then(() => {
+          wasManualNavRef.current = false // Reset so streaming works
           setIsSlideNarrationPlaying(true)
         }).catch((error) => {
           logger.warn('AUDIO', 'Slide audio resume failed', {
@@ -2606,6 +2671,8 @@ function App() {
       // SYNC FIX: Set playing state only when audio ACTUALLY starts playing
       // This ensures StreamingSubtitle animation is synchronized with audio
       const handlePlaying = () => {
+        // Reset manual nav flag so streaming subtitles work instead of showAll
+        wasManualNavRef.current = false
         setIsSlideNarrationPlaying(true)
         logger.debug('AUDIO', 'Audio playing event fired - subtitle sync started', {
           slideId: currentSlide.id,
@@ -4036,10 +4103,11 @@ function App() {
 
   /**
    * Handle topic navigation from sidebar (CORE017)
-   * Switches the active topic and navigates to its header slide
+   * Switches the active topic and navigates to its header slide.
+   * Shows loading screen while preparing TTS for first content slide.
    * @param {string} topicId - ID of the topic to navigate to
    */
-  const handleNavigateToTopic = useCallback((topicId) => {
+  const handleNavigateToTopic = useCallback(async (topicId) => {
     if (!topicId) return
     const targetTopic = topics.find((topic) => topic.id === topicId)
     const needsSlides = !targetTopic?.slides || targetTopic.slides.length === 0
@@ -4050,6 +4118,30 @@ function App() {
     if (needsSlides && !cachedSlides) {
       const currentVersionId = targetTopic?.versions?.[targetTopic.currentVersionIndex ?? 0]?.id
       void fetchSlidesFromServer(topicId, currentVersionId)
+    }
+
+    // Get the slides we'll be showing
+    const slidesToShow = cachedSlides || targetTopic?.slides || []
+
+    // Find all content slides that need TTS
+    const contentSlides = slidesToShow.filter((slide) =>
+      slide.type !== 'header' &&
+      slide.type !== 'section' &&
+      slide.type !== 'suggestions' &&
+      slide.subtitle
+    )
+
+    // Check how many slides need TTS loading
+    const slidesNeedingTts = contentSlides.filter((slide) =>
+      !slideAudioCacheRef.current.has(slide.id) &&
+      !(slide.audioUrl && slide.audioUrl.startsWith('data:'))
+    )
+
+    // Show loading state if any TTS needs to be fetched
+    const needsLoading = slidesNeedingTts.length > 0
+    if (needsLoading) {
+      setIsLoadingTopicAudio(true)
+      setLoadingTopicProgress(5)
     }
 
     setTopics((prev) => {
@@ -4075,11 +4167,48 @@ function App() {
     setActiveTopicId(topicId)
     wasManualNavRef.current = true // CORE036: Mark as manual navigation
     setCurrentIndex(0)
-    // If not already in slideshow, switch to slideshow state
+
+    // If TTS needs loading, load ALL slides before showing slideshow
+    if (needsLoading && slidesNeedingTts.length > 0) {
+      logger.info('AUDIO', 'Loading TTS for historical topic', {
+        topicId,
+        slidesCount: slidesNeedingTts.length,
+      })
+
+      try {
+        // Load TTS for all slides sequentially to avoid rate limits
+        for (let i = 0; i < slidesNeedingTts.length; i++) {
+          const slide = slidesNeedingTts[i]
+          const progress = Math.round(10 + (80 * (i + 1)) / slidesNeedingTts.length)
+          setLoadingTopicProgress(progress)
+
+          try {
+            await requestSlideAudio(slide)
+          } catch (err) {
+            logger.warn('AUDIO', 'TTS load failed for slide', {
+              slideId: slide.id,
+              error: err?.message,
+            })
+            // Continue with other slides even if one fails
+          }
+        }
+        setLoadingTopicProgress(100)
+        logger.info('AUDIO', 'All TTS ready for historical topic')
+      } catch (err) {
+        logger.warn('AUDIO', 'TTS batch load failed', {
+          error: err?.message,
+        })
+      }
+
+      setIsLoadingTopicAudio(false)
+      setLoadingTopicProgress(0)
+    }
+
+    // Switch to slideshow state
     if (uiState !== UI_STATE.SLIDESHOW && topics.length > 0) {
       setUiState(UI_STATE.SLIDESHOW)
     }
-  }, [uiState, topics, pruneSlideCache, fetchSlidesFromServer])
+  }, [uiState, topics, pruneSlideCache, fetchSlidesFromServer, requestSlideAudio])
 
   /**
    * Handle topic rename from sidebar
@@ -4747,7 +4876,33 @@ function App() {
           </div>
         )}
 
-        {uiState === UI_STATE.SLIDESHOW && visibleSlides.length > 0 && (
+        {/* Loading screen for historical topic TTS */}
+        {isLoadingTopicAudio && activeTopic && (
+          <div className="flex flex-col items-center gap-4 px-4 md:px-0 animate-fade-in">
+            <div className="w-full max-w-2xl">
+              <div className="relative w-full aspect-video overflow-hidden rounded-xl shadow-lg">
+                <TopicHeader
+                  icon={activeTopic.icon}
+                  name={activeTopic.name}
+                />
+                {/* Progress bar overlay */}
+                <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/30 to-transparent">
+                  <div className="h-2 bg-white/30 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary rounded-full transition-all duration-300"
+                      style={{ width: `${loadingTopicProgress}%` }}
+                    />
+                  </div>
+                  <p className="text-white text-sm text-center mt-3 font-medium">
+                    Preparing narration... {loadingTopicProgress > 10 ? `${loadingTopicProgress}%` : ''}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {uiState === UI_STATE.SLIDESHOW && visibleSlides.length > 0 && !isLoadingTopicAudio && (
           <div className="flex flex-col items-center gap-4 px-4 md:px-0">
             {isPreparingFollowUp && (
               <div className="px-3 py-1 text-xs text-primary bg-primary/10 rounded-full">
