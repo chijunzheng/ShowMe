@@ -1,0 +1,586 @@
+{
+  "project_name": "ShowMe Rebrand",
+  "created_at": "2026-01-25T00:00:00Z",
+  "description": "Socratic AI tutoring and gamification features for ShowMe rebrand",
+  "complexity_tier": "complex",
+  "target_feature_count": 8,
+  "features": [
+    {
+      "id": "SOCRATIC-001",
+      "category": "socratic",
+      "name": "Socratic Question Generation",
+      "description": "Backend endpoint that generates probing questions based on slideshow content to deepen understanding",
+      "priority": 1,
+      "dependencies": [],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "POST /api/socratic/question accepts slideshow data with slides array",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Endpoint returns a probing question string",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Question is relevant to slideshow content",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Response includes questionType field (comprehension|application|analysis|prediction)",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Response includes expectedTopics array for answer hints",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "English slideshow returns English question",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Chinese slideshow returns Chinese question",
+          "status": "pending"
+        },
+        {
+          "id": "T008",
+          "description": "Response time under 3 seconds",
+          "status": "pending"
+        }
+      ],
+      "files_to_modify": [
+        "backend/src/routes/socratic.js",
+        "backend/src/services/gemini.js",
+        "backend/src/index.js"
+      ],
+      "api_spec": {
+        "endpoint": "POST /api/socratic/question",
+        "request": {
+          "slides": "array - The generated slides with script and imageUrl",
+          "topicName": "string - The topic being explored",
+          "language": "string - 'en' or 'zh'"
+        },
+        "response": {
+          "question": "string - The probing question to ask",
+          "questionType": "string - comprehension|application|analysis|prediction",
+          "expectedTopics": "array - Key concepts a good answer should mention"
+        }
+      }
+    },
+    {
+      "id": "SOCRATIC-002",
+      "category": "socratic",
+      "name": "Answer Evaluation",
+      "description": "Backend endpoint that evaluates user's spoken answer and provides encouraging feedback",
+      "priority": 2,
+      "dependencies": ["SOCRATIC-001"],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "POST /api/socratic/evaluate accepts answer text",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Returns feedback string with encouraging tone",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Returns score from 1-5",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Identifies correct aspects in answer",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Provides gentle suggestions for misconceptions",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Empty answer gets encouraging 'try again' response",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Excellent answer gets celebratory response",
+          "status": "pending"
+        },
+        {
+          "id": "T008",
+          "description": "Optionally returns followUpQuestion for deeper exploration",
+          "status": "pending"
+        }
+      ],
+      "files_to_modify": [
+        "backend/src/routes/socratic.js",
+        "backend/src/services/gemini.js"
+      ],
+      "api_spec": {
+        "endpoint": "POST /api/socratic/evaluate",
+        "request": {
+          "answer": "string - User's transcribed answer",
+          "question": "string - The original Socratic question",
+          "expectedTopics": "array - Expected concepts from question generation",
+          "slideContext": "object - The slide content for context"
+        },
+        "response": {
+          "feedback": "string - Encouraging feedback message",
+          "score": "number - 1-5 understanding score",
+          "correctAspects": "array - What the user got right",
+          "suggestions": "array - Gentle corrections or extensions",
+          "followUpQuestion": "string|null - Optional deeper question"
+        }
+      }
+    },
+    {
+      "id": "SOCRATIC-003",
+      "category": "socratic",
+      "name": "Socratic UI Flow",
+      "description": "Frontend components and state for Socratic interaction after slideshow",
+      "priority": 3,
+      "dependencies": ["SOCRATIC-001", "SOCRATIC-002"],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "After slideshow ends, SOCRATIC state activates",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "SocraticQuestion component displays question text",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Question is spoken via TTS automatically",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Mic button available to record answer",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Waveform shows during recording",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Stop button ends recording and submits",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "SocraticFeedback displays AI response",
+          "status": "pending"
+        },
+        {
+          "id": "T008",
+          "description": "Skip button available to bypass Socratic mode",
+          "status": "pending"
+        },
+        {
+          "id": "T009",
+          "description": "Continue button returns to HOME state",
+          "status": "pending"
+        },
+        {
+          "id": "T010",
+          "description": "Smooth transitions between Socratic states",
+          "status": "pending"
+        }
+      ],
+      "files_to_modify": [
+        "frontend/src/App.jsx",
+        "frontend/src/components/SocraticMode/SocraticQuestion.jsx",
+        "frontend/src/components/SocraticMode/AnswerRecorder.jsx",
+        "frontend/src/components/SocraticMode/SocraticFeedback.jsx",
+        "frontend/src/components/SocraticMode/index.jsx"
+      ]
+    },
+    {
+      "id": "GAMIFY-001",
+      "category": "gamification",
+      "name": "Progress Tracking Backend",
+      "description": "Backend service for tracking streaks, points, and achievements in Firestore",
+      "priority": 4,
+      "dependencies": [],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "UserProgress service connects to Firestore",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Can create new progress record for clientId",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Streak increments on same-day activity",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Streak increments on next-day activity",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Streak resets to 1 after gap day",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Points awarded: 10 per question",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Points awarded: 5 per Socratic answer",
+          "status": "pending"
+        },
+        {
+          "id": "T008",
+          "description": "CURIOUS_MIND badge unlocks at 1 question",
+          "status": "pending"
+        },
+        {
+          "id": "T009",
+          "description": "STREAK_3 badge unlocks at 3-day streak",
+          "status": "pending"
+        },
+        {
+          "id": "T010",
+          "description": "STREAK_7 badge unlocks at 7-day streak",
+          "status": "pending"
+        },
+        {
+          "id": "T011",
+          "description": "QUESTION_10 badge unlocks at 10 questions",
+          "status": "pending"
+        },
+        {
+          "id": "T012",
+          "description": "Badge unlock dates are recorded",
+          "status": "pending"
+        }
+      ],
+      "files_to_modify": [
+        "backend/src/services/userProgress.js"
+      ],
+      "data_schema": {
+        "collection": "userProgress",
+        "fields": {
+          "clientId": "string",
+          "totalQuestions": "number",
+          "totalSocraticAnswers": "number",
+          "streakCount": "number",
+          "longestStreak": "number",
+          "lastActiveDate": "timestamp",
+          "points": "number",
+          "badges": "array",
+          "badgeUnlockDates": "map"
+        }
+      }
+    },
+    {
+      "id": "GAMIFY-002",
+      "category": "gamification",
+      "name": "Progress API Endpoints",
+      "description": "REST endpoints for retrieving and updating user progress",
+      "priority": 5,
+      "dependencies": ["GAMIFY-001"],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "GET /api/user/progress returns progress for clientId",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Returns 404 for unknown clientId (or creates empty)",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "POST /api/user/activity with action='question_asked'",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "POST /api/user/activity with action='socratic_answered'",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Response includes newBadges array when badge unlocked",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Missing clientId returns 400 error",
+          "status": "pending"
+        }
+      ],
+      "files_to_modify": [
+        "backend/src/routes/user.js",
+        "backend/src/index.js"
+      ],
+      "api_spec": {
+        "endpoints": [
+          {
+            "method": "GET",
+            "path": "/api/user/progress",
+            "query": "clientId=string"
+          },
+          {
+            "method": "POST",
+            "path": "/api/user/activity",
+            "body": {
+              "clientId": "string",
+              "action": "question_asked|socratic_answered|deep_level_used"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "GAMIFY-003",
+      "category": "gamification",
+      "name": "Gamification UI",
+      "description": "Frontend components for streaks, points, and achievement badges",
+      "priority": 6,
+      "dependencies": ["GAMIFY-002"],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "StreakCounter displays flame icon with streak number",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "StreakCounter positioned top-right corner",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "StreakCounter shows 0 for new users",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Streak counter pulses when incremented",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "AchievementToast appears when badge unlocked",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Toast shows badge icon and name",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Toast auto-dismisses after 3 seconds",
+          "status": "pending"
+        },
+        {
+          "id": "T008",
+          "description": "BadgeCollection shows all badges in grid",
+          "status": "pending"
+        },
+        {
+          "id": "T009",
+          "description": "Locked badges appear grayed out",
+          "status": "pending"
+        },
+        {
+          "id": "T010",
+          "description": "useUserProgress hook loads progress on mount",
+          "status": "pending"
+        }
+      ],
+      "files_to_modify": [
+        "frontend/src/components/StreakCounter.jsx",
+        "frontend/src/components/AchievementBadge.jsx",
+        "frontend/src/components/AchievementToast.jsx",
+        "frontend/src/components/BadgeCollection.jsx",
+        "frontend/src/hooks/useUserProgress.js",
+        "frontend/src/App.jsx"
+      ]
+    },
+    {
+      "id": "POLISH-001",
+      "category": "polish",
+      "name": "Animations & Celebrations",
+      "description": "Celebratory animations for achievements and streak milestones",
+      "priority": 7,
+      "dependencies": ["GAMIFY-003"],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Confetti animation plays on badge unlock",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Confetti cleans up after animation ends",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Flame icon has subtle flicker animation",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Streak number has scale-up animation on change",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Animations run smoothly on mobile (60fps)",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Sound effect plays on achievement (if unmuted)",
+          "status": "pending"
+        }
+      ],
+      "files_to_modify": [
+        "frontend/src/components/Confetti.jsx",
+        "frontend/src/components/AchievementToast.jsx",
+        "frontend/src/components/StreakCounter.jsx",
+        "frontend/src/utils/soundEffects.js"
+      ]
+    },
+    {
+      "id": "POLISH-002",
+      "category": "polish",
+      "name": "Visual Identity Refresh",
+      "description": "Updated color palette and styling for student-focused branding",
+      "priority": 8,
+      "dependencies": [],
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Primary gradient colors defined in Tailwind config",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Accent orange color available",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Success green color for streaks",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Mic button uses gradient effect",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "All text meets WCAG AA contrast",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Dark mode uses appropriate color variants",
+          "status": "pending"
+        }
+      ],
+      "files_to_modify": [
+        "frontend/src/index.css",
+        "frontend/tailwind.config.js",
+        "frontend/src/App.jsx"
+      ],
+      "design_spec": {
+        "primaryGradient": "linear-gradient(135deg, #6366F1, #06B6D4)",
+        "accentColor": "#F59E0B",
+        "successColor": "#22C55E",
+        "streakGradient": "linear-gradient(135deg, #F59E0B, #EF4444)"
+      }
+    }
+  ],
+  "badges": [
+    {
+      "id": "CURIOUS_MIND",
+      "name": "Curious Mind",
+      "description": "Asked your first question",
+      "icon": "lightbulb",
+      "criteria": { "totalQuestions": 1 }
+    },
+    {
+      "id": "STREAK_3",
+      "name": "Getting Started",
+      "description": "Achieved a 3-day learning streak",
+      "icon": "flame-small",
+      "criteria": { "streakCount": 3 }
+    },
+    {
+      "id": "STREAK_7",
+      "name": "Dedicated Learner",
+      "description": "Achieved a 7-day learning streak",
+      "icon": "flame-medium",
+      "criteria": { "streakCount": 7 }
+    },
+    {
+      "id": "STREAK_30",
+      "name": "Knowledge Seeker",
+      "description": "Achieved a 30-day learning streak",
+      "icon": "flame-large",
+      "criteria": { "streakCount": 30 }
+    },
+    {
+      "id": "DEEP_THINKER",
+      "name": "Deep Thinker",
+      "description": "Explored a topic in Deep mode",
+      "icon": "brain",
+      "criteria": { "deepLevelUsed": true }
+    },
+    {
+      "id": "QUESTION_10",
+      "name": "Question Champion",
+      "description": "Asked 10 questions",
+      "icon": "trophy",
+      "criteria": { "totalQuestions": 10 }
+    },
+    {
+      "id": "SOCRATIC_5",
+      "name": "Critical Thinker",
+      "description": "Answered 5 Socratic questions",
+      "icon": "thought-bubble",
+      "criteria": { "totalSocraticAnswers": 5 }
+    }
+  ]
+}

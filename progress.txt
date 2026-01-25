@@ -1902,3 +1902,103 @@ if (source !== 'voice' && uiState === UI_STATE.SLIDESHOW) {
 
 ### Git Commits
 - (pending): fix: allow typed follow-ups during narration
+
+---
+
+## Session 28: Socratic AI Tutoring & Gamification (2026-01-26)
+
+### Completed Features
+
+#### SOCRATIC-001/002: Socratic Question Generation & Evaluation (Backend)
+- Added `generateSocraticQuestion()` to `backend/src/services/gemini.js`
+  - Generates probing questions based on slideshow content
+  - Returns question, questionType, expectedTopics
+- Added `evaluateSocraticAnswer()` to `backend/src/services/gemini.js`
+  - Evaluates user's spoken answer with encouraging feedback
+  - Returns score (1-5), feedback, correctAspects, suggestions, followUpQuestion
+- Created `backend/src/routes/socratic.js` with endpoints:
+  - `POST /api/socratic/question` - Generate Socratic question with TTS
+  - `POST /api/socratic/evaluate` - Evaluate answer with TTS feedback
+
+#### GAMIFY-001/002: Progress Tracking System (Backend)
+- Created `backend/src/services/userProgress.js` with Firestore integration
+  - Tracks streaks (consecutive daily usage)
+  - Awards points (10 per question, 5 per Socratic answer, 15 for deep level)
+  - Unlocks badges based on criteria (CURIOUS_MIND, QUESTION_10, STREAK_3, etc.)
+- Created `backend/src/routes/user.js` with endpoints:
+  - `GET /api/user/progress` - Returns user progress and badge definitions
+  - `POST /api/user/activity` - Records activity and returns new badges
+
+#### SOCRATIC-003: Socratic UI Flow (Frontend)
+- Created `frontend/src/components/SocraticMode/` directory:
+  - `index.jsx` - Main orchestrator with state machine
+  - `SocraticQuestion.jsx` - Question display with TTS
+  - `AnswerRecorder.jsx` - Voice recording with Skip option
+  - `SocraticFeedback.jsx` - Feedback display with stars and suggestions
+- Added `UI_STATE.SOCRATIC` to state machine
+- Removed suggestions slide from `buildTopicSlides()` - suggestions now shown in Socratic feedback
+
+#### GAMIFY-003: Gamification UI (Frontend)
+- Created `frontend/src/components/StreakCounter.jsx` - Flame icon with streak count
+- Created `frontend/src/components/AchievementBadge.jsx` - Badge display component
+- Created `frontend/src/components/AchievementToast.jsx` - Toast notification for badge unlocks
+- Created `frontend/src/components/BadgeCollection.jsx` - Grid display of all badges
+- Created `frontend/src/components/Confetti.jsx` - Celebratory animation
+- Created `frontend/src/hooks/useUserProgress.js` - Progress state management
+
+#### POLISH-001: Animations & Sound Effects
+- Updated `frontend/tailwind.config.js` with new animations:
+  - `confetti-fall`, `flame-flicker`, `toast-enter/exit`, `scale-up`, `bounce-in`
+- Updated `frontend/src/utils/soundEffects.js`:
+  - Added `playAchievementSound()` - Celebratory fanfare for badge unlocks
+  - Added `playStreakSound()` - Quick double-beep for streak milestones
+
+### Known Issue: Socratic Mode Not Triggering
+
+**Status:** Socratic mode is implemented but NOT appearing after slideshow ends.
+
+**Investigation Findings:**
+1. Initial issue: `hasFinishedSlideshowRef` was a ref (not state), so changes didn't trigger re-renders
+2. Fixed by adding `slideshowFinished` state variable
+3. Second issue: `visibleSlides` in dependency array caused timer cancellation
+   - TTS audio persistence updates `topics` → new `activeTopic` → new `visibleSlides`
+   - Effect cleanup cancelled the 2-second timer before it could fire
+4. Fixed by using `visibleSlidesRef` instead of `visibleSlides` in dependency array
+
+**Still investigating** - the trigger mechanism may have additional race conditions or state issues preventing the SOCRATIC state transition.
+
+### Files Created
+- `backend/src/routes/socratic.js`
+- `backend/src/routes/user.js`
+- `backend/src/services/userProgress.js`
+- `frontend/src/components/SocraticMode/index.jsx`
+- `frontend/src/components/SocraticMode/SocraticQuestion.jsx`
+- `frontend/src/components/SocraticMode/AnswerRecorder.jsx`
+- `frontend/src/components/SocraticMode/SocraticFeedback.jsx`
+- `frontend/src/components/StreakCounter.jsx`
+- `frontend/src/components/AchievementBadge.jsx`
+- `frontend/src/components/AchievementToast.jsx`
+- `frontend/src/components/BadgeCollection.jsx`
+- `frontend/src/components/Confetti.jsx`
+- `frontend/src/hooks/useUserProgress.js`
+
+### Files Modified
+- `backend/src/index.js` - Registered new routes
+- `backend/src/services/gemini.js` - Added Socratic AI functions
+- `frontend/src/App.jsx` - Integrated all new features, SOCRATIC state, trigger logic
+- `frontend/src/utils/soundEffects.js` - Added achievement/streak sounds
+- `frontend/tailwind.config.js` - Added new colors and animations
+
+### Git Commits
+- (pending): feat: implement Socratic AI tutoring and gamification system
+
+### Context for Next Agent
+- Socratic mode components are complete and build successfully
+- Backend endpoints work and return proper responses
+- Frontend state machine has SOCRATIC state
+- **Issue:** Transition from SLIDESHOW to SOCRATIC not occurring
+- Possible causes to investigate:
+  - `slideshowFinished` state not being set to true
+  - `activeTopic` changing and cancelling the timer
+  - `questionQueue.length` not being 0
+  - Other state conditions blocking the effect

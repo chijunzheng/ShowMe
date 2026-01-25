@@ -194,6 +194,80 @@ export function playRecordingCompleteSound() {
 }
 
 /**
+ * Play the "achievement unlocked" sound.
+ * POLISH-001 T006: Celebratory fanfare for badge unlocks.
+ * A bright, ascending arpeggio with a triumphant finish.
+ */
+export function playAchievementSound() {
+  // Celebratory ascending fanfare: C5 -> E5 -> G5 -> C6
+  // Major chord arpeggio with triumphant high octave finish
+  playSequence([
+    {
+      frequency: 523.25, // C5
+      duration: 0.12,
+      volume: 0.2,
+      waveform: 'sine',
+      attackTime: 0.005,
+      releaseTime: 0.08,
+    },
+    {
+      frequency: 659.25, // E5
+      delay: 0.08,
+      duration: 0.12,
+      volume: 0.22,
+      waveform: 'sine',
+      attackTime: 0.005,
+      releaseTime: 0.08,
+    },
+    {
+      frequency: 783.99, // G5
+      delay: 0.16,
+      duration: 0.12,
+      volume: 0.24,
+      waveform: 'sine',
+      attackTime: 0.005,
+      releaseTime: 0.08,
+    },
+    {
+      frequency: 1046.50, // C6 - triumphant high note
+      delay: 0.24,
+      duration: 0.35,
+      volume: 0.28,
+      waveform: 'sine',
+      attackTime: 0.008,
+      releaseTime: 0.25,
+    },
+  ])
+}
+
+/**
+ * Play the "streak increment" sound.
+ * A quick, energetic double-beep for streak milestones.
+ */
+export function playStreakSound() {
+  // Quick double-beep with rising pitch
+  playSequence([
+    {
+      frequency: 880, // A5
+      duration: 0.08,
+      volume: 0.15,
+      waveform: 'triangle',
+      attackTime: 0.005,
+      releaseTime: 0.05,
+    },
+    {
+      frequency: 1108.73, // C#6
+      delay: 0.1,
+      duration: 0.12,
+      volume: 0.18,
+      waveform: 'triangle',
+      attackTime: 0.005,
+      releaseTime: 0.08,
+    },
+  ])
+}
+
+/**
  * Preload the audio context to reduce latency on first sound.
  * Call this on user interaction (e.g., first button click).
  */
@@ -209,5 +283,7 @@ export function preloadAudioContext() {
 export default {
   playMicOnSound,
   playRecordingCompleteSound,
+  playAchievementSound,
+  playStreakSound,
   preloadAudioContext,
 }

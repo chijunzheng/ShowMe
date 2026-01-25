@@ -11,7 +11,12 @@ import RegenerateDropdown from './components/RegenerateDropdown'
 import StreamingSubtitle from './components/StreamingSubtitle'
 import { useWebSocket, PROGRESS_TYPES } from './hooks/useWebSocket'
 import logger from './utils/logger'
-import { playMicOnSound, playRecordingCompleteSound } from './utils/soundEffects'
+import { playMicOnSound, playRecordingCompleteSound, playAchievementSound } from './utils/soundEffects'
+import SocraticMode from './components/SocraticMode'
+import StreakCounter from './components/StreakCounter'
+import AchievementToast from './components/AchievementToast'
+import Confetti from './components/Confetti'
+import useUserProgress from './hooks/useUserProgress'
 
 // App states
 const UI_STATE = {
@@ -19,6 +24,7 @@ const UI_STATE = {
   LISTENING: 'listening',
   GENERATING: 'generating',
   SLIDESHOW: 'slideshow',
+  SOCRATIC: 'socratic', // SOCRATIC-003: Socratic questioning after slideshow
   ERROR: 'error',
 }
 
@@ -966,15 +972,8 @@ function buildTopicSlides(topic) {
     slides.push(...versionSlides)
   }
 
-  // Add suggestions slide at the end if questions exist
-  if (topic.suggestedQuestions && topic.suggestedQuestions.length > 0) {
-    slides.push({
-      id: `suggestions_${topic.id}`,
-      type: 'suggestions',
-      topicId: topic.id,
-      questions: topic.suggestedQuestions,
-    })
-  }
+  // NOTE: Suggestions are now shown in SocraticFeedback instead of as a slide
+  // This allows Socratic mode to trigger after the last content slide
   return slides
 }
 
@@ -1059,6 +1058,26 @@ function App() {
     slidesReady: 0,  // Number of slides ready
     totalSlides: 0,  // Total number of slides being generated
   })
+
+  // GAMIFY-003: User progress and gamification
+  const {
+    progress: userProgress,
+    badges: badgeDefinitions,
+    newBadges,
+    clearNewBadges,
+    recordQuestionAsked,
+    recordSocraticAnswered,
+    recordDeepLevelUsed
+  } = useUserProgress()
+
+  // POLISH-001: Celebration state
+  const [showConfetti, setShowConfetti] = useState(false)
+  const [currentToastBadge, setCurrentToastBadge] = useState(null)
+
+  // SOCRATIC-003: State for Socratic mode data
+  const [socraticSlides, setSocraticSlides] = useState([])
+  const [socraticTopicName, setSocraticTopicName] = useState('')
+  const [socraticLanguage, setSocraticLanguage] = useState('en')
 
   const generationProgressPercent = useMemo(() => {
     if (!generationProgress.stage) return 0
@@ -1171,6 +1190,12 @@ function App() {
     // Only show top-level slides (no parentId) in the main horizontal flow
     return allTopicSlides.filter(s => !s.parentId)
   }, [allTopicSlides])
+
+  // Ref to track visibleSlides without triggering effect cleanup
+  const visibleSlidesRef = useRef(visibleSlides)
+  useEffect(() => {
+    visibleSlidesRef.current = visibleSlides
+  }, [visibleSlides])
 
   const activeChildSlides = useMemo(() => {
     const currentParent = visibleSlides[currentIndex]
@@ -1448,6 +1473,8 @@ function App() {
 
   // Track whether slideshow just finished (for auto-trigger of queued questions - F048)
   const hasFinishedSlideshowRef = useRef(false)
+  // State version to trigger re-renders for Socratic mode
+  const [slideshowFinished, setSlideshowFinished] = useState(false)
 
   // Voice agent queue state
   const [voiceAgentQueue, setVoiceAgentQueue] = useState([])
@@ -1529,6 +1556,27 @@ function App() {
       setLiveTranscription('')
     }
   }, [uiState, isListening])
+
+  // POLISH-001: Handle new badge unlocks with celebration
+  useEffect(() => {
+    if (newBadges && newBadges.length > 0) {
+      // Show the first badge toast
+      setCurrentToastBadge(newBadges[0])
+      setShowConfetti(true)
+      playAchievementSound()
+    }
+  }, [newBadges])
+
+  // POLISH-001: Handle toast dismissal
+  const handleToastDismiss = useCallback(() => {
+    setCurrentToastBadge(null)
+    clearNewBadges()
+  }, [clearNewBadges])
+
+  // POLISH-001: Handle confetti completion
+  const handleConfettiComplete = useCallback(() => {
+    setShowConfetti(false)
+  }, [])
 
   /**
    * Returns the currently playing audio element, if any.
@@ -2418,6 +2466,8 @@ function App() {
         if (nextIndex >= visibleSlides.length) {
           setIsPlaying(false)
           hasFinishedSlideshowRef.current = true
+          // Trigger state update outside setter for Socratic mode
+          setTimeout(() => setSlideshowFinished(true), 0)
           return prev
         }
         setCurrentChildIndex(null) // Reset child index when moving to next parent
@@ -2767,6 +2817,8 @@ function App() {
               if (nextIndex >= visibleSlides.length) {
                 setIsPlaying(false)
                 hasFinishedSlideshowRef.current = true
+                // Trigger state update outside setter for Socratic mode
+                setTimeout(() => setSlideshowFinished(true), 0)
                 return prev
               }
               setCurrentChildIndex(null)
@@ -2840,8 +2892,9 @@ function App() {
       // Remove it from the queue
       setQuestionQueue((prev) => prev.slice(1))
 
-      // Reset the flag
+      // Reset the flags
       hasFinishedSlideshowRef.current = false
+      setSlideshowFinished(false)
 
       // Trigger the question
       const runHandleQuestion = handleQuestionRef.current
@@ -2852,6 +2905,74 @@ function App() {
 
     return () => clearTimeout(timer)
   }, [questionQueue])
+
+  // SOCRATIC-003: Trigger Socratic mode when slideshow finishes (no queued questions)
+  useEffect(() => {
+    // Only trigger when slideshow just finished and NO queued questions
+    if (!slideshowFinished || questionQueue.length > 0) {
+      return
+    }
+
+    // Don't trigger if we don't have an active topic
+    if (!activeTopic) {
+      return
+    }
+
+    // Use ref to avoid timer cancellation when visibleSlides updates from TTS persistence
+    const slides = visibleSlidesRef.current
+    if (!slides || slides.length === 0) {
+      return
+    }
+
+    // Delay before transitioning to Socratic mode
+    const timer = setTimeout(() => {
+      // Prepare Socratic mode data (use ref for latest slides)
+      const currentSlides = visibleSlidesRef.current
+      if (!currentSlides || currentSlides.length === 0) return
+
+      const contentSlides = currentSlides.filter(s => s.type !== 'header')
+      if (contentSlides.length > 0) {
+        setSocraticSlides(contentSlides)
+        setSocraticTopicName(activeTopic.name || 'this topic')
+        // Detect language from first slide subtitle
+        const firstSubtitle = contentSlides[0]?.subtitle || ''
+        const hasChineseChars = /[\u4e00-\u9fff]/.test(firstSubtitle)
+        setSocraticLanguage(hasChineseChars ? 'zh' : 'en')
+
+        // Reset flags and transition to Socratic mode
+        hasFinishedSlideshowRef.current = false
+        setSlideshowFinished(false)
+        setUiState(UI_STATE.SOCRATIC)
+      }
+    }, 2000) // 2 second delay to let user absorb final slide
+
+    return () => clearTimeout(timer)
+  }, [slideshowFinished, questionQueue, activeTopic]) // Removed visibleSlides - using ref instead
+
+  // SOCRATIC-003: Handle Socratic mode completion
+  const handleSocraticComplete = useCallback(() => {
+    setUiState(UI_STATE.HOME)
+    setSocraticSlides([])
+  }, [])
+
+  // SOCRATIC-003: Handle Socratic skip
+  const handleSocraticSkip = useCallback(() => {
+    setUiState(UI_STATE.HOME)
+    setSocraticSlides([])
+  }, [])
+
+  // SOCRATIC-003: Handle follow-up from Socratic feedback
+  const handleSocraticFollowUp = useCallback((question) => {
+    setUiState(UI_STATE.LISTENING)
+    setSocraticSlides([])
+    // Record Socratic answer for gamification
+    recordSocraticAnswered()
+    // Trigger the follow-up question
+    const runHandleQuestion = handleQuestionRef.current
+    if (runHandleQuestion) {
+      runHandleQuestion(question)
+    }
+  }, [recordSocraticAnswered])
 
   /**
    * Analyzes audio frequency data to calculate overall audio level.
@@ -3782,14 +3903,18 @@ function App() {
       currentQueryRef.current = trimmedQuery // Store query for TTS-driven fun fact refresh
       setIsColdStart(false)
       setUiState(UI_STATE.GENERATING)
+
+      // GAMIFY-003: Record activity for gamification
+      recordQuestionAsked()
       setIsStillWorking(false)
       setIsPreparingFollowUp(false)
       setIsSlideRevealPending(false)
       enqueueVoiceAgentMessage(VOICE_AGENT_SCRIPT.GENERATION_START, { priority: 'high' })
       // F015: Reset generation progress for new query
       setGenerationProgress({ stage: null, message: '', slidesReady: 0, totalSlides: 0 })
-      // Reset the slideshow finished flag when starting new generation
+      // Reset the slideshow finished flags when starting new generation
       hasFinishedSlideshowRef.current = false
+      setSlideshowFinished(false)
 
       // Start "Still working..." timer (F053)
       stillWorkingTimerRef.current = setTimeout(() => {
@@ -4615,6 +4740,15 @@ function App() {
   return (
     // F055, F056, F058: Responsive container with sidebar layout on desktop
     <div className="h-screen flex overflow-hidden">
+      {/* GAMIFY-003: Streak counter in top-right corner (T002) */}
+      <div className="fixed top-4 right-4 z-40">
+        <StreakCounter streakCount={userProgress?.streakCount || 0} />
+      </div>
+
+      {/* POLISH-001: Achievement celebration components */}
+      <Confetti isActive={showConfetti} onComplete={handleConfettiComplete} />
+      <AchievementToast badge={currentToastBadge} onDismiss={handleToastDismiss} />
+
       {/* CORE016, CORE017: Topic sidebar - hidden when no topics, visible on desktop, hamburger on mobile */}
       <TopicSidebar
         topics={topics}
@@ -4664,6 +4798,10 @@ function App() {
                     onClick={() => {
                       playMicOnSound()
                       setSelectedLevel(level)
+                      // GAMIFY-003: Track deep level usage for badge
+                      if (level === EXPLANATION_LEVEL.DEEP) {
+                        recordDeepLevelUsed()
+                      }
                       setShowTextFallback(false)
                       setIsMicEnabled(true)
                       setAllowAutoListen(true)
@@ -4914,6 +5052,19 @@ function App() {
               Ask a different question
             </button>
           </div>
+        )}
+
+        {/* SOCRATIC-003: Socratic questioning mode after slideshow */}
+        {uiState === UI_STATE.SOCRATIC && socraticSlides.length > 0 && (
+          <SocraticMode
+            slides={socraticSlides}
+            topicName={socraticTopicName}
+            language={socraticLanguage}
+            suggestedQuestions={activeTopic?.suggestedQuestions || []}
+            onComplete={handleSocraticComplete}
+            onFollowUp={handleSocraticFollowUp}
+            onSkip={handleSocraticSkip}
+          />
         )}
 
         {/* Loading screen for historical topic TTS */}

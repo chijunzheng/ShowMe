@@ -150,6 +150,8 @@ import topicRoutes from './routes/topic.js'
 import voiceRoutes from './routes/voice.js'
 import chitchatRoutes from './routes/chitchat.js'
 import slidesRoutes from './routes/slides.js'
+import socraticRoutes from './routes/socratic.js'
+import userRoutes from './routes/user.js'
 
 app.use('/api/generate', generateRoutes)
 app.use('/api/classify', classifyRoutes)
@@ -159,6 +161,8 @@ app.use('/api/topic', topicRoutes)
 app.use('/api/voice', voiceRoutes)
 app.use('/api/chitchat', chitchatRoutes)
 app.use('/api/slides', slidesRoutes)
+app.use('/api/socratic', socraticRoutes)
+app.use('/api/user', userRoutes)
 
 // Serve frontend static files in production
 if (process.env.NODE_ENV === 'production') {

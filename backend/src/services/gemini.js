@@ -1684,6 +1684,204 @@ Example: ["How do black holes work?", "Why do we dream?", "How does WiFi work?"]
   }
 }
 
+/**
+ * Generate a Socratic question based on slideshow content
+ * SOCRATIC-001: Probing questions to deepen understanding
+ *
+ * @param {Object} params - Parameters for question generation
+ * @param {Array} params.slides - The generated slides with script and imageUrl
+ * @param {string} params.topicName - The topic being explored
+ * @param {string} params.language - Language code: 'en' or 'zh'
+ * @returns {Promise<{question: string, questionType: string, expectedTopics: string[], error: string|null}>}
+ */
+export async function generateSocraticQuestion(params) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { question: null, questionType: null, expectedTopics: null, error: 'API_NOT_AVAILABLE' }
+  }
+
+  const { slides = [], topicName = '', language = 'en' } = params
+
+  // Build context from slides
+  const slideContext = slides
+    .map((slide, i) => `Slide ${i + 1}: ${slide.subtitle || slide.script || ''}`)
+    .join('\n')
+
+  const languageInstruction = language === 'zh'
+    ? 'Generate the question and all text in Simplified Chinese (简体中文).'
+    : 'Generate the question and all text in English.'
+
+  const prompt = `You are a Socratic tutor helping students think deeply about what they've learned.
+
+The student just watched a slideshow about "${topicName}":
+${slideContext}
+
+${languageInstruction}
+
+Generate ONE thought-provoking question that:
+1. Encourages the student to think critically about the content
+2. Cannot be answered by simply repeating what was shown
+3. Connects the topic to real-world applications or deeper understanding
+
+Question types:
+- comprehension: Tests understanding of core concepts
+- application: Asks how to apply the knowledge
+- analysis: Asks to break down or compare aspects
+- prediction: Asks what would happen in a scenario
+
+Output Format (JSON):
+{
+  "question": "Your thought-provoking question here?",
+  "questionType": "comprehension|application|analysis|prediction",
+  "expectedTopics": ["concept1", "concept2", "concept3"]
+}
+
+The expectedTopics should list 2-4 key concepts that a good answer should mention.`
+
+  try {
+    const response = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.7,
+        maxOutputTokens: 256,
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    const validTypes = ['comprehension', 'application', 'analysis', 'prediction']
+    const questionType = validTypes.includes(parsed.questionType) ? parsed.questionType : 'comprehension'
+
+    return {
+      question: parsed.question || null,
+      questionType,
+      expectedTopics: Array.isArray(parsed.expectedTopics) ? parsed.expectedTopics : [],
+      error: parsed.question ? null : 'EMPTY_RESPONSE'
+    }
+  } catch (error) {
+    console.error('[Gemini] Socratic question generation error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { question: null, questionType: null, expectedTopics: null, error: 'RATE_LIMITED' }
+    }
+
+    return { question: null, questionType: null, expectedTopics: null, error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
+ * Evaluate a user's answer to a Socratic question
+ * SOCRATIC-002: Encouraging feedback with scoring
+ *
+ * @param {Object} params - Parameters for evaluation
+ * @param {string} params.answer - User's transcribed answer
+ * @param {string} params.question - The original Socratic question
+ * @param {string[]} params.expectedTopics - Expected concepts from question generation
+ * @param {Object} params.slideContext - The slide content for context
+ * @param {string} params.language - Language code: 'en' or 'zh'
+ * @returns {Promise<{feedback: string, score: number, correctAspects: string[], suggestions: string[], followUpQuestion: string|null, error: string|null}>}
+ */
+export async function evaluateSocraticAnswer(params) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { feedback: null, score: null, correctAspects: null, suggestions: null, followUpQuestion: null, error: 'API_NOT_AVAILABLE' }
+  }
+
+  const { answer = '', question = '', expectedTopics = [], slideContext = {}, language = 'en' } = params
+
+  // Handle empty answer
+  if (!answer || answer.trim().length === 0) {
+    const emptyResponse = language === 'zh'
+      ? '没关系！想一想刚才学到的内容，再试一次吧。你可以从最让你印象深刻的部分开始说起。'
+      : "That's okay! Take a moment to think about what you just learned, and give it another try. Start with whatever part stood out to you most."
+
+    return {
+      feedback: emptyResponse,
+      score: 1,
+      correctAspects: [],
+      suggestions: [],
+      followUpQuestion: null,
+      error: null
+    }
+  }
+
+  const languageInstruction = language === 'zh'
+    ? 'Generate all feedback and text in Simplified Chinese (简体中文). Be warm and encouraging.'
+    : 'Generate all feedback and text in English. Be warm and encouraging.'
+
+  const slideContextStr = typeof slideContext === 'object'
+    ? JSON.stringify(slideContext)
+    : slideContext
+
+  const prompt = `You are an encouraging Socratic tutor evaluating a student's answer.
+
+Question asked: "${question}"
+Expected topics/concepts: ${expectedTopics.join(', ')}
+Slide context: ${slideContextStr}
+
+Student's answer: "${answer}"
+
+${languageInstruction}
+
+Evaluate the answer and provide:
+1. Encouraging feedback (2-3 sentences) - focus on what they got right first
+2. Score from 1-5 (1=needs work, 3=good understanding, 5=excellent)
+3. What aspects they got correct
+4. Gentle suggestions for improvement (if any)
+5. Optional follow-up question for deeper exploration (only if score >= 3)
+
+TONE: Be warm, supportive, and celebratory for good answers. Never be critical or discouraging.
+
+Output Format (JSON):
+{
+  "feedback": "Your encouraging feedback here",
+  "score": 3,
+  "correctAspects": ["aspect1", "aspect2"],
+  "suggestions": ["suggestion1"],
+  "followUpQuestion": "Optional deeper question?" or null
+}`
+
+  try {
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.6,
+        maxOutputTokens: 512,
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    // Validate score is in range
+    let score = parseInt(parsed.score, 10)
+    if (isNaN(score) || score < 1) score = 1
+    if (score > 5) score = 5
+
+    return {
+      feedback: parsed.feedback || 'Great effort! Keep exploring.',
+      score,
+      correctAspects: Array.isArray(parsed.correctAspects) ? parsed.correctAspects : [],
+      suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+      followUpQuestion: parsed.followUpQuestion || null,
+      error: null
+    }
+  } catch (error) {
+    console.error('[Gemini] Socratic evaluation error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { feedback: null, score: null, correctAspects: null, suggestions: null, followUpQuestion: null, error: 'RATE_LIMITED' }
+    }
+
+    return { feedback: null, score: null, correctAspects: null, suggestions: null, followUpQuestion: null, error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
 export default {
   isGeminiAvailable,
   generateScript,
@@ -1699,4 +1897,6 @@ export default {
   generateSuggestedQuestions,
   determineQueryComplexity,
   determineSemanticRelation,
+  generateSocraticQuestion,
+  evaluateSocraticAnswer,
 }
