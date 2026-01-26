@@ -161,6 +161,7 @@ export default function SocraticMode({
         score: 3,
         correctAspects: [],
         suggestions: [],
+        correctAnswer: null,
         followUpQuestion: null
       })
       setState(SOCRATIC_STATE.SHOWING_FEEDBACK)
@@ -236,6 +237,7 @@ export default function SocraticMode({
           score={feedback.score}
           correctAspects={feedback.correctAspects}
           suggestions={feedback.suggestions}
+          correctAnswer={feedback.correctAnswer}
           followUpQuestion={feedback.followUpQuestion}
           audioUrl={feedback.audioUrl}
           suggestedQuestions={suggestedQuestions}

@@ -16,6 +16,9 @@ import SocraticMode from './components/SocraticMode'
 import StreakCounter from './components/StreakCounter'
 import AchievementToast from './components/AchievementToast'
 import Confetti from './components/Confetti'
+import XPPopup from './components/XPPopup'
+import LevelUpModal from './components/LevelUpModal'
+import LevelProgress from './components/LevelProgress'
 import useUserProgress from './hooks/useUserProgress'
 
 // App states
@@ -1063,9 +1066,14 @@ function App() {
   // GAMIFY-003: User progress and gamification
   const {
     progress: userProgress,
+    levelInfo,
     badges: badgeDefinitions,
     newBadges,
+    xpEarned,
+    leveledUp,
     clearNewBadges,
+    clearXpEarned,
+    clearLeveledUp,
     recordQuestionAsked,
     recordSocraticAnswered,
     recordDeepLevelUsed
@@ -1074,6 +1082,7 @@ function App() {
   // POLISH-001: Celebration state
   const [showConfetti, setShowConfetti] = useState(false)
   const [currentToastBadge, setCurrentToastBadge] = useState(null)
+  const [showLevelUpModal, setShowLevelUpModal] = useState(false)
 
   // SOCRATIC-003: State for Socratic mode data
   const [socraticSlides, setSocraticSlides] = useState([])
@@ -1577,6 +1586,19 @@ function App() {
       playAchievementSound()
     }
   }, [newBadges])
+
+  // v2.0: Handle level up celebration
+  useEffect(() => {
+    if (leveledUp && levelInfo) {
+      setShowLevelUpModal(true)
+    }
+  }, [leveledUp, levelInfo])
+
+  // v2.0: Handle level up modal close
+  const handleLevelUpModalClose = useCallback(() => {
+    setShowLevelUpModal(false)
+    clearLeveledUp()
+  }, [clearLeveledUp])
 
   // POLISH-001: Handle toast dismissal
   const handleToastDismiss = useCallback(() => {
@@ -4806,14 +4828,25 @@ function App() {
   return (
     // F055, F056, F058: Responsive container with sidebar layout on desktop
     <div className="h-screen flex overflow-hidden">
-      {/* GAMIFY-003: Streak counter in top-right corner (T002) */}
-      <div className="fixed top-4 right-4 z-40">
+      {/* v2.0: Stats bar in top-right corner */}
+      <div className="fixed top-4 right-4 z-40 flex items-center gap-3">
+        {/* Level progress */}
+        <LevelProgress levelInfo={levelInfo} compact />
+        {/* Streak counter */}
         <StreakCounter streakCount={userProgress?.streakCount || 0} />
       </div>
 
       {/* POLISH-001: Achievement celebration components */}
       <Confetti isActive={showConfetti} onComplete={handleConfettiComplete} />
       <AchievementToast badge={currentToastBadge} onDismiss={handleToastDismiss} />
+
+      {/* v2.0: XP and Level notifications */}
+      <XPPopup xpEarned={xpEarned} onComplete={clearXpEarned} />
+      <LevelUpModal
+        levelInfo={levelInfo}
+        isOpen={showLevelUpModal}
+        onClose={handleLevelUpModalClose}
+      />
 
       {/* CORE016, CORE017: Topic sidebar - hidden when no topics, visible on desktop, hamburger on mobile */}
       <TopicSidebar

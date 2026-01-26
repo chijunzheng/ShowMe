@@ -1,6 +1,7 @@
 /**
  * StreakCounter Component
  * GAMIFY-003: Displays flame icon with streak number
+ * v2.0: Added streak freeze indicator
  * T001: Displays flame icon with streak number
  * T002: Positioned top-right corner
  * T003: Shows 0 for new users
@@ -9,9 +10,17 @@
 
 import { useState, useEffect } from 'react'
 
-export default function StreakCounter({ streakCount = 0, className = '' }) {
+export default function StreakCounter({
+  streakCount = 0,
+  streakFreezeAvailable = 0,
+  canRecover = false,
+  onFreezeClick,
+  onRecoverClick,
+  className = ''
+}) {
   const [isAnimating, setIsAnimating] = useState(false)
   const [prevCount, setPrevCount] = useState(streakCount)
+  const [showTooltip, setShowTooltip] = useState(false)
 
   // Detect when streak increments (T004)
   useEffect(() => {
@@ -40,11 +49,19 @@ export default function StreakCounter({ streakCount = 0, className = '' }) {
   return (
     <div
       className={`
-        flex items-center gap-1.5 px-3 py-1.5 rounded-full
+        relative flex items-center gap-1.5 px-3 py-1.5 rounded-full
         bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm
         shadow-md border border-gray-100 dark:border-slate-700
+        cursor-pointer
         ${className}
       `}
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+      onClick={() => {
+        if (canRecover && onRecoverClick) {
+          onRecoverClick()
+        }
+      }}
     >
       {/* Flame icon with gradient and flicker animation */}
       <div
@@ -88,6 +105,37 @@ export default function StreakCounter({ streakCount = 0, className = '' }) {
       >
         {streakCount}
       </span>
+
+      {/* Streak freeze indicator */}
+      {streakFreezeAvailable > 0 && (
+        <div
+          className="absolute -top-1 -right-1 w-4 h-4 bg-cyan-500 rounded-full flex items-center justify-center text-[10px] text-white font-bold shadow-sm"
+          title="Streak freeze available"
+        >
+          <span>*</span>
+        </div>
+      )}
+
+      {/* Recovery indicator */}
+      {canRecover && (
+        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-amber-500 rounded-full text-[8px] text-white font-bold shadow-sm whitespace-nowrap">
+          Recover!
+        </div>
+      )}
+
+      {/* Tooltip */}
+      {showTooltip && (
+        <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg shadow-lg whitespace-nowrap z-50">
+          <div className="font-semibold mb-1">{streakCount} day streak</div>
+          {streakFreezeAvailable > 0 && (
+            <div className="text-cyan-300">{streakFreezeAvailable} freeze available</div>
+          )}
+          {canRecover && (
+            <div className="text-amber-300">Click to recover (50 XP)</div>
+          )}
+          <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-900 rotate-45" />
+        </div>
+      )}
     </div>
   )
 }

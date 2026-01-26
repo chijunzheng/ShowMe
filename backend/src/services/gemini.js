@@ -1782,12 +1782,12 @@ The expectedTopics should list 2-4 key concepts that a good answer should mentio
  * @param {string[]} params.expectedTopics - Expected concepts from question generation
  * @param {Object} params.slideContext - The slide content for context
  * @param {string} params.language - Language code: 'en' or 'zh'
- * @returns {Promise<{feedback: string, score: number, correctAspects: string[], suggestions: string[], followUpQuestion: string|null, error: string|null}>}
+ * @returns {Promise<{feedback: string, score: number, correctAspects: string[], suggestions: string[], correctAnswer: string|null, followUpQuestion: string|null, error: string|null}>}
  */
 export async function evaluateSocraticAnswer(params) {
   const ai = getAIClient()
   if (!ai) {
-    return { feedback: null, score: null, correctAspects: null, suggestions: null, followUpQuestion: null, error: 'API_NOT_AVAILABLE' }
+    return { feedback: null, score: null, correctAspects: null, suggestions: null, correctAnswer: null, followUpQuestion: null, error: 'API_NOT_AVAILABLE' }
   }
 
   const { answer = '', question = '', expectedTopics = [], slideContext = {}, language = 'en' } = params
@@ -1827,13 +1827,16 @@ Student's answer: "${answer}"
 ${languageInstruction}
 
 Evaluate the answer and provide:
-1. Encouraging feedback (2-3 sentences) - focus on what they got right first
+1. Encouraging feedback (2-3 sentences) - acknowledge what they got right, then gently correct any misconceptions
 2. Score from 1-5 (1=needs work, 3=good understanding, 5=excellent)
 3. What aspects they got correct
 4. Gentle suggestions for improvement (if any)
-5. Optional follow-up question for deeper exploration (only if score >= 3)
+5. The correct/complete answer - ALWAYS provide this, especially if score < 4. Explain the concept clearly so they learn the right information.
+6. Optional follow-up question for deeper exploration (only if score >= 3)
 
-TONE: Be warm, supportive, and celebratory for good answers. Never be critical or discouraging.
+TONE: Be warm, supportive, and educational. When the answer is incomplete or incorrect, gently explain the correct answer so the student learns. Never just say "try again" without teaching.
+
+IMPORTANT: The "correctAnswer" field is REQUIRED. It should explain the concept clearly and completely, even if the student got it mostly right. This helps reinforce learning.
 
 Output Format (JSON):
 {
@@ -1841,6 +1844,7 @@ Output Format (JSON):
   "score": 3,
   "correctAspects": ["aspect1", "aspect2"],
   "suggestions": ["suggestion1"],
+  "correctAnswer": "The complete, accurate explanation of the concept...",
   "followUpQuestion": "Optional deeper question?" or null
 }`
 
@@ -1850,7 +1854,7 @@ Output Format (JSON):
       contents: prompt,
       config: {
         temperature: 0.6,
-        maxOutputTokens: 512,
+        maxOutputTokens: 1024,
       }
     })
 
@@ -1868,6 +1872,7 @@ Output Format (JSON):
       score,
       correctAspects: Array.isArray(parsed.correctAspects) ? parsed.correctAspects : [],
       suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+      correctAnswer: parsed.correctAnswer || null,
       followUpQuestion: parsed.followUpQuestion || null,
       error: null
     }
@@ -1875,10 +1880,10 @@ Output Format (JSON):
     console.error('[Gemini] Socratic evaluation error:', error.message)
 
     if (error.message?.includes('quota') || error.message?.includes('rate')) {
-      return { feedback: null, score: null, correctAspects: null, suggestions: null, followUpQuestion: null, error: 'RATE_LIMITED' }
+      return { feedback: null, score: null, correctAspects: null, suggestions: null, correctAnswer: null, followUpQuestion: null, error: 'RATE_LIMITED' }
     }
 
-    return { feedback: null, score: null, correctAspects: null, suggestions: null, followUpQuestion: null, error: error.message || 'UNKNOWN_ERROR' }
+    return { feedback: null, score: null, correctAspects: null, suggestions: null, correctAnswer: null, followUpQuestion: null, error: error.message || 'UNKNOWN_ERROR' }
   }
 }
 

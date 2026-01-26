@@ -32,6 +32,7 @@ export default function SocraticFeedback({
   score,
   correctAspects = [],
   suggestions = [],
+  correctAnswer,
   followUpQuestion,
   audioUrl,
   suggestedQuestions = [],
@@ -100,6 +101,18 @@ export default function SocraticFeedback({
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {/* Correct Answer - always show for educational value */}
+        {correctAnswer && (
+          <div className={`mb-4 p-4 rounded-xl ${score < 4 ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800' : 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'}`}>
+            <h4 className={`text-sm font-semibold mb-2 flex items-center gap-2 ${score < 4 ? 'text-amber-700 dark:text-amber-400' : 'text-green-700 dark:text-green-400'}`}>
+              <span>{score < 4 ? '📚' : '✨'}</span> {score < 4 ? 'Here\'s the complete answer:' : 'Great understanding! Here\'s a summary:'}
+            </h4>
+            <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
+              {correctAnswer}
+            </p>
           </div>
         )}
 
