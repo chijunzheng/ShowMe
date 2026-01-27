@@ -1331,3 +1331,27 @@ body: JSON.stringify({ slides: sanitizedSlides, topicName, language })
 ```
 
 **Result:** Socratic question generation succeeds without 413 errors.
+
+---
+
+## Session 12: 2026-01-27
+
+### Issue 1: World View Fails to Load (500 on /api/world)
+
+**Symptoms:**
+- World tab shows "Failed to fetch world state"
+- Network: `GET /api/world?clientId=...` returns 500
+- Backend logs: `Failed to get world state` with `5 NOT_FOUND`
+
+**Root Cause:**
+1. Firestore returned `NOT_FOUND` (project/database not provisioned or credentials invalid).
+2. Home stats hook used a non-existent endpoint (`/api/world/state`), causing 404s.
+
+**Fix Applied:**
+- `backend/src/services/worldState.js`
+  - Added a dev-only local in-memory world store fallback when Firestore returns NOT_FOUND/permission/credential errors.
+  - Centralized load/save to use the fallback without crashing the endpoint.
+- `frontend/src/hooks/useWorldStats.js`
+  - Updated to call `/api/world` and read `worldState` from response.
+
+**Result:** World view loads with default data in dev even without Firestore, and home stats no longer hit a 404.

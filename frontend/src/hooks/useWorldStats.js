@@ -132,7 +132,7 @@ export default function useWorldStats(clientId) {
       setError(null)
 
       const response = await fetch(
-        `${API_BASE}/api/world/state?clientId=${encodeURIComponent(clientId)}`
+        `${API_BASE}/api/world?clientId=${encodeURIComponent(clientId)}`
       )
 
       if (!response.ok) {
@@ -140,11 +140,12 @@ export default function useWorldStats(clientId) {
       }
 
       const data = await response.json()
+      const worldState = data.worldState || {}
 
       if (!isMountedRef.current) return
 
-      const pieceCount = data.pieces?.length || 0
-      const tier = data.tier || calculateTier(pieceCount)
+      const pieceCount = worldState.pieces?.length || 0
+      const tier = worldState.tier || calculateTier(pieceCount)
       const tierConfig = TIER_CONFIG[tier]
       const xpProgress = calculateXPProgress(pieceCount, tier)
       const totalXP = pieceCount * tierConfig.xpPerPiece
@@ -155,7 +156,7 @@ export default function useWorldStats(clientId) {
         tierConfig,
         xpProgress,
         pieceCount,
-        pieces: data.pieces || [],
+        pieces: worldState.pieces || [],
       })
     } catch (err) {
       if (!isMountedRef.current) return

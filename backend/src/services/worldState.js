@@ -32,6 +32,9 @@ import logger from '../utils/logger.js'
 
 // Initialize Firestore
 let db = null
+let firestoreUnavailable = false
+let warnedLocalFallback = false
+const localWorldState = new Map()
 
 function getFirestore() {
   if (db) return db
@@ -45,6 +48,31 @@ function getFirestore() {
   } catch (error) {
     logger.error('WORLD', 'Failed to connect to Firestore', { error: error.message })
     return null
+  }
+}
+
+function shouldUseLocalWorld() {
+  if (process.env.SHOWME_LOCAL_WORLD === '1') return true
+  if (process.env.NODE_ENV === 'production') return false
+  return firestoreUnavailable
+}
+
+function isFirestoreUnavailableError(error) {
+  if (!error) return false
+  if (typeof error.code === 'number' && [5, 7, 16].includes(error.code)) return true
+  const message = String(error.message || '')
+  return /NOT_FOUND|PERMISSION_DENIED|UNAUTHENTICATED|credentials|default credentials/i.test(message)
+}
+
+function markFirestoreUnavailable(error) {
+  if (process.env.NODE_ENV === 'production') return
+  if (!isFirestoreUnavailableError(error)) return
+  if (!firestoreUnavailable) {
+    firestoreUnavailable = true
+  }
+  if (!warnedLocalFallback) {
+    warnedLocalFallback = true
+    logger.warn('WORLD', 'Falling back to local world store', { error: error?.message })
   }
 }
 
@@ -178,40 +206,45 @@ function createDefaultWorldState(clientId) {
   }
 }
 
-/**
- * Initialize a new world state for a user
- * Creates a new world state document in Firestore
- * @param {string} clientId
- * @returns {Promise<{ worldState: Object | null, error: string | null }>}
- */
-export async function initializeWorldState(clientId) {
-  const firestore = getFirestore()
-  if (!firestore) {
-    return { worldState: null, error: 'FIRESTORE_NOT_AVAILABLE' }
+function getLocalWorldState(clientId) {
+  if (localWorldState.has(clientId)) {
+    return localWorldState.get(clientId)
   }
+  const worldState = createDefaultWorldState(clientId)
+  localWorldState.set(clientId, worldState)
+  return worldState
+}
 
-  try {
-    const worldState = createDefaultWorldState(clientId)
-    const docRef = firestore.collection(COLLECTION_NAME).doc(clientId)
-    await docRef.set(worldState)
+function setLocalWorldState(clientId, worldState) {
+  localWorldState.set(clientId, worldState)
+}
 
-    logger.info('WORLD', 'World state initialized', { clientId, tier: worldState.tier })
-
-    return { worldState, error: null }
-  } catch (error) {
-    logger.error('WORLD', 'Failed to initialize world state', { clientId, error: error.message })
-    return { worldState: null, error: error.message }
+function normalizeWorldState(data) {
+  if (!data || typeof data !== 'object') {
+    return data
+  }
+  return {
+    ...data,
+    createdAt: data.createdAt?.toDate?.() || data.createdAt,
+    updatedAt: data.updatedAt?.toDate?.() || data.updatedAt,
+    pieces: (data.pieces || []).map(piece => ({
+      ...piece,
+      unlockedAt: piece.unlockedAt?.toDate?.() || piece.unlockedAt
+    }))
   }
 }
 
-/**
- * Get world state for a user, creating a default one if it doesn't exist
- * @param {string} clientId
- * @returns {Promise<{ worldState: Object | null, error: string | null }>}
- */
-export async function getWorldState(clientId) {
+async function loadWorldState(clientId) {
+  if (shouldUseLocalWorld()) {
+    return { worldState: getLocalWorldState(clientId), error: null }
+  }
+
   const firestore = getFirestore()
   if (!firestore) {
+    if (process.env.NODE_ENV !== 'production') {
+      firestoreUnavailable = true
+      return { worldState: getLocalWorldState(clientId), error: null }
+    }
     return { worldState: null, error: 'FIRESTORE_NOT_AVAILABLE' }
   }
 
@@ -220,29 +253,83 @@ export async function getWorldState(clientId) {
     const doc = await docRef.get()
 
     if (!doc.exists) {
-      // Return default world state for new users (create it lazily)
       return { worldState: createDefaultWorldState(clientId), error: null }
     }
 
     const data = doc.data()
-
-    // Convert Firestore timestamps to JS Dates
-    return {
-      worldState: {
-        ...data,
-        createdAt: data.createdAt?.toDate?.() || data.createdAt,
-        updatedAt: data.updatedAt?.toDate?.() || data.updatedAt,
-        pieces: (data.pieces || []).map(piece => ({
-          ...piece,
-          unlockedAt: piece.unlockedAt?.toDate?.() || piece.unlockedAt
-        }))
-      },
-      error: null
-    }
+    return { worldState: normalizeWorldState(data), error: null }
   } catch (error) {
-    logger.error('WORLD', 'Failed to get world state', { clientId, error: error.message })
+    markFirestoreUnavailable(error)
+    if (shouldUseLocalWorld()) {
+      return { worldState: getLocalWorldState(clientId), error: null }
+    }
     return { worldState: null, error: error.message }
   }
+}
+
+async function persistWorldState(clientId, worldState) {
+  if (shouldUseLocalWorld()) {
+    setLocalWorldState(clientId, worldState)
+    return { error: null }
+  }
+
+  const firestore = getFirestore()
+  if (!firestore) {
+    if (process.env.NODE_ENV !== 'production') {
+      firestoreUnavailable = true
+      setLocalWorldState(clientId, worldState)
+      return { error: null }
+    }
+    return { error: 'FIRESTORE_NOT_AVAILABLE' }
+  }
+
+  try {
+    const docRef = firestore.collection(COLLECTION_NAME).doc(clientId)
+    await docRef.set(worldState)
+    return { error: null }
+  } catch (error) {
+    markFirestoreUnavailable(error)
+    if (shouldUseLocalWorld()) {
+      setLocalWorldState(clientId, worldState)
+      return { error: null }
+    }
+    return { error: error.message }
+  }
+}
+
+/**
+ * Initialize a new world state for a user
+ * Creates a new world state document in Firestore
+ * @param {string} clientId
+ * @returns {Promise<{ worldState: Object | null, error: string | null }>}
+ */
+export async function initializeWorldState(clientId) {
+  const worldState = createDefaultWorldState(clientId)
+  const result = await persistWorldState(clientId, worldState)
+
+  if (result.error) {
+    logger.error('WORLD', 'Failed to initialize world state', { clientId, error: result.error })
+    return { worldState: null, error: result.error }
+  }
+
+  logger.info('WORLD', 'World state initialized', { clientId, tier: worldState.tier })
+
+  return { worldState, error: null }
+}
+
+/**
+ * Get world state for a user, creating a default one if it doesn't exist
+ * @param {string} clientId
+ * @returns {Promise<{ worldState: Object | null, error: string | null }>}
+ */
+export async function getWorldState(clientId) {
+  const result = await loadWorldState(clientId)
+  if (result.error) {
+    logger.error('WORLD', 'Failed to get world state', { clientId, error: result.error })
+    return { worldState: null, error: result.error }
+  }
+
+  return { worldState: result.worldState, error: null }
 }
 
 /**
@@ -259,22 +346,13 @@ export async function getWorldState(clientId) {
  * @returns {Promise<{ worldState: Object | null, arcaneJustUnlocked: boolean, error: string | null }>}
  */
 export async function addWorldPiece(clientId, piece) {
-  const firestore = getFirestore()
-  if (!firestore) {
-    return { worldState: null, arcaneJustUnlocked: false, error: 'FIRESTORE_NOT_AVAILABLE' }
+  const loadResult = await loadWorldState(clientId)
+  if (loadResult.error) {
+    return { worldState: null, arcaneJustUnlocked: false, error: loadResult.error }
   }
 
   try {
-    const docRef = firestore.collection(COLLECTION_NAME).doc(clientId)
-    const doc = await docRef.get()
-
-    let worldState
-    if (!doc.exists) {
-      // Create new world state if it doesn't exist
-      worldState = createDefaultWorldState(clientId)
-    } else {
-      worldState = doc.data()
-    }
+    let worldState = loadResult.worldState || createDefaultWorldState(clientId)
 
     // Validate piece zone
     const validZones = ['nature', 'civilization', 'arcane']
@@ -305,7 +383,10 @@ export async function addWorldPiece(clientId, piece) {
       logger.info('WORLD', 'Arcane zone unlocked', { clientId, topicsCompleted: worldState.topicsCompleted })
     }
 
-    await docRef.set(worldState)
+    const persistResult = await persistWorldState(clientId, worldState)
+    if (persistResult.error) {
+      return { worldState: null, arcaneJustUnlocked: false, error: persistResult.error }
+    }
 
     logger.info('WORLD', 'World piece added', {
       clientId,
@@ -329,26 +410,17 @@ export async function addWorldPiece(clientId, piece) {
  * @returns {Promise<{ worldState: Object | null, tierUpgrade: Object | null, error: string | null }>}
  */
 export async function addXP(clientId, amount) {
-  const firestore = getFirestore()
-  if (!firestore) {
-    return { worldState: null, tierUpgrade: null, error: 'FIRESTORE_NOT_AVAILABLE' }
-  }
-
   if (typeof amount !== 'number' || amount < 0) {
     return { worldState: null, tierUpgrade: null, error: 'XP amount must be a non-negative number' }
   }
 
-  try {
-    const docRef = firestore.collection(COLLECTION_NAME).doc(clientId)
-    const doc = await docRef.get()
+  const loadResult = await loadWorldState(clientId)
+  if (loadResult.error) {
+    return { worldState: null, tierUpgrade: null, error: loadResult.error }
+  }
 
-    let worldState
-    if (!doc.exists) {
-      // Create new world state if it doesn't exist
-      worldState = createDefaultWorldState(clientId)
-    } else {
-      worldState = doc.data()
-    }
+  try {
+    let worldState = loadResult.worldState || createDefaultWorldState(clientId)
 
     const oldXP = worldState.totalXP || 0
     const newXP = oldXP + amount
@@ -361,7 +433,10 @@ export async function addXP(clientId, amount) {
     worldState.tier = getTierForXP(newXP)
     worldState.updatedAt = new Date()
 
-    await docRef.set(worldState)
+    const persistResult = await persistWorldState(clientId, worldState)
+    if (persistResult.error) {
+      return { worldState: null, tierUpgrade: null, error: persistResult.error }
+    }
 
     logger.info('WORLD', 'XP added', {
       clientId,
@@ -395,30 +470,22 @@ export async function addXP(clientId, amount) {
  * }>}
  */
 export async function awardQuizXP(clientId, score, maxScore, streak = 0) {
-  const firestore = getFirestore()
-  if (!firestore) {
+  const loadResult = await loadWorldState(clientId)
+  if (loadResult.error) {
     return {
       newXP: 0,
       totalXP: 0,
       tierUpgrade: null,
       newTier: 'barren',
-      error: 'FIRESTORE_NOT_AVAILABLE'
+      error: loadResult.error
     }
   }
 
   try {
-    const docRef = firestore.collection(COLLECTION_NAME).doc(clientId)
-    const doc = await docRef.get()
-
-    let worldState
-    if (!doc.exists) {
-      worldState = createDefaultWorldState(clientId)
-    } else {
-      const data = doc.data()
-      worldState = {
-        ...data,
-        tierHistory: data.tierHistory || [{ tier: 'barren', achievedAt: new Date() }]
-      }
+    let worldState = loadResult.worldState || createDefaultWorldState(clientId)
+    worldState = {
+      ...worldState,
+      tierHistory: worldState.tierHistory || [{ tier: 'barren', achievedAt: new Date() }]
     }
 
     // Calculate XP to award based on quiz performance
@@ -476,7 +543,16 @@ export async function awardQuizXP(clientId, score, maxScore, streak = 0) {
     worldState.updatedAt = now
 
     // Save to Firestore
-    await docRef.set(worldState)
+    const persistResult = await persistWorldState(clientId, worldState)
+    if (persistResult.error) {
+      return {
+        newXP: 0,
+        totalXP: 0,
+        tierUpgrade: null,
+        newTier: 'barren',
+        error: persistResult.error
+      }
+    }
 
     logger.info('WORLD', 'Quiz XP awarded', {
       clientId,
@@ -514,30 +590,25 @@ export async function awardQuizXP(clientId, score, maxScore, streak = 0) {
  * @returns {Promise<{ worldState: Object | null, error: string | null }>}
  */
 export async function updateStreak(clientId, streak) {
-  const firestore = getFirestore()
-  if (!firestore) {
-    return { worldState: null, error: 'FIRESTORE_NOT_AVAILABLE' }
-  }
-
   if (typeof streak !== 'number' || streak < 0) {
     return { worldState: null, error: 'Streak must be a non-negative number' }
   }
 
-  try {
-    const docRef = firestore.collection(COLLECTION_NAME).doc(clientId)
-    const doc = await docRef.get()
+  const loadResult = await loadWorldState(clientId)
+  if (loadResult.error) {
+    return { worldState: null, error: loadResult.error }
+  }
 
-    let worldState
-    if (!doc.exists) {
-      worldState = createDefaultWorldState(clientId)
-    } else {
-      worldState = doc.data()
-    }
+  try {
+    const worldState = loadResult.worldState || createDefaultWorldState(clientId)
 
     worldState.streak = streak
     worldState.updatedAt = new Date()
 
-    await docRef.set(worldState)
+    const persistResult = await persistWorldState(clientId, worldState)
+    if (persistResult.error) {
+      return { worldState: null, error: persistResult.error }
+    }
 
     logger.info('WORLD', 'Streak updated', { clientId, streak })
 
@@ -575,28 +646,20 @@ export function getTierDefinitions() {
  * }>}
  */
 export async function checkArcaneUnlock(clientId) {
-  const firestore = getFirestore()
-  if (!firestore) {
+  const loadResult = await loadWorldState(clientId)
+  if (loadResult.error) {
     return {
       unlocked: false,
       justUnlocked: false,
       message: null,
       topicsCompleted: 0,
       topicsNeeded: ARCANE_UNLOCK_THRESHOLD,
-      error: 'FIRESTORE_NOT_AVAILABLE'
+      error: loadResult.error
     }
   }
 
   try {
-    const docRef = firestore.collection(COLLECTION_NAME).doc(clientId)
-    const doc = await docRef.get()
-
-    let worldState
-    if (!doc.exists) {
-      worldState = createDefaultWorldState(clientId)
-    } else {
-      worldState = doc.data()
-    }
+    const worldState = loadResult.worldState || createDefaultWorldState(clientId)
 
     const topicsCompleted = worldState.topicsCompleted || 0
     const wasUnlocked = worldState.arcaneUnlocked || false
@@ -606,7 +669,17 @@ export async function checkArcaneUnlock(clientId) {
       // Unlock arcane zone
       worldState.arcaneUnlocked = true
       worldState.updatedAt = new Date()
-      await docRef.set(worldState)
+      const persistResult = await persistWorldState(clientId, worldState)
+      if (persistResult.error) {
+        return {
+          unlocked: false,
+          justUnlocked: false,
+          message: null,
+          topicsCompleted: 0,
+          topicsNeeded: ARCANE_UNLOCK_THRESHOLD,
+          error: persistResult.error
+        }
+      }
 
       logger.info('WORLD', 'Arcane zone unlocked via check', { clientId, topicsCompleted })
 
@@ -657,31 +730,23 @@ export async function checkArcaneUnlock(clientId) {
  * }>}
  */
 export async function awardQuickModeXP(clientId) {
-  const firestore = getFirestore()
-  if (!firestore) {
+  const loadResult = await loadWorldState(clientId)
+  if (loadResult.error) {
     return {
       xpEarned: 0,
       totalXP: 0,
       tier: 'barren',
       tierUpgrade: null,
       message: '',
-      error: 'FIRESTORE_NOT_AVAILABLE'
+      error: loadResult.error
     }
   }
 
   try {
-    const docRef = firestore.collection(COLLECTION_NAME).doc(clientId)
-    const doc = await docRef.get()
-
-    let worldState
-    if (!doc.exists) {
-      worldState = createDefaultWorldState(clientId)
-    } else {
-      const data = doc.data()
-      worldState = {
-        ...data,
-        tierHistory: data.tierHistory || [{ tier: 'barren', achievedAt: new Date() }]
-      }
+    let worldState = loadResult.worldState || createDefaultWorldState(clientId)
+    worldState = {
+      ...worldState,
+      tierHistory: worldState.tierHistory || [{ tier: 'barren', achievedAt: new Date() }]
     }
 
     // Award quick mode XP (no world piece)
@@ -722,7 +787,17 @@ export async function awardQuickModeXP(clientId) {
     worldState.updatedAt = now
 
     // Save to Firestore
-    await docRef.set(worldState)
+    const persistResult = await persistWorldState(clientId, worldState)
+    if (persistResult.error) {
+      return {
+        xpEarned: 0,
+        totalXP: 0,
+        tier: 'barren',
+        tierUpgrade: null,
+        message: '',
+        error: persistResult.error
+      }
+    }
 
     logger.info('WORLD', 'Quick mode XP awarded', {
       clientId,
