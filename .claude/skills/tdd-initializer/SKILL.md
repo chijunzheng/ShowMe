@@ -30,9 +30,9 @@ Reference tiers based on app complexity:
 
 | Complexity | Feature Count | Description |
 |------------|---------------|-------------|
-| **Simple** | ~150 features | Basic CRUD apps, simple tools |
-| **Medium** | ~250 features | Multi-entity apps, user roles |
-| **Complex** | ~400+ features | Full platforms, complex workflows |
+| **Simple** | ~100 features | Basic CRUD apps, simple tools |
+| **Medium** | ~200 features | Multi-entity apps, user roles |
+| **Complex** | ~300+ features | Full platforms, complex workflows |
 
 ### Features Schema
 

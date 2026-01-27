@@ -1,0 +1,1079 @@
+{
+  "category": "gamification",
+  "description": "World Builder Gamification - Personal island that grows with learning",
+  "feature_count": 28,
+  "features": [
+    {
+      "id": "WB001",
+      "name": "Quiz generation from slides",
+      "description": "After viewing slides, AI generates quiz questions that reference specific slide content. Questions test comprehension of the material just learned.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Generate slides about volcanoes",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Call POST /api/quiz/generate with slide content",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify 4-6 quiz questions returned",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify each question references specific slide content",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify question types include MCQ, fill_blank, and voice",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify each question has correctAnswer field",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB002",
+      "name": "Quiz UI - Multiple choice questions",
+      "description": "Display MCQ questions with 4 options. User taps to select answer. Visual feedback for selection.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Complete a lesson to trigger quiz",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify MCQ question displays with 4 options",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Tap an option and verify selection highlight",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Submit answer and verify correct/incorrect feedback",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify correct answer shown if user was wrong",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB003",
+      "name": "Quiz UI - Fill in the blank",
+      "description": "Display sentence with blank. User types or speaks answer. Fuzzy matching for acceptable variations.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Display fill_blank question with visible blank",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Type answer in text input",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Submit and verify answer evaluation",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Test fuzzy matching (e.g., 'magma' matches 'Magma')",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify partial credit for close answers",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB004",
+      "name": "Quiz UI - Voice answer",
+      "description": "Question prompts spoken response. User speaks answer via mic. STT transcribes and AI evaluates semantic correctness.",
+      "priority": 2,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Display voice question with mic prompt",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Tap mic and speak answer",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify transcription displayed",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify AI evaluates semantic meaning (not exact match)",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify feedback explains why answer was correct/incorrect",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB005",
+      "name": "Quiz evaluation and scoring",
+      "description": "Calculate quiz score from answers. Pass threshold is 75%. Return score, XP earned, and pass/fail status.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Complete quiz with 4/5 correct (80%)",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify pass status returned",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify XP calculated based on score",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Complete quiz with 2/5 correct (40%)",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify fail status returned",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify option to retry quiz on fail",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB006",
+      "name": "World state initialization",
+      "description": "New user gets empty world at 'barren' tier. World state includes pieces array, totalXP, tier, and streak.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "New user opens app for first time",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify world state created with tier='barren'",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify pieces array is empty",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify totalXP is 0",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify world view shows empty island",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB007",
+      "name": "Topic to zone mapping",
+      "description": "AI determines which zone (nature/civilization/arcane) a topic belongs to. Concrete topics map to nature/civilization, abstract to arcane.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Learn about volcanoes",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify mapped to 'nature' zone",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Learn about Ancient Egypt",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify mapped to 'civilization' zone",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Learn about calculus",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify mapped to 'arcane' zone",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB008",
+      "name": "World piece prompt generation",
+      "description": "AI generates image prompt for world piece based on topic. Prompt describes a whimsical, child-friendly element that represents the learned concept.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Pass quiz about ocean life",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify world piece prompt generated",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify prompt includes topic-relevant visual elements",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify prompt specifies child-friendly, game art style",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Test abstract topic (algebra) generates metaphorical prompt",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB009",
+      "name": "World piece image generation",
+      "description": "Generate AI image for world piece using the prompt. Image should be consistent style, suitable for layering in diorama.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Call POST /api/world/piece/generate with prompt",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify image URL returned",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify image is not placeholder",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify image has transparent or removable background",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify image matches topic theme",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB010",
+      "name": "World piece unlocking flow",
+      "description": "After passing quiz, world piece is added to user's world. Celebration animation plays. Piece appears in appropriate zone.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Pass quiz for volcano topic",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify celebration animation plays",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify 'New piece unlocked!' message shown",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify piece added to world state",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Navigate to world view and verify piece visible",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify piece is in correct zone (nature for volcano)",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB011",
+      "name": "Diorama parallax world view",
+      "description": "World displayed as parallax diorama with 3 layers. Scroll/drag causes layers to move at different speeds creating depth effect.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Open world view",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify 3 distinct layers visible (foreground, mid, background)",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Drag/scroll horizontally",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify foreground moves fastest",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify background moves slowest",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify smooth parallax animation",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB012",
+      "name": "Zone layers in diorama",
+      "description": "Nature zone in foreground, Civilization in midground, Arcane in background/sky. Pieces render in appropriate layer.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Unlock a nature piece (volcano)",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify piece appears in foreground layer",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Unlock a civilization piece (pyramid)",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify piece appears in midground layer",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Unlock an arcane piece (floating observatory)",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify piece appears in background/sky layer",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB013",
+      "name": "Pocket portal system",
+      "description": "When multiple pieces cluster in a sub-category, a pocket portal appears. Tapping portal zooms into that pocket world.",
+      "priority": 2,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Unlock 3+ ocean-related pieces",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify 'Ocean Pocket' portal appears in nature zone",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Tap on pocket portal",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify smooth zoom transition into pocket",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify ocean pieces displayed inside pocket",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Tap back button to return to main world",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB014",
+      "name": "XP and tier progression",
+      "description": "XP earned from quizzes. Tiers unlock at thresholds: barren(0), sprouting(100), growing(300), thriving(600), legendary(1000).",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "New user starts at barren tier with 0 XP",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Pass quiz and earn 25 XP",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify XP added to totalXP",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Accumulate 100 XP total",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify tier upgrades to 'sprouting'",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify tier-up celebration animation",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB015",
+      "name": "Quick mode XP (no world piece)",
+      "description": "Using quick answer mode (skipping quiz) awards small XP but no world piece. Encourages full learning for world growth.",
+      "priority": 2,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Use quick answer mode for a question",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify small XP awarded (5 XP)",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify no world piece unlocked",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify prompt suggesting full lesson for world piece",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify world piece count unchanged",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB016",
+      "name": "World state persistence",
+      "description": "World state (pieces, XP, tier) persists across sessions. Stored in Firestore with pieces in GCS.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Unlock 3 world pieces and earn 150 XP",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Close and reopen app",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify world state restored",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify all 3 pieces visible in world",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify XP and tier preserved",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB017",
+      "name": "Arcane zone reveal",
+      "description": "Arcane zone (background) only reveals after user completes 20 topics. Creates sense of mystery and progression.",
+      "priority": 2,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "New user views world",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify arcane zone hidden/clouded",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Complete 20 topics with quizzes",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify 'Arcane zone awakens!' notification",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify arcane zone now visible in background",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Learn abstract topic and verify piece in arcane zone",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "WB018",
+      "name": "World navigation from main app",
+      "description": "Button/tab to switch between learning view and world view. World icon shows piece count badge.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "View main app home screen",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify world button/tab visible",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Tap world button",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify smooth transition to world view",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Unlock new piece",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify world button shows notification badge",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "UI001",
+      "name": "Bottom tab navigation",
+      "description": "Replace topic sidebar with bottom tab bar. Two tabs: Learn (mic/home) and World (island view). Active tab highlighted.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Open app and verify bottom tab bar visible",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify Learn tab is active by default",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Tap World tab",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify world view displayed",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify tab highlight switches to World",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Tap Learn tab to return",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "UI002",
+      "name": "Redesigned home screen with stats",
+      "description": "Home screen shows XP progress bar, current tier, streak count, and world preview thumbnail. Mic button remains prominent.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Open app to home screen",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify XP progress bar visible showing current/next tier",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify current tier badge displayed",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify streak counter visible",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify world preview thumbnail in corner",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify mic button still prominent and centered",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Tap world preview to navigate to world view",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "UI003",
+      "name": "Learn mode selection",
+      "description": "Before asking question, user chooses Quick (instant answer, small XP) or Full (lesson + quiz, world piece). Selection persists.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Open home screen",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify mode toggle visible (Quick/Full)",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Select Quick mode and ask question",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify slides shown but no quiz after",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Select Full mode and ask question",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify quiz appears after slideshow",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Refresh app and verify mode selection persisted",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "UI004",
+      "name": "Post-slideshow quiz prompt",
+      "description": "After slideshow ends in Full mode, show quiz prompt screen with topic summary and 'Take Quiz' button.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Complete slideshow in Full mode",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify quiz prompt screen appears",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify topic summary displayed",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify 'Take Quiz' button prominent",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify 'Review Slides' option available",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Tap Take Quiz and verify quiz starts",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "UI005",
+      "name": "Quiz progress indicator",
+      "description": "During quiz, show progress bar (e.g., 2/5 questions) and question type icon. Smooth transitions between questions.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Start quiz with 5 questions",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify progress shows '1/5'",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Answer question and proceed",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify progress updates to '2/5'",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify smooth slide transition to next question",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify question type icon (MCQ/voice/fill) shown",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "UI006",
+      "name": "Quiz results screen",
+      "description": "After quiz, show results: score, XP earned, pass/fail status. On pass, show world piece preview with 'View in World' button.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Complete quiz with passing score",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify results screen shows score (e.g., 4/5)",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify XP earned displayed with animation",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify 'Passed!' celebration shown",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify world piece preview image shown",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Tap 'View in World' and verify navigation",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Complete quiz with failing score",
+          "status": "pending"
+        },
+        {
+          "id": "T008",
+          "description": "Verify 'Try Again' button shown on fail",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "UI007",
+      "name": "World piece unlock animation",
+      "description": "When piece unlocks, show full-screen celebration: piece floats down, sparkles, then settles into world preview.",
+      "priority": 2,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Pass quiz to unlock piece",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify celebration overlay appears",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify piece image animates into view",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify sparkle/particle effects",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify piece shrinks and moves to world preview",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify sound effect plays (optional)",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "UI008",
+      "name": "Tier upgrade celebration",
+      "description": "When user reaches new tier, show special celebration with tier badge animation and world transformation preview.",
+      "priority": 2,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Earn XP to reach tier threshold (100 XP)",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify tier-up celebration triggers",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify new tier badge shown prominently",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify 'Sprouting!' tier name announced",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify world transformation preview shown",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify home screen XP bar updates",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "UI009",
+      "name": "Streak tracking UI",
+      "description": "Show current streak (days of consecutive learning) on home. Streak resets if no quiz passed in 24h. Streak freeze item available.",
+      "priority": 2,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Complete first quiz",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify streak counter shows '1'",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Complete quiz next day",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify streak increments to '2'",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify streak flame animation on home",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify streak freeze icon if available",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "UI010",
+      "name": "Remove topic sidebar",
+      "description": "Remove old topic sidebar. Topics now tracked implicitly through world pieces. Recent topics accessible from Learn tab history.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Open app",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify no sidebar visible on left",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Complete a topic with quiz",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Verify topic appears in Learn tab history section",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Tap history item to review slides",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Verify world piece associated with topic in world view",
+          "status": "pending"
+        }
+      ]
+    }
+  ]
+}

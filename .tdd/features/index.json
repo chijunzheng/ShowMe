@@ -1,26 +1,62 @@
 {
-  "project_name": "ShowMe v2 - Core MVP",
-  "created_at": "2026-01-15T13:00:00Z",
-  "description": "Voice-first AI tutor that transforms spoken questions into visual explanations",
-  "complexity_tier": "mvp",
-  "target_feature_count": 27,
+  "project_name": "ShowMe - World Builder Gamification",
+  "created_at": "2026-01-26T23:00:00Z",
+  "description": "World Builder gamification system - Personal island that grows with learning through quizzes",
+  "complexity_tier": "major_feature",
+  "target_feature_count": 28,
   "spec_version": "2.0",
   "feature_files": [
-    "core-features.json"
+    "gamify-features.json"
   ],
   "category_counts": {
-    "core": 27
+    "quiz_system": 5,
+    "world_system": 5,
+    "world_view": 3,
+    "progression": 4,
+    "ui_redesign": 10
   },
   "key_features": [
-    "Voice input with STT",
-    "Slide generation (AI images + TTS)",
-    "UI states: listening -> generating -> slideshow",
-    "AI greeting on cold start",
-    "Topic classification (NEW_TOPIC, TOPIC_FOLLOWUP)",
-    "Slide appending for follow-ups",
-    "Simple topic sidebar",
-    "Push-to-talk interrupt",
-    "Simulated duplex (VAD-based)",
-    "Narration with annotations"
+    "Quiz generation from slides (MCQ, fill-blank, voice)",
+    "World state with 3 zones (nature, civilization, arcane)",
+    "AI-generated world pieces as learning rewards",
+    "Parallax diorama world visualization",
+    "Pocket portals for topic clusters",
+    "XP and tier progression system",
+    "Bottom tab navigation (Learn/World)",
+    "Quick vs Full learning modes",
+    "Post-slideshow quiz flow",
+    "Celebration animations for unlocks"
+  ],
+  "implementation_phases": [
+    {
+      "phase": 1,
+      "name": "Foundation",
+      "features": ["WB006", "WB014", "WB016", "UI001", "UI010"],
+      "description": "World state, XP system, persistence, navigation structure"
+    },
+    {
+      "phase": 2,
+      "name": "Quiz System",
+      "features": ["WB001", "WB002", "WB003", "WB005", "UI004", "UI005", "UI006"],
+      "description": "Quiz generation, UI for all question types, scoring, results"
+    },
+    {
+      "phase": 3,
+      "name": "World Pieces",
+      "features": ["WB007", "WB008", "WB009", "WB010"],
+      "description": "Zone mapping, piece prompt generation, image generation, unlock flow"
+    },
+    {
+      "phase": 4,
+      "name": "World Visualization",
+      "features": ["WB011", "WB012", "WB018", "UI002"],
+      "description": "Parallax diorama, zone layers, navigation, home stats"
+    },
+    {
+      "phase": 5,
+      "name": "Polish & Extras",
+      "features": ["WB004", "WB013", "WB015", "WB017", "UI003", "UI007", "UI008", "UI009"],
+      "description": "Voice quiz, pockets, quick mode, arcane reveal, celebrations"
+    }
   ]
 }
