@@ -17,6 +17,13 @@ import StreakCounter from './components/StreakCounter'
 import AchievementToast from './components/AchievementToast'
 import Confetti from './components/Confetti'
 import useUserProgress from './hooks/useUserProgress'
+// WB018: World Builder gamification imports
+import BottomTabBar from './components/BottomTabBar'
+import WorldView from './components/WorldView'
+import Quiz from './components/Quiz'
+import QuizPrompt from './components/QuizPrompt'
+import PieceUnlockCelebration from './components/PieceUnlockCelebration'
+import LearnModeToggle from './components/LearnModeToggle'
 
 // App states
 const UI_STATE = {
@@ -25,6 +32,10 @@ const UI_STATE = {
   GENERATING: 'generating',
   SLIDESHOW: 'slideshow',
   SOCRATIC: 'socratic', // SOCRATIC-003: Socratic questioning after slideshow
+  // WB018: Quiz states for World Builder gamification
+  QUIZ_PROMPT: 'quiz_prompt',
+  QUIZ: 'quiz',
+  QUIZ_RESULTS: 'quiz_results',
   ERROR: 'error',
 }
 
@@ -1079,6 +1090,19 @@ function App() {
   const [socraticSlides, setSocraticSlides] = useState([])
   const [socraticTopicName, setSocraticTopicName] = useState('')
   const [socraticLanguage, setSocraticLanguage] = useState('en')
+
+  // WB018: World Builder gamification state
+  const [activeTab, setActiveTab] = useState('learn') // 'learn' | 'world'
+  const [worldBadge, setWorldBadge] = useState(0) // New piece notification count
+  const [learnMode, setLearnMode] = useState('full') // 'quick' | 'full'
+  // Quiz flow state
+  const [quizQuestions, setQuizQuestions] = useState([])
+  const [quizTopicId, setQuizTopicId] = useState(null)
+  const [quizTopicName, setQuizTopicName] = useState('')
+  const [isLoadingQuiz, setIsLoadingQuiz] = useState(false)
+  const [quizResults, setQuizResults] = useState(null)
+  const [unlockedPiece, setUnlockedPiece] = useState(null)
+  const [showPieceCelebration, setShowPieceCelebration] = useState(false)
 
   const generationProgressPercent = useMemo(() => {
     if (!generationProgress.stage) return 0
@@ -2969,7 +2993,7 @@ function App() {
     return () => clearTimeout(timer)
   }, [slideshowFinished, questionQueue])
 
-  // SOCRATIC-003: Trigger Socratic mode when slideshow finishes (no queued questions)
+  // SOCRATIC-003 + WB018: Trigger quiz prompt (Full mode) or Socratic mode (Quick mode) when slideshow finishes
   useEffect(() => {
     // Only trigger when slideshow just finished and NO queued questions
     if (!slideshowFinished || questionQueue.length > 0) {
@@ -2987,9 +3011,9 @@ function App() {
       return
     }
 
-    // Delay before transitioning to Socratic mode
+    // Delay before transitioning to next mode
     const timer = setTimeout(() => {
-      // Prepare Socratic mode data (use ref for latest slides)
+      // Get topic data (use ref for latest)
       const topic = activeTopicRef.current
       if (!topic || topic.id !== activeTopicId) return
 
@@ -2998,22 +3022,29 @@ function App() {
 
       const contentSlides = currentSlides.filter(s => s.type !== 'header')
       if (contentSlides.length > 0) {
-        setSocraticSlides(contentSlides)
-        setSocraticTopicName(topic.name || 'this topic')
-        // Detect language from first slide subtitle
-        const firstSubtitle = contentSlides[0]?.subtitle || ''
-        const hasChineseChars = /[\u4e00-\u9fff]/.test(firstSubtitle)
-        setSocraticLanguage(hasChineseChars ? 'zh' : 'en')
-
-        // Reset flags and transition to Socratic mode
+        // Reset slideshow flags
         hasFinishedSlideshowRef.current = false
         setSlideshowFinished(false)
-        setUiState(UI_STATE.SOCRATIC)
+
+        // WB018: Branch based on learn mode
+        if (learnMode === 'full') {
+          // Full mode: Show quiz prompt to encourage knowledge retention
+          setUiState(UI_STATE.QUIZ_PROMPT)
+        } else {
+          // Quick mode: Show Socratic questioning
+          setSocraticSlides(contentSlides)
+          setSocraticTopicName(topic.name || 'this topic')
+          // Detect language from first slide subtitle
+          const firstSubtitle = contentSlides[0]?.subtitle || ''
+          const hasChineseChars = /[\u4e00-\u9fff]/.test(firstSubtitle)
+          setSocraticLanguage(hasChineseChars ? 'zh' : 'en')
+          setUiState(UI_STATE.SOCRATIC)
+        }
       }
     }, 2000) // 2 second delay to let user absorb final slide
 
     return () => clearTimeout(timer)
-  }, [slideshowFinished, questionQueue.length, activeTopicId]) // Removed visibleSlides - using ref instead
+  }, [slideshowFinished, questionQueue.length, activeTopicId, learnMode]) // Added learnMode dependency
 
   // SOCRATIC-003: Handle Socratic mode completion
   const handleSocraticComplete = useCallback(() => {
@@ -3039,6 +3070,143 @@ function App() {
       runHandleQuestion(question)
     }
   }, [recordSocraticAnswered])
+
+  // WB018: Tab navigation handler with badge clearing
+  const handleTabChange = useCallback((tab) => {
+    if (tab === 'world') {
+      // Clear world badge when user views world
+      setWorldBadge(0)
+    }
+    setActiveTab(tab)
+  }, [])
+
+  // WB018: Start quiz flow - fetch questions from API
+  const handleStartQuiz = useCallback(async () => {
+    if (!activeTopic) return
+
+    setIsLoadingQuiz(true)
+    setQuizTopicId(activeTopic.id)
+    setQuizTopicName(activeTopic.name || 'this topic')
+
+    try {
+      // Get content slides for quiz generation
+      const contentSlides = visibleSlidesRef.current?.filter(s => s.type !== 'header' && s.type !== 'suggestions') || []
+      const slideContent = contentSlides.map(s => s.subtitle).filter(Boolean).join('\n')
+
+      const response = await fetch('/api/quiz/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topicId: activeTopic.id,
+          topicName: activeTopic.name,
+          slideContent,
+          clientId: wsClientId,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to generate quiz')
+      }
+
+      const data = await response.json()
+      setQuizQuestions(data.questions || [])
+      setUiState(UI_STATE.QUIZ)
+    } catch (error) {
+      logger.error('QUIZ', 'Failed to generate quiz', { error: error.message })
+      // Fall back to Socratic mode on quiz error
+      const contentSlides = visibleSlidesRef.current?.filter(s => s.type !== 'header') || []
+      if (contentSlides.length > 0) {
+        setSocraticSlides(contentSlides)
+        setSocraticTopicName(activeTopic.name || 'this topic')
+        setUiState(UI_STATE.SOCRATIC)
+      } else {
+        setUiState(UI_STATE.HOME)
+      }
+    } finally {
+      setIsLoadingQuiz(false)
+    }
+  }, [activeTopic, wsClientId])
+
+  // WB018: Handle quiz completion - evaluate and potentially unlock piece
+  const handleQuizComplete = useCallback(async (results) => {
+    setQuizResults(results)
+
+    // Check if user passed (>= 60% score)
+    const passed = results.percentage >= 60
+
+    if (passed && quizTopicId) {
+      try {
+        // Evaluate quiz and unlock piece via API
+        const response = await fetch('/api/quiz/evaluate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topicId: quizTopicId,
+            topicName: quizTopicName,
+            results,
+            clientId: wsClientId,
+          }),
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          if (data.piece) {
+            setUnlockedPiece(data.piece)
+            setShowPieceCelebration(true)
+            // Increment world badge for new piece notification
+            setWorldBadge(prev => prev + 1)
+          }
+        }
+      } catch (error) {
+        logger.error('QUIZ', 'Failed to evaluate quiz', { error: error.message })
+      }
+    }
+
+    setUiState(UI_STATE.QUIZ_RESULTS)
+  }, [quizTopicId, quizTopicName, wsClientId])
+
+  // WB018: Handle quiz skip
+  const handleQuizSkip = useCallback(() => {
+    setQuizQuestions([])
+    setQuizResults(null)
+    setUiState(UI_STATE.HOME)
+  }, [])
+
+  // WB018: Handle quiz prompt skip (before quiz starts)
+  const handleQuizPromptSkip = useCallback(() => {
+    // Fall back to Socratic mode when skipping quiz
+    const contentSlides = visibleSlidesRef.current?.filter(s => s.type !== 'header') || []
+    if (contentSlides.length > 0) {
+      setSocraticSlides(contentSlides)
+      setSocraticTopicName(activeTopic?.name || 'this topic')
+      setUiState(UI_STATE.SOCRATIC)
+    } else {
+      setUiState(UI_STATE.HOME)
+    }
+  }, [activeTopic])
+
+  // WB018: Handle piece celebration close
+  const handlePieceCelebrationClose = useCallback(() => {
+    setShowPieceCelebration(false)
+    setUnlockedPiece(null)
+    setUiState(UI_STATE.HOME)
+  }, [])
+
+  // WB018: Handle view world from celebration
+  const handleViewWorldFromCelebration = useCallback(() => {
+    setShowPieceCelebration(false)
+    setUnlockedPiece(null)
+    setActiveTab('world')
+    setWorldBadge(0) // Clear badge since they're viewing world
+    setUiState(UI_STATE.HOME)
+  }, [])
+
+  // WB018: Handle continue from quiz results
+  const handleQuizResultsContinue = useCallback(() => {
+    setQuizQuestions([])
+    setQuizResults(null)
+    setUiState(UI_STATE.HOME)
+  }, [])
 
   /**
    * Analyzes audio frequency data to calculate overall audio level.
@@ -5133,6 +5301,82 @@ function App() {
           />
         )}
 
+        {/* WB018: Quiz prompt screen - shown after slideshow in Full mode */}
+        {uiState === UI_STATE.QUIZ_PROMPT && (
+          <QuizPrompt
+            topicName={activeTopic?.name}
+            onStart={handleStartQuiz}
+            onSkip={handleQuizPromptSkip}
+            isLoading={isLoadingQuiz}
+          />
+        )}
+
+        {/* WB018: Quiz screen - active quiz questions */}
+        {uiState === UI_STATE.QUIZ && quizQuestions.length > 0 && (
+          <Quiz
+            questions={quizQuestions}
+            onComplete={handleQuizComplete}
+            onSkip={handleQuizSkip}
+          />
+        )}
+
+        {/* WB018: Quiz results screen */}
+        {uiState === UI_STATE.QUIZ_RESULTS && quizResults && (
+          <div className="flex flex-col items-center gap-6 px-4 py-8 animate-fade-in">
+            {/* Result icon */}
+            <div className={`w-20 h-20 rounded-full flex items-center justify-center ${
+              quizResults.percentage >= 60
+                ? 'bg-green-100 dark:bg-green-900/30'
+                : 'bg-orange-100 dark:bg-orange-900/30'
+            }`}>
+              <span className="text-4xl">
+                {quizResults.percentage >= 60 ? '' : ''}
+              </span>
+            </div>
+
+            {/* Score */}
+            <div className="text-center">
+              <h2 className="text-3xl font-bold text-gray-800 dark:text-white mb-2">
+                {quizResults.percentage}%
+              </h2>
+              <p className="text-gray-600 dark:text-gray-300">
+                {quizResults.correctCount} of {quizResults.totalQuestions} correct
+              </p>
+            </div>
+
+            {/* Result message */}
+            <p className={`text-lg font-medium ${
+              quizResults.percentage >= 60
+                ? 'text-green-600 dark:text-green-400'
+                : 'text-orange-600 dark:text-orange-400'
+            }`}>
+              {quizResults.percentage >= 60
+                ? 'Great job! You earned a new piece!'
+                : 'Keep learning! Try again to unlock the piece.'}
+            </p>
+
+            {/* Continue button */}
+            <button
+              onClick={handleQuizResultsContinue}
+              className="px-8 py-3 bg-primary text-white font-semibold rounded-xl hover:bg-primary/90 transition-colors"
+            >
+              Continue
+            </button>
+          </div>
+        )}
+
+        {/* WB018: World View - shown when World tab is active */}
+        {activeTab === 'world' && (
+          <WorldView
+            clientId={wsClientId}
+            onStartLearning={() => setActiveTab('learn')}
+            onPieceClick={(piece) => {
+              // Could show piece details modal in future
+              logger.debug('WORLD', 'Piece clicked', { pieceId: piece?.id })
+            }}
+          />
+        )}
+
         {/* Loading screen for historical topic TTS */}
         {isLoadingTopicAudio && activeTopic && (
           <div className="flex flex-col items-center gap-4 px-4 md:px-0 animate-fade-in">
@@ -5759,7 +6003,23 @@ function App() {
           visible={toast.visible}
           onDismiss={hideToast}
         />
+
+        {/* WB018: Bottom Tab Bar for Learn/World navigation */}
+        <BottomTabBar
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+          worldBadge={worldBadge}
+        />
       </div>
+
+      {/* WB018: Piece unlock celebration overlay */}
+      {showPieceCelebration && unlockedPiece && (
+        <PieceUnlockCelebration
+          piece={unlockedPiece}
+          onComplete={handlePieceCelebrationClose}
+          onViewWorld={handleViewWorldFromCelebration}
+        />
+      )}
 
       {/* Spacer to balance sidebar and keep content centered on wide screens */}
       {topics.length > 0 && (

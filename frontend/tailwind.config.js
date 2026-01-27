@@ -81,6 +81,8 @@ export default {
         'flame-flicker': 'flameFlicker 0.5s ease-in-out infinite',
         'scale-up': 'scaleUp 0.3s ease-out',
         'bounce-in': 'bounceIn 0.5s ease-out',
+        // WB010: Sparkle animation for piece unlock celebration
+        'sparkle': 'sparkle 1.5s ease-out forwards',
       },
       keyframes: {
         waveform: {
@@ -137,6 +139,25 @@ export default {
           '0%': { transform: 'scale(0)', opacity: '0' },
           '50%': { transform: 'scale(1.2)' },
           '100%': { transform: 'scale(1)', opacity: '1' },
+        },
+        // WB010: Sparkle particle animation for piece unlock
+        sparkle: {
+          '0%': {
+            transform: 'scale(0) rotate(0deg)',
+            opacity: '0',
+          },
+          '20%': {
+            transform: 'scale(1.2) rotate(45deg)',
+            opacity: '1',
+          },
+          '50%': {
+            transform: 'scale(1) rotate(90deg)',
+            opacity: '1',
+          },
+          '100%': {
+            transform: 'scale(0) rotate(180deg)',
+            opacity: '0',
+          },
         },
       },
       // T004: Gradient backgrounds for mic button

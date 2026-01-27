@@ -196,3 +196,38 @@ body {
 .highlight-fade-out {
   animation: highlight-fade-out 0.5s ease-out forwards;
 }
+
+/* WB011: World Builder parallax diorama animations */
+@keyframes parallax-float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+.parallax-float {
+  animation: parallax-float 4s ease-in-out infinite;
+}
+
+/* Piece glow pulse for highlighted items */
+@keyframes piece-glow {
+  0%, 100% {
+    box-shadow: 0 0 10px currentColor;
+  }
+  50% {
+    box-shadow: 0 0 25px currentColor;
+  }
+}
+
+.piece-glow {
+  animation: piece-glow 2s ease-in-out infinite;
+}
+
+/* Smooth layer transitions */
+.parallax-layer {
+  will-change: transform;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}

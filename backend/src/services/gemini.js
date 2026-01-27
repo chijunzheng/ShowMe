@@ -1882,6 +1882,496 @@ Output Format (JSON):
   }
 }
 
+/**
+ * Classify a topic into a world zone for World Builder gamification
+ * WB007: Topic to zone mapping
+ *
+ * Zones:
+ * - nature: Animals, plants, geology, weather, oceans, space, biology
+ * - civilization: History, cultures, inventions, buildings, people, society
+ * - arcane: Math, philosophy, abstract concepts, logic, music theory, language
+ *
+ * @param {string} topicName - The topic name
+ * @param {string} topicDescription - Brief description or slide summary (optional)
+ * @returns {Promise<{zone: string, confidence: number, error: string|null}>}
+ */
+export async function classifyTopicZone(topicName, topicDescription = '') {
+  const ai = getAIClient()
+  if (!ai) {
+    return { zone: null, confidence: 0, error: 'API_NOT_AVAILABLE' }
+  }
+
+  // Validate input
+  if (!topicName || typeof topicName !== 'string' || topicName.trim().length === 0) {
+    return { zone: null, confidence: 0, error: 'INVALID_TOPIC' }
+  }
+
+  const prompt = `You are a classifier for an educational world-building game. Classify the following topic into exactly ONE zone.
+
+ZONES:
+1. "nature" - Natural world topics: animals, plants, geology (volcanoes, earthquakes), weather, oceans, space/astronomy, biology, ecosystems, chemistry of natural processes
+2. "civilization" - Human civilization topics: history, cultures, ancient civilizations (Egypt, Rome, etc.), inventions, architecture/buildings, famous people, society, geography of human settlements, wars, politics
+3. "arcane" - Abstract/intellectual topics: mathematics, philosophy, logic, music theory, language/linguistics, abstract physics concepts, economics theory, psychology concepts, computer science theory
+
+RULES:
+- Concrete, tangible topics about the physical world → nature
+- Topics about human history, society, or physical creations → civilization
+- Abstract, theoretical, or conceptual topics → arcane
+- When in doubt between civilization and arcane: if it's about DOING something in society → civilization; if it's about UNDERSTANDING a concept → arcane
+- "History of math" → civilization (because it's about historical development)
+- "How calculus works" → arcane (because it's about the abstract concept)
+
+TOPIC: "${topicName}"
+${topicDescription ? `DESCRIPTION: "${topicDescription}"` : ''}
+
+Respond with ONLY a JSON object:
+{
+  "zone": "nature" | "civilization" | "arcane",
+  "confidence": 0.0-1.0,
+  "reasoning": "Brief explanation"
+}`
+
+  try {
+    const response = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.1, // Low temperature for consistent classification
+        maxOutputTokens: 128,
+        responseMimeType: 'application/json',
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    // Validate zone is one of the expected values
+    const validZones = ['nature', 'civilization', 'arcane']
+    const zone = validZones.includes(parsed.zone) ? parsed.zone : null
+
+    if (!zone) {
+      return { zone: null, confidence: 0, error: 'INVALID_ZONE_RESPONSE' }
+    }
+
+    // Validate and normalize confidence
+    let confidence = parseFloat(parsed.confidence)
+    if (isNaN(confidence) || confidence < 0) confidence = 0.5
+    if (confidence > 1) confidence = 1
+
+    return {
+      zone,
+      confidence,
+      error: null
+    }
+  } catch (error) {
+    console.error('[Gemini] Zone classification error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { zone: null, confidence: 0, error: 'RATE_LIMITED' }
+    }
+    if (error.message?.includes('JSON')) {
+      return { zone: null, confidence: 0, error: 'PARSE_ERROR' }
+    }
+
+    return { zone: null, confidence: 0, error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
+ * Generate an image prompt for a world piece based on topic
+ * WB008: World piece prompt generation
+ *
+ * Generates a whimsical, child-friendly prompt for a world piece image
+ * that represents what the user learned about a topic. The prompt describes
+ * elements suitable for an isometric game art diorama.
+ *
+ * @param {string} topicName - The topic learned
+ * @param {string} zone - 'nature' | 'civilization' | 'arcane'
+ * @param {string} summary - Brief topic summary from slides
+ * @returns {Promise<{ prompt: string, elements: string[], error: string|null }>}
+ */
+export async function generateWorldPiecePrompt(topicName, zone, summary) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { prompt: null, elements: null, error: 'API_NOT_AVAILABLE' }
+  }
+
+  // Validate zone
+  const validZones = ['nature', 'civilization', 'arcane']
+  if (!validZones.includes(zone)) {
+    return { prompt: null, elements: null, error: 'INVALID_ZONE' }
+  }
+
+  // Zone-specific style modifiers
+  const zoneModifiers = {
+    nature: 'lush greenery, natural elements, animals or plants, organic shapes, earthy colors with vibrant accents',
+    civilization: 'architectural elements, historical or cultural artifacts, buildings, monuments, inventions, warm stone and metal textures',
+    arcane: 'magical elements, floating objects, glowing particles, ethereal effects, mystical symbols, crystals, nebula colors'
+  }
+
+  const aiPrompt = `You are a creative artist designing collectible world pieces for an educational game.
+The player just learned about "${topicName}" and earned a world piece for their island diorama.
+
+Topic summary: ${summary || 'No summary provided'}
+Zone category: ${zone}
+
+Generate a WHIMSICAL, CHILD-FRIENDLY image prompt for a world piece that:
+1. Represents a key visual element or concept from this topic
+2. Is suitable for isometric game art style
+3. Works as a collectible piece that can be placed in a parallax diorama
+4. Has a transparent or simple background for layering
+5. Is charming and appealing to children ages 8-14
+
+Zone style guidance: ${zoneModifiers[zone]}
+
+For ABSTRACT topics (math, philosophy, logic, etc.):
+- Use metaphorical representations (e.g., algebra → balance scales with glowing equations)
+- Create whimsical visualizations (e.g., prime numbers → a crystalline tower with numbered facets)
+- Don't be too literal - make it magical and interesting
+
+For CONCRETE topics (animals, buildings, historical figures):
+- Focus on the most iconic or recognizable visual element
+- Add whimsical or fantastical touches to make it special
+
+Output Format (JSON):
+{
+  "prompt": "Detailed image generation prompt here (1-3 sentences describing the visual)",
+  "elements": ["element1", "element2", "element3"]
+}
+
+The "elements" array should list 2-4 key visual elements that will appear in the image.
+The "prompt" should be a complete, detailed description ready for image generation.
+
+IMPORTANT: The prompt should specify "isometric game art style, vibrant colors, child-friendly, whimsical, transparent background, centered composition, no text".`
+
+  try {
+    const response = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: aiPrompt,
+      config: {
+        temperature: 0.8,
+        maxOutputTokens: 256,
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    // Validate response
+    if (!parsed.prompt || typeof parsed.prompt !== 'string') {
+      return { prompt: null, elements: null, error: 'INVALID_RESPONSE' }
+    }
+
+    // Ensure the prompt includes style guidance
+    let finalPrompt = parsed.prompt
+    if (!finalPrompt.toLowerCase().includes('isometric')) {
+      finalPrompt = `Isometric game art style, vibrant colors, child-friendly, whimsical, transparent background, centered composition, no text. ${finalPrompt}`
+    }
+
+    return {
+      prompt: finalPrompt,
+      elements: Array.isArray(parsed.elements) ? parsed.elements : [],
+      error: null
+    }
+  } catch (error) {
+    console.error('[Gemini] World piece prompt generation error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { prompt: null, elements: null, error: 'RATE_LIMITED' }
+    }
+    if (error.message?.includes('JSON')) {
+      return { prompt: null, elements: null, error: 'PARSE_ERROR' }
+    }
+
+    return { prompt: null, elements: null, error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
+ * Generate world piece image using Gemini's image generation
+ * WB009: World piece image generation
+ *
+ * Creates an AI-generated image for a world piece that can be layered
+ * in the user's island diorama. The image should be consistent style,
+ * suitable for parallax layering with transparent or removable background.
+ *
+ * @param {string} prompt - The image generation prompt from generateWorldPiecePrompt
+ * @returns {Promise<{ imageUrl: string|null, error: string|null }>}
+ */
+export async function generateWorldPieceImage(prompt) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { imageUrl: null, error: 'API_NOT_AVAILABLE' }
+  }
+
+  if (!prompt || typeof prompt !== 'string') {
+    return { imageUrl: null, error: 'INVALID_PROMPT' }
+  }
+
+  // Enhance prompt with world piece specific styling
+  const enhancedPrompt = `${prompt}
+
+Additional style requirements for world piece:
+- Isometric game art style with clean lines
+- Vibrant, saturated colors suitable for children
+- Single centered object or small scene
+- Transparent or solid color background (for easy layering)
+- No text, labels, or UI elements
+- Suitable for parallax diorama display at approximately 512x512 pixels
+- Game asset quality, collectible item appearance`
+
+  let lastError = null
+
+  // Try image generation with fallback models (same pattern as generateEducationalImage)
+  for (const model of [IMAGE_MODEL, ...IMAGE_MODEL_FALLBACKS]) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: enhancedPrompt,
+        config: {
+          responseModalities: ['IMAGE'],
+        }
+      })
+
+      // Extract image data from response
+      const parts = response.candidates?.[0]?.content?.parts || []
+
+      for (const part of parts) {
+        if (part.inlineData) {
+          const mimeType = part.inlineData.mimeType || 'image/png'
+          const base64Data = (part.inlineData.data || '').replace(/\s/g, '')
+          const imageUrl = `data:${mimeType};base64,${base64Data}`
+
+          console.log('[Gemini] World piece image generated successfully', { model })
+          return { imageUrl, error: null }
+        }
+      }
+    } catch (error) {
+      lastError = error.message || 'UNKNOWN_ERROR'
+      console.warn('[Gemini] World piece image generation failed, trying next model:', {
+        model,
+        error: error.message,
+      })
+    }
+  }
+
+  // All models failed - check error type
+  if (lastError?.includes('quota') || lastError?.includes('rate')) {
+    return { imageUrl: null, error: 'RATE_LIMITED' }
+  }
+  if (lastError?.includes('safety') || lastError?.includes('blocked')) {
+    return { imageUrl: null, error: 'CONTENT_FILTERED' }
+  }
+
+  return { imageUrl: null, error: lastError || 'NO_IMAGE_GENERATED' }
+}
+
+/**
+ * Generate quiz questions based on slideshow content
+ * WB001: Quiz generation from slides for World Builder gamification
+ *
+ * Generates 4-6 questions of varying types (MCQ, fill_blank, voice) that
+ * reference specific slide content and test comprehension of the material.
+ *
+ * @param {Object} params - Parameters for quiz generation
+ * @param {Array} params.slides - The generated slides with script, subtitle, and imageUrl
+ * @param {string} params.topicName - The topic being quizzed
+ * @param {string} params.language - Language code: 'en' or 'zh'
+ * @returns {Promise<{questions: Array, error: string|null}>}
+ */
+export async function generateQuizQuestions(params) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { questions: null, error: 'API_NOT_AVAILABLE' }
+  }
+
+  const { slides = [], topicName = '', language = 'en' } = params
+
+  // Validate slides input
+  if (!Array.isArray(slides) || slides.length === 0) {
+    return { questions: null, error: 'INVALID_SLIDES' }
+  }
+
+  // Build context from slides with clear numbering (0-indexed for slideReference)
+  const slideContext = slides
+    .map((slide, i) => {
+      const content = slide.subtitle || slide.script || ''
+      return `[Slide ${i}]: ${content}`
+    })
+    .join('\n\n')
+
+  const languageInstruction = language === 'zh'
+    ? 'Generate all questions, options, and explanations in Simplified Chinese (简体中文).'
+    : 'Generate all questions, options, and explanations in English.'
+
+  const prompt = `You are an educational quiz generator. Based on the slideshow content below, generate quiz questions that test comprehension of the material.
+
+TOPIC: "${topicName}"
+
+SLIDE CONTENT:
+${slideContext}
+
+${languageInstruction}
+
+REQUIREMENTS:
+1. Generate exactly 4-6 questions total
+2. Mix question types:
+   - 2-3 MCQ (multiple choice) questions
+   - 1-2 fill_blank questions
+   - 1 voice question (open-ended spoken response)
+3. Questions should progress in difficulty (easier first, harder later)
+4. Each question MUST reference a specific slide number (0-indexed)
+5. Questions should test understanding, not just recall of exact words
+6. Every question MUST have a correctAnswer field
+
+QUESTION TYPES:
+
+MCQ (Multiple Choice):
+- Provide exactly 4 options
+- correctIndex is the 0-based index of the correct option
+- Options should be plausible but only one correct
+
+fill_blank:
+- blankSentence has ___ where the answer goes
+- correctAnswer is the word/phrase that fills the blank
+- acceptableAnswers lists variations that should also be accepted
+
+voice (Open-ended):
+- expectedTopics lists key concepts a good answer should mention
+- sampleAnswer shows what a complete answer might look like
+
+OUTPUT FORMAT (JSON):
+{
+  "questions": [
+    {
+      "id": "q1",
+      "type": "mcq",
+      "question": "What is the main purpose of X?",
+      "slideReference": 0,
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correctIndex": 1,
+      "correctAnswer": "Option B",
+      "explanation": "Brief explanation of why this is correct"
+    },
+    {
+      "id": "q2",
+      "type": "fill_blank",
+      "question": "Complete the following statement about Y:",
+      "slideReference": 1,
+      "blankSentence": "The process of ___ allows plants to convert sunlight into energy.",
+      "correctAnswer": "photosynthesis",
+      "acceptableAnswers": ["photosynthesis", "photo-synthesis"],
+      "explanation": "This is the key process described in the slide"
+    },
+    {
+      "id": "q3",
+      "type": "voice",
+      "question": "In your own words, explain how Z works and why it matters.",
+      "slideReference": 2,
+      "expectedTopics": ["concept1", "concept2", "concept3"],
+      "sampleAnswer": "A complete answer would explain that...",
+      "correctAnswer": "A good answer mentions concept1, concept2, and concept3",
+      "explanation": "This tests deeper understanding of the topic"
+    }
+  ]
+}
+
+Generate the quiz questions now:`
+
+  try {
+    const response = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.6,
+        maxOutputTokens: 2048,
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    // Validate the response structure
+    if (!parsed.questions || !Array.isArray(parsed.questions)) {
+      return { questions: null, error: 'INVALID_RESPONSE' }
+    }
+
+    // Validate and normalize each question
+    const validTypes = ['mcq', 'fill_blank', 'voice']
+    const validatedQuestions = parsed.questions
+      .filter(q => q && typeof q === 'object')
+      .map((q, index) => {
+        // Ensure required fields
+        const question = {
+          id: q.id || `q${index + 1}`,
+          type: validTypes.includes(q.type) ? q.type : 'mcq',
+          question: q.question || '',
+          slideReference: typeof q.slideReference === 'number'
+            ? Math.max(0, Math.min(slides.length - 1, q.slideReference))
+            : 0,
+          correctAnswer: q.correctAnswer || '',
+          explanation: q.explanation || '',
+        }
+
+        // Add type-specific fields
+        if (question.type === 'mcq') {
+          question.options = Array.isArray(q.options) ? q.options.slice(0, 4) : []
+          question.correctIndex = typeof q.correctIndex === 'number'
+            ? Math.max(0, Math.min(3, q.correctIndex))
+            : 0
+          // Ensure correctAnswer matches the selected option
+          if (question.options.length > question.correctIndex) {
+            question.correctAnswer = question.options[question.correctIndex]
+          }
+        } else if (question.type === 'fill_blank') {
+          question.blankSentence = q.blankSentence || ''
+          question.acceptableAnswers = Array.isArray(q.acceptableAnswers)
+            ? q.acceptableAnswers
+            : [question.correctAnswer]
+        } else if (question.type === 'voice') {
+          question.expectedTopics = Array.isArray(q.expectedTopics)
+            ? q.expectedTopics
+            : []
+          question.sampleAnswer = q.sampleAnswer || ''
+        }
+
+        return question
+      })
+      .filter(q => q.question && q.correctAnswer) // Only keep valid questions
+
+    // Validate we have enough questions
+    if (validatedQuestions.length < 4) {
+      return { questions: null, error: 'INSUFFICIENT_QUESTIONS' }
+    }
+
+    // Validate we have mixed question types
+    const types = new Set(validatedQuestions.map(q => q.type))
+    if (types.size < 2) {
+      // If all same type, this is still valid but not ideal
+      // The prompt should prevent this, but we allow it
+    }
+
+    return {
+      questions: validatedQuestions.slice(0, 6), // Cap at 6 questions
+      error: null
+    }
+  } catch (error) {
+    console.error('[Gemini] Quiz generation error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { questions: null, error: 'RATE_LIMITED' }
+    }
+    if (error.message?.includes('JSON')) {
+      return { questions: null, error: 'PARSE_ERROR' }
+    }
+
+    return { questions: null, error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
 export default {
   isGeminiAvailable,
   generateScript,
@@ -1899,4 +2389,8 @@ export default {
   determineSemanticRelation,
   generateSocraticQuestion,
   evaluateSocraticAnswer,
+  generateQuizQuestions,
+  classifyTopicZone,
+  generateWorldPiecePrompt,
+  generateWorldPieceImage,
 }
