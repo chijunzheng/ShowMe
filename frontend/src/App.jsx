@@ -3017,6 +3017,33 @@ function App() {
     return () => clearTimeout(timer)
   }, [slideshowFinished, questionQueue])
 
+  // WB015: Award XP for quick mode (no world piece) - defined before useEffect that uses it
+  const awardQuickXP = useCallback(async () => {
+    if (!wsClientId) return
+
+    try {
+      const response = await fetch('/api/world/quick-xp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: wsClientId }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setQuickXpEarned(data.xpEarned)
+        setShowQuickXpToast(true)
+        logger.info('QUICK_XP', 'Quick mode XP awarded', { xpEarned: data.xpEarned, totalXP: data.totalXP })
+
+        // Refresh world stats to reflect new XP
+        if (typeof refreshWorldStats === 'function') {
+          refreshWorldStats()
+        }
+      }
+    } catch (error) {
+      logger.error('QUICK_XP', 'Failed to award quick mode XP', { error: error.message })
+    }
+  }, [wsClientId])
+
   // SOCRATIC-003 + WB018: Trigger quiz prompt (Full mode) or Socratic mode (Quick mode) when slideshow finishes
   useEffect(() => {
     // Only trigger when slideshow just finished and NO queued questions
@@ -3096,33 +3123,6 @@ function App() {
       runHandleQuestion(question)
     }
   }, [recordSocraticAnswered])
-
-  // WB015: Award XP for quick mode (no world piece)
-  const awardQuickXP = useCallback(async () => {
-    if (!wsClientId) return
-
-    try {
-      const response = await fetch('/api/world/quick-xp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId: wsClientId }),
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        setQuickXpEarned(data.xpEarned)
-        setShowQuickXpToast(true)
-        logger.info('QUICK_XP', 'Quick mode XP awarded', { xpEarned: data.xpEarned, totalXP: data.totalXP })
-
-        // Refresh world stats to reflect new XP
-        if (typeof refreshWorldStats === 'function') {
-          refreshWorldStats()
-        }
-      }
-    } catch (error) {
-      logger.error('QUICK_XP', 'Failed to award quick mode XP', { error: error.message })
-    }
-  }, [wsClientId])
 
   // WB018: Tab navigation handler with badge clearing
   const handleTabChange = useCallback((tab) => {
