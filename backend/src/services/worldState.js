@@ -256,12 +256,12 @@ export async function getWorldState(clientId) {
  * @param {string} piece.imageUrl - URL of the piece image
  * @param {string} piece.prompt - Prompt used to generate the image
  * @param {Object} piece.position - { x: number, y: number } position on the island
- * @returns {Promise<{ worldState: Object | null, error: string | null }>}
+ * @returns {Promise<{ worldState: Object | null, arcaneJustUnlocked: boolean, error: string | null }>}
  */
 export async function addWorldPiece(clientId, piece) {
   const firestore = getFirestore()
   if (!firestore) {
-    return { worldState: null, error: 'FIRESTORE_NOT_AVAILABLE' }
+    return { worldState: null, arcaneJustUnlocked: false, error: 'FIRESTORE_NOT_AVAILABLE' }
   }
 
   try {
@@ -279,12 +279,12 @@ export async function addWorldPiece(clientId, piece) {
     // Validate piece zone
     const validZones = ['nature', 'civilization', 'arcane']
     if (!validZones.includes(piece.zone)) {
-      return { worldState: null, error: `Invalid zone. Must be one of: ${validZones.join(', ')}` }
+      return { worldState: null, arcaneJustUnlocked: false, error: `Invalid zone. Must be one of: ${validZones.join(', ')}` }
     }
 
     // Check if arcane zone is accessible
     if (piece.zone === 'arcane' && !worldState.arcaneUnlocked) {
-      return { worldState: null, error: 'Arcane zone is not unlocked yet' }
+      return { worldState: null, arcaneJustUnlocked: false, error: 'Arcane zone is not unlocked yet' }
     }
 
     // Add the piece with unlock timestamp
@@ -297,9 +297,11 @@ export async function addWorldPiece(clientId, piece) {
     worldState.topicsCompleted = (worldState.topicsCompleted || 0) + 1
     worldState.updatedAt = new Date()
 
-    // Check if arcane should be unlocked
+    // WB017: Check if arcane should be unlocked and track if it just got unlocked
+    let arcaneJustUnlocked = false
     if (!worldState.arcaneUnlocked && worldState.topicsCompleted >= ARCANE_UNLOCK_THRESHOLD) {
       worldState.arcaneUnlocked = true
+      arcaneJustUnlocked = true
       logger.info('WORLD', 'Arcane zone unlocked', { clientId, topicsCompleted: worldState.topicsCompleted })
     }
 
@@ -309,13 +311,14 @@ export async function addWorldPiece(clientId, piece) {
       clientId,
       pieceId: piece.id,
       zone: piece.zone,
-      topicsCompleted: worldState.topicsCompleted
+      topicsCompleted: worldState.topicsCompleted,
+      arcaneJustUnlocked
     })
 
-    return { worldState, error: null }
+    return { worldState, arcaneJustUnlocked, error: null }
   } catch (error) {
     logger.error('WORLD', 'Failed to add world piece', { clientId, error: error.message })
-    return { worldState: null, error: error.message }
+    return { worldState: null, arcaneJustUnlocked: false, error: error.message }
   }
 }
 
@@ -557,18 +560,213 @@ export function getTierDefinitions() {
   }
 }
 
+/**
+ * Check if the arcane zone should be unlocked and unlock it if threshold is met
+ * WB017: Arcane zone unlock after completing 20 topics
+ *
+ * @param {string} clientId - The client identifier
+ * @returns {Promise<{
+ *   unlocked: boolean,
+ *   justUnlocked: boolean,
+ *   message: string | null,
+ *   topicsCompleted: number,
+ *   topicsNeeded: number,
+ *   error: string | null
+ * }>}
+ */
+export async function checkArcaneUnlock(clientId) {
+  const firestore = getFirestore()
+  if (!firestore) {
+    return {
+      unlocked: false,
+      justUnlocked: false,
+      message: null,
+      topicsCompleted: 0,
+      topicsNeeded: ARCANE_UNLOCK_THRESHOLD,
+      error: 'FIRESTORE_NOT_AVAILABLE'
+    }
+  }
+
+  try {
+    const docRef = firestore.collection(COLLECTION_NAME).doc(clientId)
+    const doc = await docRef.get()
+
+    let worldState
+    if (!doc.exists) {
+      worldState = createDefaultWorldState(clientId)
+    } else {
+      worldState = doc.data()
+    }
+
+    const topicsCompleted = worldState.topicsCompleted || 0
+    const wasUnlocked = worldState.arcaneUnlocked || false
+
+    // Check if we should unlock the arcane zone
+    if (!wasUnlocked && topicsCompleted >= ARCANE_UNLOCK_THRESHOLD) {
+      // Unlock arcane zone
+      worldState.arcaneUnlocked = true
+      worldState.updatedAt = new Date()
+      await docRef.set(worldState)
+
+      logger.info('WORLD', 'Arcane zone unlocked via check', { clientId, topicsCompleted })
+
+      return {
+        unlocked: true,
+        justUnlocked: true,
+        message: 'The Arcane zone awakens!',
+        topicsCompleted,
+        topicsNeeded: 0,
+        error: null
+      }
+    }
+
+    // Return current state
+    return {
+      unlocked: wasUnlocked,
+      justUnlocked: false,
+      message: null,
+      topicsCompleted,
+      topicsNeeded: wasUnlocked ? 0 : Math.max(0, ARCANE_UNLOCK_THRESHOLD - topicsCompleted),
+      error: null
+    }
+  } catch (error) {
+    logger.error('WORLD', 'Failed to check arcane unlock', { clientId, error: error.message })
+    return {
+      unlocked: false,
+      justUnlocked: false,
+      message: null,
+      topicsCompleted: 0,
+      topicsNeeded: ARCANE_UNLOCK_THRESHOLD,
+      error: error.message
+    }
+  }
+}
+
+/**
+ * Award XP for quick mode completion (no quiz, no world piece)
+ * WB015: Quick mode awards small XP but no world piece
+ *
+ * @param {string} clientId - The client identifier
+ * @returns {Promise<{
+ *   xpEarned: number,
+ *   totalXP: number,
+ *   tier: string,
+ *   tierUpgrade: { from: string, to: string } | null,
+ *   message: string,
+ *   error: string | null
+ * }>}
+ */
+export async function awardQuickModeXP(clientId) {
+  const firestore = getFirestore()
+  if (!firestore) {
+    return {
+      xpEarned: 0,
+      totalXP: 0,
+      tier: 'barren',
+      tierUpgrade: null,
+      message: '',
+      error: 'FIRESTORE_NOT_AVAILABLE'
+    }
+  }
+
+  try {
+    const docRef = firestore.collection(COLLECTION_NAME).doc(clientId)
+    const doc = await docRef.get()
+
+    let worldState
+    if (!doc.exists) {
+      worldState = createDefaultWorldState(clientId)
+    } else {
+      const data = doc.data()
+      worldState = {
+        ...data,
+        tierHistory: data.tierHistory || [{ tier: 'barren', achievedAt: new Date() }]
+      }
+    }
+
+    // Award quick mode XP (no world piece)
+    const xpEarned = XP_REWARDS.QUICK_MODE
+    const previousTotalXP = worldState.totalXP || 0
+    const previousTier = worldState.tier || 'barren'
+    const newTotalXP = previousTotalXP + xpEarned
+    const newTier = getTierForXP(newTotalXP)
+
+    // Check for tier upgrade
+    let tierUpgrade = null
+    if (newTier !== previousTier) {
+      const previousTierIndex = TIER_ORDER.indexOf(previousTier)
+      const newTierIndex = TIER_ORDER.indexOf(newTier)
+
+      // Only report upgrade if new tier is higher
+      if (newTierIndex > previousTierIndex) {
+        tierUpgrade = { from: previousTier, to: newTier }
+
+        // Add to tier history
+        worldState.tierHistory = worldState.tierHistory || []
+        worldState.tierHistory.push({
+          tier: newTier,
+          achievedAt: new Date()
+        })
+      }
+    }
+
+    // Update world state (note: topicsCompleted NOT incremented, no piece added)
+    const now = new Date()
+    worldState.totalXP = newTotalXP
+    worldState.tier = newTier
+    worldState.lastXPAward = {
+      amount: xpEarned,
+      source: 'quick_mode',
+      timestamp: now
+    }
+    worldState.updatedAt = now
+
+    // Save to Firestore
+    await docRef.set(worldState)
+
+    logger.info('WORLD', 'Quick mode XP awarded', {
+      clientId,
+      xpEarned,
+      totalXP: newTotalXP,
+      tier: newTier,
+      tierUpgrade: tierUpgrade ? `${tierUpgrade.from} -> ${tierUpgrade.to}` : null
+    })
+
+    return {
+      xpEarned,
+      totalXP: newTotalXP,
+      tier: newTier,
+      tierUpgrade,
+      message: 'Complete a full lesson with quiz to unlock world pieces!',
+      error: null
+    }
+  } catch (error) {
+    logger.error('WORLD', 'Failed to award quick mode XP', { clientId, error: error.message })
+    return {
+      xpEarned: 0,
+      totalXP: 0,
+      tier: 'barren',
+      tierUpgrade: null,
+      message: '',
+      error: error.message
+    }
+  }
+}
+
 export default {
   getWorldState,
   initializeWorldState,
   addWorldPiece,
   addXP,
   awardQuizXP,
+  awardQuickModeXP,
   updateStreak,
   getTierForXP,
   calculateTier,
   xpToNextTier,
   checkTierUpgrade,
   getTierDefinitions,
+  checkArcaneUnlock,
   XP_REWARDS,
   TIER_THRESHOLDS
 }

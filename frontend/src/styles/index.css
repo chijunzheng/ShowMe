@@ -231,3 +231,239 @@ body {
   backface-visibility: hidden;
   transform: translateZ(0);
 }
+
+/* WB013: Pocket Portal Animations */
+
+/* Portal swirling animation - clockwise */
+@keyframes portal-swirl {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.portal-swirl {
+  animation: portal-swirl 4s linear infinite;
+}
+
+/* Portal swirling animation - counter-clockwise */
+@keyframes portal-swirl-reverse {
+  0% {
+    transform: rotate(360deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+.portal-swirl-reverse {
+  animation: portal-swirl-reverse 6s linear infinite;
+}
+
+/* Portal icon floating animation */
+@keyframes portal-float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.portal-float {
+  animation: portal-float 2s ease-in-out infinite;
+}
+
+/* Portal sparkle particles */
+@keyframes portal-particle {
+  0%, 100% {
+    opacity: 0;
+    transform: scale(0);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.portal-particle {
+  animation: portal-particle 2s ease-in-out infinite;
+}
+
+/* WB013: Pocket View Animations */
+
+/* Zoom-in transition when entering pocket */
+@keyframes pocket-zoom-in {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+    border-radius: 50%;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+    border-radius: 0;
+  }
+}
+
+.pocket-zoom-in {
+  animation: pocket-zoom-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Zoom-out transition when exiting pocket */
+@keyframes pocket-zoom-out {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+    border-radius: 0;
+  }
+  100% {
+    transform: scale(0.3);
+    opacity: 0;
+    border-radius: 50%;
+  }
+}
+
+.pocket-zoom-out {
+  animation: pocket-zoom-out 0.4s cubic-bezier(0.36, 0, 0.66, -0.56) forwards;
+}
+
+/* Pieces entering pocket view with staggered animation */
+@keyframes pocket-piece-enter {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.5);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.pocket-piece-enter {
+  animation: pocket-piece-enter 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  opacity: 0;
+}
+
+/* Ambient floating animation for pocket decorations */
+@keyframes pocket-float {
+  0%, 100% {
+    transform: translateY(0) translateX(0);
+    opacity: 0.3;
+  }
+  25% {
+    transform: translateY(-10px) translateX(5px);
+    opacity: 0.5;
+  }
+  50% {
+    transform: translateY(-5px) translateX(-5px);
+    opacity: 0.4;
+  }
+  75% {
+    transform: translateY(-15px) translateX(3px);
+    opacity: 0.6;
+  }
+}
+
+.pocket-float {
+  animation: pocket-float 6s ease-in-out infinite;
+}
+
+/* Star twinkle animation for space pocket */
+@keyframes pocket-twinkle {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.5);
+  }
+}
+
+.pocket-twinkle {
+  animation: pocket-twinkle 2s ease-in-out infinite;
+}
+
+/* WB017: Arcane Zone Reveal Animations */
+
+/* Fog drift animation for hidden arcane zone */
+@keyframes fogDrift {
+  0%, 100% {
+    transform: translateX(0) scale(1);
+    opacity: 0.6;
+  }
+  33% {
+    transform: translateX(10px) scale(1.02);
+    opacity: 0.7;
+  }
+  66% {
+    transform: translateX(-8px) scale(0.98);
+    opacity: 0.5;
+  }
+}
+
+.fog-drift {
+  animation: fogDrift 20s ease-in-out infinite;
+}
+
+/* Arcane reveal cloud parting animation */
+@keyframes arcane-cloud-part-top {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(-100%);
+  }
+}
+
+@keyframes arcane-cloud-part-bottom {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+.arcane-cloud-part-top {
+  animation: arcane-cloud-part-top 1.5s ease-out forwards;
+}
+
+.arcane-cloud-part-bottom {
+  animation: arcane-cloud-part-bottom 1.5s ease-out forwards;
+}
+
+/* Arcane zone glow pulse for reveal */
+@keyframes arcane-glow {
+  0%, 100% {
+    box-shadow: 0 0 30px rgba(168, 85, 247, 0.3);
+    opacity: 0.8;
+  }
+  50% {
+    box-shadow: 0 0 60px rgba(168, 85, 247, 0.6);
+    opacity: 1;
+  }
+}
+
+.arcane-glow {
+  animation: arcane-glow 2s ease-in-out infinite;
+}
+
+/* Star twinkle for arcane reveal */
+@keyframes arcane-twinkle {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.5);
+  }
+}
+
+.arcane-twinkle {
+  animation: arcane-twinkle 2s ease-in-out infinite;
+}

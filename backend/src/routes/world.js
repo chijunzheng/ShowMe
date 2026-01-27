@@ -5,12 +5,14 @@
  * WB008: World piece prompt generation
  * WB009: World piece image generation
  * WB014: XP and tier progression for World Builder gamification
+ * WB015: Quick mode XP (no world piece)
  *
  * GET /api/world - Get user's world state
  * POST /api/world/piece - Add a new piece (after quiz pass)
  * POST /api/world/piece/generate - Generate a world piece (prompt + image)
  * POST /api/world/xp - Add XP (returns tier upgrade info)
  * POST /api/world/award-xp - Award XP for quiz completion (WB014)
+ * POST /api/world/quick-xp - Award XP for quick mode (WB015)
  * GET /api/world/tiers - Get tier definitions
  * POST /api/world/classify-zone - Classify a topic into a world zone
  */
@@ -24,6 +26,7 @@ import {
   addWorldPiece,
   addXP,
   awardQuizXP,
+  awardQuickModeXP,
   xpToNextTier,
   getTierDefinitions,
   XP_REWARDS,
@@ -170,7 +173,8 @@ router.post('/piece', async (req, res) => {
 
     return res.json({
       worldState: result.worldState,
-      arcaneUnlocked: result.worldState.arcaneUnlocked
+      arcaneUnlocked: result.worldState.arcaneUnlocked,
+      arcaneJustUnlocked: result.arcaneJustUnlocked || false
     })
   } catch (error) {
     logger.error('WORLD', 'Unexpected error adding world piece', { error: error.message })
@@ -333,6 +337,74 @@ router.post('/award-xp', async (req, res) => {
     })
   } catch (error) {
     logger.error('WORLD', 'Unexpected error awarding quiz XP', { error: error.message })
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
+ * POST /api/world/quick-xp
+ * Award XP for quick mode completion (WB015)
+ *
+ * Quick mode awards a small amount of XP (5 XP) without unlocking
+ * a world piece. This encourages users to try Full mode for world growth.
+ *
+ * Request body:
+ * - clientId: string - The client identifier
+ *
+ * Response:
+ * - xpEarned: number - XP earned (always 5 for quick mode)
+ * - totalXP: number - User's total XP after this award
+ * - tier: string - Current tier after XP award
+ * - tierUpgrade: { from: string, to: string } | null - Tier upgrade info if tier changed
+ * - message: string - Encouraging message to try full mode
+ * - xpRewards: Object - XP reward configuration for client display
+ */
+router.post('/quick-xp', async (req, res) => {
+  try {
+    const { clientId } = req.body
+
+    // Validate clientId
+    if (!clientId || typeof clientId !== 'string') {
+      return res.status(400).json({
+        error: 'Missing or invalid clientId',
+        field: 'clientId'
+      })
+    }
+
+    const { sanitized: sanitizedId, error: idError } = sanitizeId(clientId)
+    if (idError) {
+      return res.status(400).json({
+        error: idError,
+        field: 'clientId'
+      })
+    }
+
+    logger.info('WORLD', 'Awarding quick mode XP', { clientId: sanitizedId })
+
+    const result = await awardQuickModeXP(sanitizedId)
+
+    if (result.error) {
+      logger.error('WORLD', 'Failed to award quick mode XP', { error: result.error })
+      return res.status(500).json({ error: result.error })
+    }
+
+    // Calculate XP to next tier for the response
+    const nextTierInfo = xpToNextTier(result.totalXP)
+
+    return res.json({
+      xpEarned: result.xpEarned,
+      totalXP: result.totalXP,
+      tier: result.tier,
+      tierUpgrade: result.tierUpgrade,
+      message: result.message,
+      xpToNextTier: nextTierInfo.xpNeeded,
+      nextTier: nextTierInfo.nextTier,
+      xpProgress: nextTierInfo.xpProgress,
+      xpProgressTotal: nextTierInfo.xpTotal,
+      xpRewards: XP_REWARDS
+    })
+  } catch (error) {
+    logger.error('WORLD', 'Unexpected error awarding quick mode XP', { error: error.message })
     return res.status(500).json({ error: 'Internal server error' })
   }
 })

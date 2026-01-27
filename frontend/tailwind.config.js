@@ -83,6 +83,9 @@ export default {
         'bounce-in': 'bounceIn 0.5s ease-out',
         // WB010: Sparkle animation for piece unlock celebration
         'sparkle': 'sparkle 1.5s ease-out forwards',
+        // UI008: Tier upgrade celebration animations
+        'tier-particle': 'tierParticle 1.8s ease-out forwards',
+        'fade-in-up': 'fadeInUp 0.5s ease-out forwards',
       },
       keyframes: {
         waveform: {
@@ -157,6 +160,36 @@ export default {
           '100%': {
             transform: 'scale(0) rotate(180deg)',
             opacity: '0',
+          },
+        },
+        // UI008: Tier particle animation - particles radiate outward
+        tierParticle: {
+          '0%': {
+            transform: 'translate(-50%, -50%) scale(0) rotate(0deg)',
+            opacity: '0',
+          },
+          '20%': {
+            transform: 'translate(-50%, -50%) scale(1.5) rotate(45deg)',
+            opacity: '1',
+          },
+          '50%': {
+            transform: 'translate(-50%, -50%) scale(1.2) rotate(90deg)',
+            opacity: '1',
+          },
+          '100%': {
+            transform: 'translate(-50%, -50%) scale(0) rotate(180deg)',
+            opacity: '0',
+          },
+        },
+        // UI008: Fade in up animation for text reveals
+        fadeInUp: {
+          '0%': {
+            transform: 'translateY(20px)',
+            opacity: '0',
+          },
+          '100%': {
+            transform: 'translateY(0)',
+            opacity: '1',
           },
         },
       },

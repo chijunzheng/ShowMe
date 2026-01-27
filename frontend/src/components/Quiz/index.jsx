@@ -14,6 +14,7 @@ import { useState, useCallback, useMemo } from 'react'
 import QuizProgress from './QuizProgress'
 import MCQQuestion from './MCQQuestion'
 import FillBlankQuestion from './FillBlankQuestion'
+import VoiceQuestion from './VoiceQuestion'
 import QuizFeedback from './QuizFeedback'
 import QuizPrompt from './QuizPrompt'
 import QuizResults, { AnimatedXP } from './QuizResults'
@@ -21,7 +22,7 @@ import { fuzzyMatch } from '../../utils/fuzzyMatch'
 
 /**
  * Question types supported by the quiz
- * @typedef {'mcq' | 'fill_blank' | 'true_false'} QuestionType
+ * @typedef {'mcq' | 'fill_blank' | 'true_false' | 'voice'} QuestionType
  */
 
 /**
@@ -132,6 +133,64 @@ export default function Quiz({
       correctAnswer: Array.isArray(currentQuestion.correctAnswer)
         ? currentQuestion.correctAnswer[0]
         : currentQuestion.correctAnswer,
+      explanation: currentQuestion.explanation
+    }
+
+    setCurrentFeedback(feedback)
+    setState(QUIZ_STATE.SHOWING_FEEDBACK)
+  }, [currentQuestion])
+
+  // Handle Voice answer
+  // Voice answers are evaluated semantically: user's response should cover expectedTopics
+  const handleVoiceAnswer = useCallback((userTranscript) => {
+    if (!currentQuestion || currentQuestion.type !== 'voice') return
+
+    const expectedTopics = currentQuestion.expectedTopics || []
+    const correctAnswer = currentQuestion.correctAnswer || currentQuestion.sampleAnswer || ''
+
+    // Count how many expected topics are mentioned in the user's answer
+    // Uses case-insensitive substring matching for semantic evaluation
+    const normalizedTranscript = userTranscript.toLowerCase()
+    let topicsMatched = 0
+
+    for (const topic of expectedTopics) {
+      if (normalizedTranscript.includes(topic.toLowerCase())) {
+        topicsMatched++
+      }
+    }
+
+    // Determine correctness based on topic coverage
+    // Correct if majority of topics are covered (>= 50%)
+    // Partial credit if at least one topic is mentioned
+    const totalTopics = expectedTopics.length
+    let isCorrect = false
+    let isPartial = false
+
+    if (totalTopics > 0) {
+      const coverage = topicsMatched / totalTopics
+      if (coverage >= 0.5) {
+        isCorrect = true
+      } else if (topicsMatched > 0) {
+        isPartial = true
+      }
+    } else {
+      // Fallback: if no expectedTopics, use fuzzy match against correctAnswer
+      const matchResult = fuzzyMatch(userTranscript, correctAnswer, {
+        exactThreshold: 0.7, // More lenient for spoken answers
+        partialThreshold: 0.5,
+        minSimilarity: 0.3
+      })
+      isCorrect = matchResult.isCorrect
+      isPartial = matchResult.isPartial
+    }
+
+    const feedback = {
+      isCorrect,
+      isPartial,
+      similarity: totalTopics > 0 ? topicsMatched / totalTopics : 0,
+      questionId: currentQuestion.id,
+      userAnswer: userTranscript,
+      correctAnswer,
       explanation: currentQuestion.explanation
     }
 
@@ -291,6 +350,46 @@ export default function Quiz({
             />
           </div>
         )}
+
+        {/* Voice Question */}
+        {currentQuestion?.type === 'voice' && state === QUIZ_STATE.ANSWERING && (
+          <VoiceQuestion
+            key={currentQuestion.id}
+            question={currentQuestion.question}
+            expectedTopics={currentQuestion.expectedTopics}
+            sampleAnswer={currentQuestion.sampleAnswer || currentQuestion.correctAnswer}
+            onAnswer={handleVoiceAnswer}
+            showFeedback={false}
+          />
+        )}
+
+        {/* Voice with feedback */}
+        {currentQuestion?.type === 'voice' && state === QUIZ_STATE.SHOWING_FEEDBACK && currentFeedback && (
+          <div className="space-y-6">
+            <VoiceQuestion
+              key={`${currentQuestion.id}-feedback`}
+              question={currentQuestion.question}
+              expectedTopics={currentQuestion.expectedTopics}
+              sampleAnswer={currentQuestion.sampleAnswer || currentQuestion.correctAnswer}
+              onAnswer={() => {}}
+              showFeedback={true}
+              feedback={{
+                correct: currentFeedback.isCorrect,
+                explanation: currentQuestion.explanation
+              }}
+              userTranscript={currentFeedback.userAnswer}
+              correctAnswer={currentFeedback.correctAnswer}
+            />
+            <QuizFeedback
+              isCorrect={currentFeedback.isCorrect}
+              isPartial={currentFeedback.isPartial}
+              explanation={currentQuestion.explanation}
+              correctAnswer={currentFeedback.correctAnswer}
+              userAnswer={currentFeedback.userAnswer}
+              onContinue={handleContinue}
+            />
+          </div>
+        )}
       </div>
     </div>
   )
@@ -301,6 +400,7 @@ export {
   QuizProgress,
   MCQQuestion,
   FillBlankQuestion,
+  VoiceQuestion,
   QuizFeedback,
   QuizPrompt,
   QuizResults,

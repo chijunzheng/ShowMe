@@ -2,6 +2,7 @@
  * ParallaxDiorama Component
  * WB011: Renders the world as a parallax diorama with 3 distinct layers
  * WB012: Distributes pieces to correct zones (nature=foreground, civilization=mid, arcane=background)
+ * WB013: Renders pocket portals within appropriate zone layers
  *
  * The parallax effect is achieved by moving layers at different speeds:
  * - Background (arcane): 0.2x speed - slowest, appears farthest
@@ -72,14 +73,56 @@ function categorizePiecesByZone(pieces) {
 }
 
 /**
+ * WB013: Group pockets by their zone for rendering in correct layers
+ *
+ * @param {Array} pockets - Array of pocket objects
+ * @returns {Object} Pockets organized by zone
+ */
+function categorizePocketsByZone(pockets) {
+  const zones = {
+    nature: [],
+    civilization: [],
+    arcane: [],
+  }
+
+  if (!pockets || !Array.isArray(pockets)) {
+    return zones
+  }
+
+  pockets.forEach((pocket) => {
+    const zone = pocket.zone?.toLowerCase() || 'nature'
+    if (zones[zone]) {
+      zones[zone].push(pocket)
+    } else {
+      // Unknown zones default to nature (foreground)
+      zones.nature.push(pocket)
+    }
+  })
+
+  return zones
+}
+
+/**
  * ParallaxDiorama - The main parallax world view with drag/scroll interaction
  *
  * @param {Object} props - Component props
  * @param {Array} props.pieces - Array of WorldPiece objects
  * @param {string} [props.tier='barren'] - Current world tier for background
+ * @param {Array} [props.pockets=[]] - WB013: Array of pocket portal objects
  * @param {Function} [props.onPieceClick] - Callback when a piece is clicked
+ * @param {Function} [props.onPocketClick] - WB013: Callback when a pocket portal is clicked
+ * @param {boolean} [props.arcaneUnlocked=false] - WB017: Whether the arcane zone is unlocked
+ * @param {number} [props.topicsNeeded=0] - WB017: Number of topics needed to unlock arcane
  */
-function ParallaxDiorama({ pieces = [], tier = 'barren', onPieceClick }) {
+function ParallaxDiorama({
+  pieces = [],
+  tier = 'barren',
+  pockets = [],
+  onPieceClick,
+  onPocketClick,
+  arcaneUnlocked = false,
+  topicsNeeded = 0,
+}) {
   // Scroll/drag state
   const [scrollOffset, setScrollOffset] = useState(0)
   const [isDragging, setIsDragging] = useState(false)
@@ -106,6 +149,9 @@ function ParallaxDiorama({ pieces = [], tier = 'barren', onPieceClick }) {
 
   // Organize pieces by zone for rendering in correct layers
   const piecesByZone = useMemo(() => categorizePiecesByZone(pieces), [pieces])
+
+  // WB013: Organize pockets by zone for rendering portals in correct layers
+  const pocketsByZone = useMemo(() => categorizePocketsByZone(pockets), [pockets])
 
   // Get tier background or default
   const backgroundClass = TIER_BACKGROUNDS[tier] || DEFAULT_BACKGROUND
@@ -264,33 +310,42 @@ function ParallaxDiorama({ pieces = [], tier = 'barren', onPieceClick }) {
       aria-label="World diorama with parallax layers. Drag to explore."
     >
       {/* Background layer - Arcane pieces (sky/cosmic) */}
+      {/* WB017: Arcane zone hidden until unlocked */}
       <ZoneLayer
         zone="arcane"
         pieces={piecesByZone.arcane}
+        pockets={pocketsByZone.arcane}
         scrollOffset={scrollOffset}
         speed={PARALLAX_SPEEDS.arcane}
         layerWidth={layerWidth}
         onPieceClick={onPieceClick}
+        onPocketClick={onPocketClick}
+        hidden={!arcaneUnlocked}
+        topicsNeeded={topicsNeeded}
       />
 
       {/* Midground layer - Civilization pieces (structures) */}
       <ZoneLayer
         zone="civilization"
         pieces={piecesByZone.civilization}
+        pockets={pocketsByZone.civilization}
         scrollOffset={scrollOffset}
         speed={PARALLAX_SPEEDS.civilization}
         layerWidth={layerWidth}
         onPieceClick={onPieceClick}
+        onPocketClick={onPocketClick}
       />
 
       {/* Foreground layer - Nature pieces (terrain/plants) */}
       <ZoneLayer
         zone="nature"
         pieces={piecesByZone.nature}
+        pockets={pocketsByZone.nature}
         scrollOffset={scrollOffset}
         speed={PARALLAX_SPEEDS.nature}
         layerWidth={layerWidth}
         onPieceClick={onPieceClick}
+        onPocketClick={onPocketClick}
       />
 
       {/* Scroll indicator hint */}

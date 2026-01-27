@@ -4,7 +4,8 @@ import SuggestionCard from './components/SuggestionCard'
 import Toast from './components/Toast'
 import TopicHeader from './components/TopicHeader'
 import SectionDivider from './components/SectionDivider'
-import TopicSidebar from './components/TopicSidebar'
+// UI010: TopicSidebar removed - topics now accessible via Learn tab history
+import LearnHistory from './components/LearnHistory'
 import HighlightOverlay from './components/HighlightOverlay'
 import LevelCard from './components/LevelCard'
 import RegenerateDropdown from './components/RegenerateDropdown'
@@ -23,7 +24,13 @@ import WorldView from './components/WorldView'
 import Quiz from './components/Quiz'
 import QuizPrompt from './components/QuizPrompt'
 import PieceUnlockCelebration from './components/PieceUnlockCelebration'
+import TierUpCelebration from './components/TierUpCelebration'
 import LearnModeToggle from './components/LearnModeToggle'
+// WB015: Quick mode XP toast
+import QuickXpToast from './components/QuickXpToast'
+// UI002: Home screen stats display
+import HomeStats from './components/HomeStats'
+import useWorldStats from './hooks/useWorldStats'
 
 // App states
 const UI_STATE = {
@@ -1077,10 +1084,21 @@ function App() {
     badges: badgeDefinitions,
     newBadges,
     clearNewBadges,
+    clientId: userClientId,
     recordQuestionAsked,
     recordSocraticAnswered,
     recordDeepLevelUsed
   } = useUserProgress()
+
+  // UI002: World stats for home screen display
+  const {
+    totalXP,
+    tier: worldTier,
+    xpProgress,
+    pieceCount,
+    isLoading: isWorldStatsLoading,
+    refresh: refreshWorldStats,
+  } = useWorldStats(userClientId)
 
   // POLISH-001: Celebration state
   const [showConfetti, setShowConfetti] = useState(false)
@@ -1103,6 +1121,12 @@ function App() {
   const [quizResults, setQuizResults] = useState(null)
   const [unlockedPiece, setUnlockedPiece] = useState(null)
   const [showPieceCelebration, setShowPieceCelebration] = useState(false)
+  // WB015: Quick mode XP toast state
+  const [showQuickXpToast, setShowQuickXpToast] = useState(false)
+  const [quickXpEarned, setQuickXpEarned] = useState(0)
+  // UI008: Tier upgrade celebration state
+  const [showTierCelebration, setShowTierCelebration] = useState(false)
+  const [tierUpgradeInfo, setTierUpgradeInfo] = useState(null)
 
   const generationProgressPercent = useMemo(() => {
     if (!generationProgress.stage) return 0
@@ -3031,7 +3055,7 @@ function App() {
           // Full mode: Show quiz prompt to encourage knowledge retention
           setUiState(UI_STATE.QUIZ_PROMPT)
         } else {
-          // Quick mode: Show Socratic questioning
+          // Quick mode: Show Socratic questioning + award quick XP (WB015)
           setSocraticSlides(contentSlides)
           setSocraticTopicName(topic.name || 'this topic')
           // Detect language from first slide subtitle
@@ -3039,12 +3063,14 @@ function App() {
           const hasChineseChars = /[\u4e00-\u9fff]/.test(firstSubtitle)
           setSocraticLanguage(hasChineseChars ? 'zh' : 'en')
           setUiState(UI_STATE.SOCRATIC)
+          // WB015: Award small XP for quick mode (no world piece)
+          awardQuickXP()
         }
       }
     }, 2000) // 2 second delay to let user absorb final slide
 
     return () => clearTimeout(timer)
-  }, [slideshowFinished, questionQueue.length, activeTopicId, learnMode]) // Added learnMode dependency
+  }, [slideshowFinished, questionQueue.length, activeTopicId, learnMode, awardQuickXP]) // WB015: Added awardQuickXP dependency
 
   // SOCRATIC-003: Handle Socratic mode completion
   const handleSocraticComplete = useCallback(() => {
@@ -3070,6 +3096,33 @@ function App() {
       runHandleQuestion(question)
     }
   }, [recordSocraticAnswered])
+
+  // WB015: Award XP for quick mode (no world piece)
+  const awardQuickXP = useCallback(async () => {
+    if (!wsClientId) return
+
+    try {
+      const response = await fetch('/api/world/quick-xp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: wsClientId }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setQuickXpEarned(data.xpEarned)
+        setShowQuickXpToast(true)
+        logger.info('QUICK_XP', 'Quick mode XP awarded', { xpEarned: data.xpEarned, totalXP: data.totalXP })
+
+        // Refresh world stats to reflect new XP
+        if (typeof refreshWorldStats === 'function') {
+          refreshWorldStats()
+        }
+      }
+    } catch (error) {
+      logger.error('QUICK_XP', 'Failed to award quick mode XP', { error: error.message })
+    }
+  }, [wsClientId])
 
   // WB018: Tab navigation handler with badge clearing
   const handleTabChange = useCallback((tab) => {
@@ -3156,6 +3209,16 @@ function App() {
             // Increment world badge for new piece notification
             setWorldBadge(prev => prev + 1)
           }
+          // UI008: Handle tier upgrade celebration
+          if (data.tierUpgrade) {
+            setTierUpgradeInfo(data.tierUpgrade)
+            // Delay tier celebration to show after piece celebration if both occur
+            if (data.piece) {
+              // Will be shown after piece celebration closes
+            } else {
+              setShowTierCelebration(true)
+            }
+          }
         }
       } catch (error) {
         logger.error('QUIZ', 'Failed to evaluate quiz', { error: error.message })
@@ -3189,13 +3252,43 @@ function App() {
   const handlePieceCelebrationClose = useCallback(() => {
     setShowPieceCelebration(false)
     setUnlockedPiece(null)
-    setUiState(UI_STATE.HOME)
-  }, [])
+    // UI002: Refresh world stats after piece unlock
+    refreshWorldStats()
+    // UI008: Show tier celebration if pending after piece celebration
+    if (tierUpgradeInfo) {
+      setShowTierCelebration(true)
+    } else {
+      setUiState(UI_STATE.HOME)
+    }
+  }, [tierUpgradeInfo, refreshWorldStats])
 
   // WB018: Handle view world from celebration
   const handleViewWorldFromCelebration = useCallback(() => {
     setShowPieceCelebration(false)
     setUnlockedPiece(null)
+    // UI002: Refresh world stats after piece unlock
+    refreshWorldStats()
+    // UI008: Show tier celebration if pending, then go to world
+    if (tierUpgradeInfo) {
+      setShowTierCelebration(true)
+    } else {
+      setActiveTab('world')
+      setWorldBadge(0) // Clear badge since they're viewing world
+      setUiState(UI_STATE.HOME)
+    }
+  }, [tierUpgradeInfo, refreshWorldStats])
+
+  // UI008: Handle tier celebration close
+  const handleTierCelebrationClose = useCallback(() => {
+    setShowTierCelebration(false)
+    setTierUpgradeInfo(null)
+    setUiState(UI_STATE.HOME)
+  }, [])
+
+  // UI008: Handle view world from tier celebration
+  const handleTierViewWorld = useCallback(() => {
+    setShowTierCelebration(false)
+    setTierUpgradeInfo(null)
     setActiveTab('world')
     setWorldBadge(0) // Clear badge since they're viewing world
     setUiState(UI_STATE.HOME)
@@ -4974,37 +5067,54 @@ function App() {
   return (
     // F055, F056, F058: Responsive container with sidebar layout on desktop
     <div className="h-screen flex overflow-hidden">
-      {/* GAMIFY-003: Streak counter in top-right corner (T002) */}
+      {/* GAMIFY-003, UI009: Streak counter in top-right corner (T002) */}
       <div className="fixed top-4 right-4 z-40">
-        <StreakCounter streakCount={userProgress?.streakCount || 0} />
+        <StreakCounter
+          streakCount={userProgress?.streakCount || 0}
+          lastActiveDate={userProgress?.lastActiveDate}
+          longestStreak={userProgress?.longestStreak || 0}
+          hasFreezeAvailable={userProgress?.streakFreezeAvailable || false}
+        />
       </div>
 
       {/* POLISH-001: Achievement celebration components */}
       <Confetti isActive={showConfetti} onComplete={handleConfettiComplete} />
       <AchievementToast badge={currentToastBadge} onDismiss={handleToastDismiss} />
 
-      {/* CORE016, CORE017: Topic sidebar - hidden when no topics, visible on desktop, hamburger on mobile */}
-      <TopicSidebar
-        topics={topics}
-        activeTopic={activeTopic}
-        onNavigateToTopic={handleNavigateToTopic}
-        onNewTopic={handleNewTopic}
-        onRenameTopic={handleRenameTopic}
-        onDeleteTopic={handleDeleteTopic}
+      {/* WB015: Quick mode XP toast */}
+      <QuickXpToast
+        xpEarned={quickXpEarned}
+        visible={showQuickXpToast}
+        onDismiss={() => setShowQuickXpToast(false)}
+        onSwitchMode={() => {
+          setShowQuickXpToast(false)
+          setLearnMode('full')
+        }}
       />
 
-      {/* Main content area - centered on wide screens when sidebar is present */}
-      <div className={`
-        flex-1 h-full flex flex-col items-center justify-center
-        px-4 py-4 pb-24 md:pb-4
-        overflow-y-auto
-        ${topics.length > 0 ? 'md:ml-0' : ''}
-      `}>
+      {/* UI010: TopicSidebar removed - topics now accessible via Learn tab history */}
+
+      {/* UI010: Main content area - full width with bottom tabs */}
+      <div className="flex-1 h-full flex flex-col items-center justify-center px-4 py-4 pb-24 md:pb-4 overflow-y-auto">
         {/* F055: max-width 800px centered on desktop, F056: full-width on mobile */}
         <main className="w-full max-w-4xl mx-auto">
         {/* HOME screen - level selection + voice trigger */}
         {uiState === UI_STATE.HOME && (
           <div className="flex flex-col items-center gap-8 px-4 md:px-0 animate-fade-in">
+            {/* UI002: Home stats bar with XP, tier, streak, and world preview */}
+            <HomeStats
+              totalXP={totalXP}
+              tier={worldTier}
+              xpProgress={xpProgress}
+              streakCount={userProgress?.streakCount || 0}
+              pieceCount={pieceCount}
+              onWorldPreviewClick={() => {
+                setWorldBadge(0)
+                setActiveTab('world')
+              }}
+              isLoading={isWorldStatsLoading}
+            />
+
             {/* Headline */}
             <div className="text-center">
               <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
@@ -5118,8 +5228,18 @@ function App() {
                   onClick={() => setShowTextFallback(false)}
                   className="w-full text-sm text-primary hover:text-primary/80 transition-colors"
                 >
-                  🎤 Use voice instead
+                  Use voice instead
                 </button>
+              </div>
+            )}
+
+            {/* UI010: Recent topics history - replaces sidebar navigation */}
+            {topics.length > 0 && (
+              <div className="w-full mt-4">
+                <LearnHistory
+                  topics={topics}
+                  onTopicClick={(topic) => handleNavigateToTopic(topic.id)}
+                />
               </div>
             )}
           </div>
@@ -6021,10 +6141,17 @@ function App() {
         />
       )}
 
-      {/* Spacer to balance sidebar and keep content centered on wide screens */}
-      {topics.length > 0 && (
-        <div className="hidden xl:block w-64 flex-shrink-0" aria-hidden="true" />
+      {/* UI008: Tier upgrade celebration overlay */}
+      {showTierCelebration && tierUpgradeInfo && (
+        <TierUpCelebration
+          fromTier={tierUpgradeInfo.from}
+          toTier={tierUpgradeInfo.to}
+          onComplete={handleTierCelebrationClose}
+          onViewWorld={handleTierViewWorld}
+        />
       )}
+
+      {/* UI010: Sidebar spacer removed - using full width layout */}
     </div>
   )
 }

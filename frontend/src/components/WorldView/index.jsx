@@ -1,19 +1,23 @@
 /**
  * WorldView Component
  * WB011 + WB012: Main container for the World Builder diorama view
+ * WB013: Pocket portal system for grouping related pieces
  *
  * This component:
  * - Manages world state (pieces, tier, loading)
  * - Fetches world data from API
  * - Renders the parallax diorama or empty state
  * - Handles piece click interactions
+ * - Detects and manages pocket portals for clustered pieces
  *
  * The world displays user's learned topics as collectible pieces
  * arranged in a parallax diorama with 3 depth layers.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import ParallaxDiorama from './ParallaxDiorama'
+import PocketView from './PocketView'
+import ArcaneReveal from './ArcaneReveal'
 
 /**
  * API base URL from environment
@@ -40,6 +44,88 @@ function calculateTier(pieceCount) {
   if (pieceCount >= TIER_THRESHOLDS.growing) return 'growing'
   if (pieceCount >= TIER_THRESHOLDS.sprouting) return 'sprouting'
   return 'barren'
+}
+
+/**
+ * WB013: Minimum pieces required to form a pocket portal
+ */
+const POCKET_THRESHOLD = 3
+
+/**
+ * WB013: Category inference patterns
+ * Maps keywords in topic names to sub-categories
+ */
+const CATEGORY_PATTERNS = {
+  ocean: /ocean|sea|fish|whale|coral|shark|dolphin|jellyfish|octopus|reef|marine|aquatic|underwater/i,
+  space: /space|planet|star|galaxy|moon|asteroid|rocket|astronaut|solar|cosmic|nebula|mars|saturn|jupiter/i,
+  dinosaurs: /dinosaur|fossil|prehistoric|jurassic|trex|raptor|pterodactyl|extinct|triassic|cretaceous/i,
+  ancient: /ancient|egypt|rome|greek|pyramid|pharaoh|gladiator|mythology|medieval|castle|knight/i,
+  plants: /plant|tree|flower|garden|forest|leaf|root|photosynthesis|seed|botany|jungle|rainforest/i,
+  animals: /animal|lion|tiger|elephant|bird|mammal|reptile|insect|bug|wildlife|zoo|safari|predator/i,
+  weather: /weather|rain|storm|cloud|tornado|hurricane|lightning|snow|climate|wind|thunder|forecast/i,
+  technology: /computer|robot|ai|machine|code|software|internet|digital|electronic|circuit|programming/i,
+  music: /music|song|instrument|guitar|piano|drum|melody|rhythm|orchestra|concert|symphony/i,
+}
+
+/**
+ * WB013: Infer category from a topic name
+ *
+ * @param {string} topicName - The name of the topic
+ * @returns {string} - Inferred category or 'general'
+ */
+function inferCategory(topicName) {
+  if (!topicName || typeof topicName !== 'string') {
+    return 'general'
+  }
+
+  const lower = topicName.toLowerCase()
+
+  for (const [category, pattern] of Object.entries(CATEGORY_PATTERNS)) {
+    if (pattern.test(lower)) {
+      return category
+    }
+  }
+
+  return 'general'
+}
+
+/**
+ * WB013: Detect pocket portals from a collection of pieces
+ * Groups pieces by sub-category and returns pockets with 3+ pieces
+ *
+ * @param {Array} pieces - Array of world pieces
+ * @returns {Array} - Array of pocket objects { category, pieces, zone }
+ */
+function detectPockets(pieces) {
+  if (!pieces || !Array.isArray(pieces) || pieces.length < POCKET_THRESHOLD) {
+    return []
+  }
+
+  // Group pieces by their category
+  const categories = {}
+
+  pieces.forEach((piece) => {
+    // Use piece's explicit category if available, otherwise infer from topic name
+    const category = piece.category || inferCategory(piece.topicName || piece.name)
+
+    if (!categories[category]) {
+      categories[category] = []
+    }
+    categories[category].push(piece)
+  })
+
+  // Filter to only categories with enough pieces to form a pocket
+  // Exclude 'general' category from forming pockets (too vague)
+  return Object.entries(categories)
+    .filter(([category, categoryPieces]) =>
+      category !== 'general' && categoryPieces.length >= POCKET_THRESHOLD
+    )
+    .map(([category, categoryPieces]) => ({
+      category,
+      pieces: categoryPieces,
+      // Use the zone of the first piece in the category
+      zone: categoryPieces[0]?.zone || 'nature',
+    }))
 }
 
 /**
@@ -146,16 +232,20 @@ function ErrorState({ message, onRetry }) {
  * @param {string} props.clientId - User's client ID for API calls
  * @param {Function} [props.onStartLearning] - Callback to start a learning session
  * @param {Function} [props.onPieceClick] - Callback when a piece is clicked
+ * @param {Function} [props.onArcaneUnlock] - WB017: Callback when arcane zone is unlocked
  * @param {Array} [props.initialPieces] - Optional initial pieces (for testing)
  * @param {string} [props.initialTier] - Optional initial tier (for testing)
+ * @param {boolean} [props.initialArcaneUnlocked] - WB017: Optional initial arcane unlock state (for testing)
  * @param {boolean} [props.skipFetch] - Skip API fetch (for testing with initialPieces)
  */
 function WorldView({
   clientId,
   onStartLearning,
   onPieceClick,
+  onArcaneUnlock,
   initialPieces,
   initialTier,
+  initialArcaneUnlocked = false,
   skipFetch = false,
 }) {
   // World state
@@ -163,6 +253,17 @@ function WorldView({
   const [tier, setTier] = useState(initialTier || 'barren')
   const [isLoading, setIsLoading] = useState(!skipFetch)
   const [error, setError] = useState(null)
+
+  // WB017: Arcane zone unlock state
+  const [arcaneUnlocked, setArcaneUnlocked] = useState(initialArcaneUnlocked)
+  const [topicsNeeded, setTopicsNeeded] = useState(20) // Default threshold
+  const [showArcaneReveal, setShowArcaneReveal] = useState(false)
+
+  // WB013: Pocket portal state
+  const [activePocket, setActivePocket] = useState(null)
+
+  // WB013: Detect pocket portals from current pieces
+  const pockets = useMemo(() => detectPockets(pieces), [pieces])
 
   /**
    * Fetch world state from API
@@ -178,7 +279,7 @@ function WorldView({
       setError(null)
 
       const response = await fetch(
-        `${API_BASE}/api/world/state?clientId=${encodeURIComponent(clientId)}`
+        `${API_BASE}/api/world?clientId=${encodeURIComponent(clientId)}`
       )
 
       if (!response.ok) {
@@ -186,13 +287,20 @@ function WorldView({
       }
 
       const data = await response.json()
+      const worldState = data.worldState || {}
 
       // Update state with fetched data
-      setPieces(data.pieces || [])
+      setPieces(worldState.pieces || [])
 
       // Calculate tier from piece count if not provided
-      const calculatedTier = data.tier || calculateTier(data.pieces?.length || 0)
+      const calculatedTier = worldState.tier || calculateTier(worldState.pieces?.length || 0)
       setTier(calculatedTier)
+
+      // WB017: Update arcane unlock state from world state response
+      setArcaneUnlocked(worldState.arcaneUnlocked || false)
+      const topicsCompleted = worldState.topicsCompleted || 0
+      const threshold = data.tiers?.arcaneUnlockThreshold || 20
+      setTopicsNeeded(Math.max(0, threshold - topicsCompleted))
     } catch (err) {
       console.error('Failed to load world state:', err)
       setError(err.message)
@@ -233,6 +341,56 @@ function WorldView({
     fetchWorldState()
   }, [fetchWorldState])
 
+  /**
+   * WB013: Handle pocket portal click - opens pocket view
+   */
+  const handlePocketClick = useCallback((pocketData) => {
+    setActivePocket(pocketData)
+  }, [])
+
+  /**
+   * WB013: Handle return from pocket view
+   */
+  const handlePocketBack = useCallback(() => {
+    setActivePocket(null)
+  }, [])
+
+  /**
+   * WB017: Handle arcane reveal animation completion
+   */
+  const handleArcaneRevealComplete = useCallback(() => {
+    setShowArcaneReveal(false)
+    onArcaneUnlock?.()
+  }, [onArcaneUnlock])
+
+  /**
+   * WB017: Trigger arcane reveal when unlocked via external action
+   * This is called when a piece is added that triggers the unlock
+   */
+  const triggerArcaneReveal = useCallback(() => {
+    setArcaneUnlocked(true)
+    setTopicsNeeded(0)
+    setShowArcaneReveal(true)
+  }, [])
+
+  // WB013: Render pocket view if active
+  if (activePocket) {
+    return (
+      <PocketView
+        pocket={activePocket}
+        onBack={handlePocketBack}
+        onPieceClick={onPieceClick}
+      />
+    )
+  }
+
+  // WB017: Render arcane reveal animation if showing
+  if (showArcaneReveal) {
+    return (
+      <ArcaneReveal onComplete={handleArcaneRevealComplete} />
+    )
+  }
+
   // Render loading state
   if (isLoading) {
     return <LoadingState />
@@ -248,12 +406,16 @@ function WorldView({
     return <EmptyWorldState onStartLearning={handleStartLearning} />
   }
 
-  // Render the parallax diorama
+  // Render the parallax diorama with pocket portals
   return (
     <ParallaxDiorama
       pieces={pieces}
       tier={tier}
+      pockets={pockets}
       onPieceClick={handlePieceClick}
+      onPocketClick={handlePocketClick}
+      arcaneUnlocked={arcaneUnlocked}
+      topicsNeeded={topicsNeeded}
     />
   )
 }
