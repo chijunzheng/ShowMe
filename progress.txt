@@ -2025,3 +2025,97 @@ if (source !== 'voice' && uiState === UI_STATE.SLIDESHOW) {
 
 ### Git Commits
 - (pending): fix: shrink socratic payload and trigger on manual end
+
+---
+
+## Session 30: Knowledge Graph UI Redesign + GCS Audio Storage (2026-01-26)
+
+### Completed Features
+
+#### Knowledge Graph Visualization - IMPLEMENTED
+Complete redesign of the knowledge graph with LLM-connected topics and force-directed layout.
+
+**Force Simulation (`useClusteredSimulation.js`):**
+- Hooke's law springs for edge connections (weak: 0.008 strength)
+- Coulomb's law repulsion between all nodes (strong: 25000 force)
+- Cluster gravity groups nodes by category
+- Boundary repulsion keeps nodes on screen
+- Wedge-based initialization spreads categories in distinct sectors
+
+**Edge Rendering (`EdgeLine.jsx`):**
+- Bezier curves with category-aware colors
+- Cross-category edges shown as dashed lines
+- Opacity varies based on highlight state
+
+**Local Classification Fallback (`useGraphClassification.js`):**
+- Keyword-based topic classification when backend unavailable
+- Categories: Technology, Biology, Physics, Chemistry, History, Geography, Math, Arts, Language, Philosophy, Psychology, Economics
+- Builds edges between topics sharing category + keywords
+
+**Follow-up Tree Panel (`FollowUpTreePanel.jsx`):**
+- Right-side panel showing slide hierarchy
+- Converts flat slides array (with parentId) to nested tree
+- Click to navigate to specific slide
+
+#### Backend Storage Infrastructure - IMPLEMENTED
+
+**Firestore + GCS Dual Storage (`knowledgeGraph.js`, `storage.js`):**
+- Firestore for topic metadata (fast queries)
+- GCS for full topic data (scalable storage)
+- In-memory fallback for development without cloud credentials
+
+**Audio Persistence to GCS (`slideStore.js`):**
+- Audio now saved alongside images to GCS bucket
+- Path format: `slides/{clientId}/{topicId}/{versionId}/{slideId}_audio.mp3`
+- Signed URLs generated on retrieval (24-hour expiry)
+- Eliminates 1-2s TTS regeneration latency for historical content
+
+**GCS Bucket Configuration:**
+- Created bucket: `showme-slides-jasonchi` (us-central1)
+- Configured Application Default Credentials
+- Added `SHOWME_GCS_BUCKET` to `.env`
+
+### Files Created
+- `frontend/src/components/KnowledgeGraph/useGraphClassification.js`
+- `frontend/src/components/KnowledgeGraph/useClusteredSimulation.js`
+- `frontend/src/components/KnowledgeGraph/EdgeLine.jsx`
+- `frontend/src/components/KnowledgeGraph/FollowUpTreePanel.jsx`
+- `frontend/src/components/KnowledgeGraph/TopicNode.jsx`
+- `frontend/src/components/KnowledgeGraph/ClusterHull.jsx`
+- `backend/src/services/storage.js`
+
+### Files Modified
+- `frontend/src/components/KnowledgeGraph/ClusteredForceGraph.jsx` - Dimension measurement fix with retries
+- `frontend/src/components/GraphOverlayModal.jsx` - Split layout with follow-up panel
+- `backend/src/services/knowledgeGraph.js` - Added CATEGORY_COLORS export, in-memory fallback
+- `backend/src/services/slideStore.js` - Audio persistence to GCS
+- `backend/.env` - Added SHOWME_GCS_BUCKET config
+
+### Bug Fixes
+1. **Graph empty on first open** - Container measured 0x0 before modal rendered
+   - Fix: Added requestAnimationFrame + setTimeout retries, `[topics.length]` dependency
+2. **CATEGORY_COLORS not exported** - Backend route failed to import
+   - Fix: Changed `const` to `export const`
+3. **Firestore NOT_FOUND spam** - Errors when no project configured
+   - Fix: Early return if `!process.env.GOOGLE_CLOUD_PROJECT`
+4. **Graph too crowded** - All 50 topics clustered in center
+   - Fix: 10x stronger repulsion, 20x weaker edge springs, larger repulsion radius
+
+### Storage Architecture Summary
+
+| Data Type | Location | Format |
+|-----------|----------|--------|
+| Slide images | GCS bucket | Binary PNG/JPG |
+| Slide audio | GCS bucket | Binary MP3/WAV (NEW!) |
+| Slide metadata | Firestore | JSON (id, subtitle, imagePath, audioPath) |
+| Knowledge graph | Firestore + Memory | Nodes + edges |
+
+### Git Commits
+- (pending): feat: knowledge graph UI redesign with force-directed layout
+- (pending): feat: audio persistence to GCS for instant historical playback
+
+### Context for Next Agent
+- Knowledge graph uses local classification when backend unavailable
+- Force simulation creates spacious layout with category clustering
+- Audio is now persisted to GCS, eliminating TTS regeneration latency
+- Local development uses `SHOWME_LOCAL_SLIDES=1` for file-based storage

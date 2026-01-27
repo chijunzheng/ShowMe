@@ -151,10 +151,16 @@ function parseDataUrl(dataUrl) {
 
 function getExtensionFromContentType(contentType) {
   if (!contentType) return 'bin'
+  // Image types
   if (contentType.includes('png')) return 'png'
   if (contentType.includes('jpeg')) return 'jpg'
   if (contentType.includes('webp')) return 'webp'
   if (contentType.includes('svg')) return 'svg'
+  // Audio types
+  if (contentType.includes('mpeg') || contentType.includes('mp3')) return 'mp3'
+  if (contentType.includes('wav')) return 'wav'
+  if (contentType.includes('ogg')) return 'ogg'
+  if (contentType.includes('webm')) return 'webm'
   return 'bin'
 }
 
@@ -163,7 +169,7 @@ function getFallbackImageUrl(index) {
   return `https://placehold.co/800x450/${colors[index % colors.length]}/white?text=Slide+${index + 1}`
 }
 
-async function uploadDataUrl({ bucket, clientId, topicId, versionId, slideId, dataUrl, index }) {
+async function uploadDataUrl({ bucket, clientId, topicId, versionId, slideId, dataUrl, index, suffix = '' }) {
   const parsed = parseDataUrl(dataUrl)
   if (!parsed) return null
 
@@ -172,7 +178,8 @@ async function uploadDataUrl({ bucket, clientId, topicId, versionId, slideId, da
   const safeTopicId = sanitizeSegment(topicId)
   const safeVersionId = sanitizeSegment(versionId)
   const safeSlideId = sanitizeSegment(slideId || `slide_${index}`)
-  const objectPath = `slides/${safeClientId}/${safeTopicId}/${safeVersionId}/${safeSlideId}.${extension}`
+  const fileName = suffix ? `${safeSlideId}_${suffix}` : safeSlideId
+  const objectPath = `slides/${safeClientId}/${safeTopicId}/${safeVersionId}/${fileName}.${extension}`
 
   const buffer = Buffer.from(parsed.base64Data, 'base64')
   await bucket.file(objectPath).save(buffer, {
@@ -192,6 +199,7 @@ async function hydrateSlides(slides, bucket) {
   const hydrated = await Promise.all(slides.map(async (slide, index) => {
     if (!slide || typeof slide !== 'object') return null
 
+    // Hydrate image URL
     let imageUrl = slide.imageUrl || null
     if (!imageUrl && slide.imagePath) {
       try {
@@ -201,7 +209,7 @@ async function hydrateSlides(slides, bucket) {
         })
         imageUrl = signedUrl
       } catch (error) {
-        logger.warn('STORAGE', 'Failed to sign GCS URL', {
+        logger.warn('STORAGE', 'Failed to sign image GCS URL', {
           error: error.message,
           imagePath: slide.imagePath,
         })
@@ -212,9 +220,27 @@ async function hydrateSlides(slides, bucket) {
       imageUrl = getFallbackImageUrl(index)
     }
 
+    // Hydrate audio URL
+    let audioUrl = slide.audioUrl || null
+    if (!audioUrl && slide.audioPath) {
+      try {
+        const [signedUrl] = await bucket.file(slide.audioPath).getSignedUrl({
+          action: 'read',
+          expires: Date.now() + URL_EXPIRY_MS,
+        })
+        audioUrl = signedUrl
+      } catch (error) {
+        logger.warn('STORAGE', 'Failed to sign audio GCS URL', {
+          error: error.message,
+          audioPath: slide.audioPath,
+        })
+      }
+    }
+
     return {
       ...slide,
       imageUrl,
+      audioUrl,
     }
   }))
 
@@ -235,8 +261,10 @@ async function buildStoredSlides({ slides, bucket, clientId, topicId, versionId 
       topicId: slide.topicId || topicId,
       segmentId: slide.segmentId || null,
       isConclusion: !!slide.isConclusion,
+      parentId: slide.parentId || null,
     }
 
+    // Upload image to GCS
     const imageUrl = slide.imageUrl
     if (isDataUrl(imageUrl)) {
       try {
@@ -267,6 +295,37 @@ async function buildStoredSlides({ slides, bucket, clientId, topicId, versionId 
       stored.imageUrl = imageUrl
     } else {
       stored.imageUrl = getFallbackImageUrl(index)
+    }
+
+    // Upload audio to GCS
+    const audioUrl = slide.audioUrl
+    if (isDataUrl(audioUrl)) {
+      try {
+        const audioPath = await uploadDataUrl({
+          bucket,
+          clientId,
+          topicId,
+          versionId,
+          slideId: slide.id,
+          dataUrl: audioUrl,
+          index,
+          suffix: 'audio',
+        })
+        if (audioPath) {
+          stored.audioPath = audioPath
+        }
+      } catch (error) {
+        logger.warn('STORAGE', 'Failed to upload slide audio to GCS', {
+          error: error.message,
+          topicId,
+          versionId,
+          slideId: slide.id,
+        })
+        // No fallback for audio - just won't have narration
+      }
+    } else if (typeof audioUrl === 'string' && audioUrl.trim()) {
+      // Keep external audio URL as-is
+      stored.audioUrl = audioUrl
     }
 
     storedSlides.push(stored)
