@@ -5102,7 +5102,7 @@ function App() {
         {/* F055: max-width 800px centered on desktop, F056: full-width on mobile */}
         <main className="w-full max-w-4xl mx-auto">
         {/* HOME screen - level selection + voice trigger */}
-        {uiState === UI_STATE.HOME && (
+        {uiState === UI_STATE.HOME && activeTab === 'learn' && (
           <div className="flex flex-col items-center gap-8 px-4 md:px-0 animate-fade-in">
             {/* Headline */}
             <div className="text-center">
@@ -5225,7 +5225,7 @@ function App() {
           </div>
         )}
 
-        {uiState === UI_STATE.LISTENING && (
+        {uiState === UI_STATE.LISTENING && activeTab === 'learn' && (
           <div className="flex flex-col items-center gap-6 px-4 md:px-0 animate-fade-in">
             {/* Level indicator - shows what mode they're in */}
             <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -5297,7 +5297,7 @@ function App() {
           </div>
         )}
 
-        {uiState === UI_STATE.GENERATING && (
+        {uiState === UI_STATE.GENERATING && activeTab === 'learn' && (
           <div className="flex flex-col items-center gap-6 px-4 md:px-0">
             {/* Loader */}
             <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin" />
@@ -5389,7 +5389,7 @@ function App() {
         )}
 
         {/* SOCRATIC-003: Socratic questioning mode after slideshow */}
-        {uiState === UI_STATE.SOCRATIC && socraticSlides.length > 0 && (
+        {uiState === UI_STATE.SOCRATIC && activeTab === 'learn' && socraticSlides.length > 0 && (
           <SocraticMode
             slides={socraticSlides}
             topicName={socraticTopicName}
@@ -5402,7 +5402,7 @@ function App() {
         )}
 
         {/* WB018: Quiz prompt screen - shown after slideshow in Full mode */}
-        {uiState === UI_STATE.QUIZ_PROMPT && (
+        {uiState === UI_STATE.QUIZ_PROMPT && activeTab === 'learn' && (
           <QuizPrompt
             topicName={activeTopic?.name}
             onStart={handleStartQuiz}
@@ -5412,7 +5412,7 @@ function App() {
         )}
 
         {/* WB018: Quiz screen - active quiz questions */}
-        {uiState === UI_STATE.QUIZ && quizQuestions.length > 0 && (
+        {uiState === UI_STATE.QUIZ && activeTab === 'learn' && quizQuestions.length > 0 && (
           <Quiz
             questions={quizQuestions}
             onComplete={handleQuizComplete}
@@ -5421,7 +5421,7 @@ function App() {
         )}
 
         {/* WB018: Quiz results screen */}
-        {uiState === UI_STATE.QUIZ_RESULTS && quizResults && (
+        {uiState === UI_STATE.QUIZ_RESULTS && activeTab === 'learn' && quizResults && (
           <div className="flex flex-col items-center gap-6 px-4 py-8 animate-fade-in">
             {/* Result icon */}
             <div className={`w-20 h-20 rounded-full flex items-center justify-center ${
@@ -5478,7 +5478,7 @@ function App() {
         )}
 
         {/* Loading screen for historical topic TTS */}
-        {isLoadingTopicAudio && activeTopic && (
+        {isLoadingTopicAudio && activeTopic && activeTab === 'learn' && (
           <div className="flex flex-col items-center gap-4 px-4 md:px-0 animate-fade-in">
             <div className="w-full max-w-2xl">
               <div className="relative w-full aspect-video overflow-hidden rounded-xl shadow-lg">
@@ -5503,7 +5503,7 @@ function App() {
           </div>
         )}
 
-        {uiState === UI_STATE.SLIDESHOW && visibleSlides.length > 0 && !isLoadingTopicAudio && (
+        {uiState === UI_STATE.SLIDESHOW && activeTab === 'learn' && visibleSlides.length > 0 && !isLoadingTopicAudio && (
           <div className="flex flex-col items-center gap-4 px-4 md:px-0">
             {isPreparingFollowUp && (
               <div className="px-3 py-1 text-xs text-primary bg-primary/10 rounded-full">
@@ -5995,7 +5995,7 @@ function App() {
         </main>
 
         {/* Raise hand button - only shown during slideshow */}
-        {uiState === UI_STATE.SLIDESHOW && (
+        {uiState === UI_STATE.SLIDESHOW && activeTab === 'learn' && (
           <div
             className={`fixed z-50 pointer-events-none left-1/2 -translate-x-1/2 ${
               topics.length > 0 ? 'md:left-[calc(50%+128px)] xl:left-1/2' : ''
