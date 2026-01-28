@@ -1,6 +1,6 @@
 === TDD Progress Report ===
 Project: ShowMe
-Last Updated: 2026-01-26
+Last Updated: 2026-01-28
 
 ## Session 1: Initialization
 
@@ -2025,3 +2025,115 @@ if (source !== 'voice' && uiState === UI_STATE.SLIDESHOW) {
 
 ### Git Commits
 - (pending): fix: shrink socratic payload and trigger on manual end
+
+---
+
+## Session 30: World View Error Fix (2026-01-28)
+
+### Updates
+- Added dev-only local world state fallback when Firestore is unavailable.
+- Updated world stats hook to call `/api/world` and use `worldState`.
+- Logged the fix in debugging-progress.md.
+
+### Files Modified
+- backend/src/services/worldState.js
+- frontend/src/hooks/useWorldStats.js
+- debugging-progress.md
+
+---
+
+## Session 31: UI Redesign - Sidebar Layout Polish (2026-01-28)
+
+### Summary
+Major UI cleanup to create a cleaner, more elegant interface:
+1. Re-enabled TopicSidebar for topic navigation (was using bottom horizontal cards)
+2. Removed duplicate streak indicator from top-right corner
+3. Made sidebar extend full height (bottom tab bar doesn't overlap)
+4. Moved "+ New Topic" button to top of sidebar (was at bottom, easy to miss)
+5. Moved stats (tier/XP/streak) to compact row in sidebar
+6. Removed HomeStats card from main content area
+
+### New Sidebar Layout
+```
+┌─────────────────────┐
+│  [+ New Topic]      │  ← Prominent button at top
+├─────────────────────┤
+│ 🏜️ Barren   0/250 XP │  ← Compact stats row
+│ ████░░░░░░    🔥 0  │  ← XP progress bar + streak
+├─────────────────────┤
+│ TOPICS              │  ← Section header
+├─────────────────────┤
+│ 📊 LTE Network      │
+│ 🎮 Game Develop...  │  ← Scrollable topic list
+│ 📡 LTE Technology   │
+│ ...                 │
+└─────────────────────┘
+```
+
+### New Main Content Layout
+- Clean and focused - just headline and level cards
+- No stats card cluttering the view
+- World preview removed (users access via World tab)
+
+### Changes Made
+
+#### 1. Re-enabled TopicSidebar
+- Imported TopicSidebar in App.jsx (was commented out)
+- Removed LearnHistory horizontal cards from HOME state
+
+#### 2. Removed Duplicate Streak
+- Deleted fixed top-right StreakCounter from App.jsx
+- Stats card in sidebar shows streak (single source of truth)
+
+#### 3. Sidebar Full Height
+- Added `hasSidebar` prop to BottomTabBar
+- BottomTabBar now uses `md:left-64` when sidebar present
+- Sidebar extends to bottom of screen on desktop
+
+#### 4. Sidebar Restructure
+- Moved "+ New Topic" button to very top (was at bottom)
+- Added TIER_CONFIG for tier display (icon, label, color)
+- Added compact stats row with tier badge, XP progress bar, streak
+- Added "Topics" section header
+- Removed bottom button section
+
+#### 5. Removed HomeStats from Main Content
+- Deleted HomeStats component usage from HOME state
+- Passed stats props to TopicSidebar instead
+
+### Files Modified
+- `frontend/src/App.jsx`
+  - Re-enabled TopicSidebar import
+  - Removed top-right StreakCounter
+  - Added TopicSidebar with stats props (tier, xpProgress, streakCount)
+  - Removed LearnHistory from HOME state
+  - Removed HomeStats from HOME state
+  - Pass `hasSidebar` prop to BottomTabBar
+
+- `frontend/src/components/TopicSidebar.jsx`
+  - Added TIER_CONFIG constant for tier display
+  - Added new props: tier, xpProgress, streakCount
+  - Restructured layout: New Topic button at top
+  - Added compact stats row (tier badge, XP bar, streak)
+  - Added "Topics" section header
+  - Removed bottom New Topic button section
+
+- `frontend/src/components/BottomTabBar.jsx`
+  - Added `hasSidebar` prop
+  - Conditional `md:left-64` class when sidebar present
+  - Bottom bar doesn't overlap sidebar on desktop
+
+### Build Results
+- Build passes: 356KB bundle (slightly smaller due to removed HomeStats usage)
+- 76 modules transformed
+- No errors or warnings
+
+### Visual Changes
+- Desktop: Left sidebar with stats, main content clean and focused
+- Mobile: Hamburger menu for sidebar, full-width bottom bar
+- Gamification stats always visible in sidebar
+- "+ New Topic" button prominent and easy to find
+
+### Git Status
+- Branch: feature/world-builder-gamification
+- Ready to commit

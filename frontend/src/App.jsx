@@ -4,8 +4,7 @@ import SuggestionCard from './components/SuggestionCard'
 import Toast from './components/Toast'
 import TopicHeader from './components/TopicHeader'
 import SectionDivider from './components/SectionDivider'
-// UI010: TopicSidebar removed - topics now accessible via Learn tab history
-import LearnHistory from './components/LearnHistory'
+import TopicSidebar from './components/TopicSidebar'
 import HighlightOverlay from './components/HighlightOverlay'
 import LevelCard from './components/LevelCard'
 import RegenerateDropdown from './components/RegenerateDropdown'
@@ -5067,16 +5066,6 @@ function App() {
   return (
     // F055, F056, F058: Responsive container with sidebar layout on desktop
     <div className="h-screen flex overflow-hidden">
-      {/* GAMIFY-003, UI009: Streak counter in top-right corner (T002) */}
-      <div className="fixed top-4 right-4 z-40">
-        <StreakCounter
-          streakCount={userProgress?.streakCount || 0}
-          lastActiveDate={userProgress?.lastActiveDate}
-          longestStreak={userProgress?.longestStreak || 0}
-          hasFreezeAvailable={userProgress?.streakFreezeAvailable || false}
-        />
-      </div>
-
       {/* POLISH-001: Achievement celebration components */}
       <Confetti isActive={showConfetti} onComplete={handleConfettiComplete} />
       <AchievementToast badge={currentToastBadge} onDismiss={handleToastDismiss} />
@@ -5092,29 +5081,29 @@ function App() {
         }}
       />
 
-      {/* UI010: TopicSidebar removed - topics now accessible via Learn tab history */}
+      {/* Left sidebar - Recent Topics */}
+      {topics.length > 0 && (
+        <TopicSidebar
+          topics={topics}
+          activeTopic={activeTopic}
+          onNavigateToTopic={handleNavigateToTopic}
+          onNewTopic={() => {
+            setActiveTopicId(null)
+            setUiState(UI_STATE.HOME)
+          }}
+          tier={worldTier}
+          xpProgress={xpProgress}
+          streakCount={userProgress?.streakCount || 0}
+        />
+      )}
 
-      {/* UI010: Main content area - full width with bottom tabs */}
+      {/* Main content area */}
       <div className="flex-1 h-full flex flex-col items-center justify-center px-4 py-4 pb-24 md:pb-4 overflow-y-auto">
         {/* F055: max-width 800px centered on desktop, F056: full-width on mobile */}
         <main className="w-full max-w-4xl mx-auto">
         {/* HOME screen - level selection + voice trigger */}
         {uiState === UI_STATE.HOME && (
           <div className="flex flex-col items-center gap-8 px-4 md:px-0 animate-fade-in">
-            {/* UI002: Home stats bar with XP, tier, streak, and world preview */}
-            <HomeStats
-              totalXP={totalXP}
-              tier={worldTier}
-              xpProgress={xpProgress}
-              streakCount={userProgress?.streakCount || 0}
-              pieceCount={pieceCount}
-              onWorldPreviewClick={() => {
-                setWorldBadge(0)
-                setActiveTab('world')
-              }}
-              isLoading={isWorldStatsLoading}
-            />
-
             {/* Headline */}
             <div className="text-center">
               <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
@@ -5233,15 +5222,6 @@ function App() {
               </div>
             )}
 
-            {/* UI010: Recent topics history - replaces sidebar navigation */}
-            {topics.length > 0 && (
-              <div className="w-full mt-4">
-                <LearnHistory
-                  topics={topics}
-                  onTopicClick={(topic) => handleNavigateToTopic(topic.id)}
-                />
-              </div>
-            )}
           </div>
         )}
 
@@ -6129,6 +6109,7 @@ function App() {
           activeTab={activeTab}
           onTabChange={handleTabChange}
           worldBadge={worldBadge}
+          hasSidebar={topics.length > 0}
         />
       </div>
 

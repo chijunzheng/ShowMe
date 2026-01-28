@@ -1,14 +1,26 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 
 /**
+ * Tier configuration with colors, icons, and labels
+ */
+const TIER_CONFIG = {
+  barren: { icon: '🏜️', label: 'Barren', color: 'text-slate-500' },
+  sprouting: { icon: '🌱', label: 'Sprouting', color: 'text-green-500' },
+  growing: { icon: '🌿', label: 'Growing', color: 'text-emerald-500' },
+  thriving: { icon: '🌳', label: 'Thriving', color: 'text-cyan-500' },
+  legendary: { icon: '✨', label: 'Legendary', color: 'text-purple-500' },
+}
+
+/**
  * TopicSidebar Component (CORE016 & CORE017)
  *
  * Displays a navigable list of topics with icons and names.
  * Features:
  * - Desktop: Always visible on the left side (~250px wide)
  * - Mobile: Collapsible via hamburger menu button
+ * - "+ New Topic" button at top (prominent)
+ * - Compact stats bar (tier, XP, streak)
  * - Active topic highlighting
- * - "+ New Topic" button to return to listening state
  * - Click navigation to switch active topic
  * - Rename and delete options via "..." menu
  *
@@ -19,6 +31,9 @@ import { useState, useEffect, useCallback, useRef } from 'react'
  * @param {Function} props.onNewTopic - Callback when "+ New Topic" is clicked
  * @param {Function} props.onRenameTopic - Callback when topic is renamed, receives (topicId, newName)
  * @param {Function} props.onDeleteTopic - Callback when topic is deleted, receives topicId
+ * @param {string} props.tier - Current tier (barren, sprouting, etc.)
+ * @param {Object} props.xpProgress - XP progress { current, target }
+ * @param {number} props.streakCount - Current streak days
  */
 function TopicSidebar({
   topics,
@@ -27,6 +42,9 @@ function TopicSidebar({
   onNewTopic,
   onRenameTopic,
   onDeleteTopic,
+  tier = 'barren',
+  xpProgress = { current: 0, target: 250 },
+  streakCount = 0,
 }) {
   // Mobile sidebar open/closed state
   const [isOpen, setIsOpen] = useState(false)
@@ -275,13 +293,68 @@ function TopicSidebar({
         role="navigation"
         aria-label="Topic navigation"
       >
-        {/* Sidebar header */}
-        <div className="p-4 border-b border-gray-100">
-          <h2 className="text-lg font-semibold text-gray-800">Topics</h2>
+        {/* New Topic Button - TOP */}
+        <div className="p-3 border-b border-gray-100">
+          <button
+            onClick={handleNewTopicClick}
+            className="
+              w-full flex items-center justify-center gap-2
+              px-4 py-2.5 min-h-[44px]
+              bg-primary text-white font-medium
+              rounded-lg
+              hover:bg-primary/90
+              focus:outline-none focus:ring-2 focus:ring-primary/50 focus:ring-offset-2
+              transition-colors
+            "
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="w-5 h-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            New Topic
+          </button>
+        </div>
+
+        {/* Compact Stats Row */}
+        <div className="px-3 py-2 border-b border-gray-100 bg-gray-50/50">
+          {/* Tier + XP row */}
+          <div className="flex items-center justify-between text-sm mb-1.5">
+            <span className={`flex items-center gap-1 font-medium ${TIER_CONFIG[tier]?.color || 'text-gray-500'}`}>
+              {TIER_CONFIG[tier]?.icon} {TIER_CONFIG[tier]?.label}
+            </span>
+            <span className="text-gray-500 text-xs">
+              {xpProgress.current}/{xpProgress.target} XP
+            </span>
+          </div>
+          {/* XP Progress bar + Streak row */}
+          <div className="flex items-center gap-2">
+            {/* XP Progress bar */}
+            <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(100, (xpProgress.current / xpProgress.target) * 100)}%` }}
+              />
+            </div>
+            {/* Streak */}
+            <span className={`text-xs flex items-center gap-0.5 ${streakCount > 0 ? 'text-orange-500' : 'text-gray-400'}`}>
+              🔥 {streakCount}
+            </span>
+          </div>
+        </div>
+
+        {/* Topics header */}
+        <div className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">
+          Topics
         </div>
 
         {/* Topic list */}
-        <nav className="flex-1 overflow-y-auto p-2">
+        <nav className="flex-1 overflow-y-auto px-2 pb-2">
           <ul className="space-y-1" role="list">
             {topics.map((topic) => {
               const isActive = activeTopic?.id === topic.id
@@ -421,34 +494,6 @@ function TopicSidebar({
           </ul>
         </nav>
 
-        {/* New Topic button at bottom */}
-        <div className="p-4 border-t border-gray-100">
-          <button
-            onClick={handleNewTopicClick}
-            className="
-              w-full flex items-center justify-center gap-2
-              px-4 py-3 min-h-[44px]
-              bg-primary text-white font-medium
-              rounded-lg
-              hover:bg-primary/90
-              focus:outline-none focus:ring-2 focus:ring-primary/50 focus:ring-offset-2
-              transition-colors
-            "
-          >
-            {/* Plus icon */}
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="w-5 h-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            New Topic
-          </button>
-        </div>
       </aside>
     </>
   )

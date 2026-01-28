@@ -17,8 +17,9 @@
  * @param {'learn' | 'world'} props.activeTab - Currently active tab
  * @param {Function} props.onTabChange - Callback when tab is clicked, receives tab name
  * @param {number} [props.worldBadge] - Optional badge count for World tab (new pieces)
+ * @param {boolean} [props.hasSidebar] - Whether sidebar is visible (offsets bar on desktop)
  */
-function BottomTabBar({ activeTab = 'learn', onTabChange, worldBadge = 0 }) {
+function BottomTabBar({ activeTab = 'learn', onTabChange, worldBadge = 0, hasSidebar = false }) {
   /**
    * Handle tab click/keyboard activation
    */
@@ -40,13 +41,14 @@ function BottomTabBar({ activeTab = 'learn', onTabChange, worldBadge = 0 }) {
 
   return (
     <nav
-      className="
-        fixed bottom-0 left-0 right-0 z-40
+      className={`
+        fixed bottom-0 right-0 z-40
+        ${hasSidebar ? 'left-0 md:left-64' : 'left-0'}
         h-16 safe-bottom
         bg-white dark:bg-slate-800
         border-t border-gray-200 dark:border-slate-700
         shadow-lg
-      "
+      `}
       role="navigation"
       aria-label="Main navigation"
     >

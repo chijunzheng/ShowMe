@@ -1355,3 +1355,11 @@ body: JSON.stringify({ slides: sanitizedSlides, topicName, language })
   - Updated to call `/api/world` and read `worldState` from response.
 
 **Result:** World view loads with default data in dev even without Firestore, and home stats no longer hit a 404.
+
+---
+
+## Session 13: 2026-01-28
+
+### Follow-up: World State Fix Verified
+
+**Result:** Confirmed world view renders after backend fallback + stats endpoint fix; docs updated.
