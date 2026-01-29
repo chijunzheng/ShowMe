@@ -2179,6 +2179,7 @@ Additional style requirements for world piece:
  * @param {Array} params.slides - The generated slides with script, subtitle, and imageUrl
  * @param {string} params.topicName - The topic being quizzed
  * @param {string} params.language - Language code: 'en' or 'zh'
+ * @param {string} [params.slideContent] - Legacy newline-delimited slide text (fallback)
  * @returns {Promise<{questions: Array, error: string|null}>}
  */
 export async function generateQuizQuestions(params) {
@@ -2187,15 +2188,29 @@ export async function generateQuizQuestions(params) {
     return { questions: null, error: 'API_NOT_AVAILABLE' }
   }
 
-  const { slides = [], topicName = '', language = 'en' } = params
+  const { slides = [], topicName = '', language = 'en', slideContent = '' } = params
+
+  // Normalize slide input (supports legacy slideContent string)
+  let normalizedSlides = Array.isArray(slides) ? slides : []
+  if (normalizedSlides.length === 0 && typeof slideContent === 'string' && slideContent.trim()) {
+    normalizedSlides = slideContent
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean)
+      .map(text => ({ subtitle: text }))
+  }
 
   // Validate slides input
-  if (!Array.isArray(slides) || slides.length === 0) {
+  const usableSlides = normalizedSlides.filter(slide =>
+    slide && (typeof slide.subtitle === 'string' || typeof slide.script === 'string')
+  )
+
+  if (usableSlides.length === 0) {
     return { questions: null, error: 'INVALID_SLIDES' }
   }
 
   // Build context from slides with clear numbering (0-indexed for slideReference)
-  const slideContext = slides
+  const slideContext = usableSlides
     .map((slide, i) => {
       const content = slide.subtitle || slide.script || ''
       return `[Slide ${i}]: ${content}`
@@ -2310,7 +2325,7 @@ Generate the quiz questions now:`
           type: validTypes.includes(q.type) ? q.type : 'mcq',
           question: q.question || '',
           slideReference: typeof q.slideReference === 'number'
-            ? Math.max(0, Math.min(slides.length - 1, q.slideReference))
+            ? Math.max(0, Math.min(usableSlides.length - 1, q.slideReference))
             : 0,
           correctAnswer: q.correctAnswer || '',
           explanation: q.explanation || '',

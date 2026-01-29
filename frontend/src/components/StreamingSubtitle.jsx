@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { SUBTITLE_STREAMING_CONFIG } from '../constants/appConfig.js'
 
 /**
  * StreamingSubtitle - Karaoke-style subtitle display with smooth gradient reveal
@@ -50,7 +51,10 @@ function StreamingSubtitle({ text, duration, isPlaying, showAll = false, audioRe
 
       // Calculate progress as percentage of audio playback (exact 1:1 sync)
       const currentMs = audio.currentTime * 1000
-      const newProgress = Math.min(100, (currentMs / duration) * 100)
+      const newProgress = Math.min(
+        100,
+        (currentMs / duration) * 100 * SUBTITLE_STREAMING_CONFIG.SPEED_MULTIPLIER
+      )
 
       setProgress(newProgress)
 

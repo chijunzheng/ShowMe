@@ -2222,3 +2222,79 @@ States updated:
 ### Result
 - Button positioned above tab bar with proper spacing
 - Button centered relative to content area (accounting for sidebar) at all breakpoints
+
+---
+
+## Session 34: Major App.jsx Refactoring (2026-01-28)
+
+### Overview
+Massive refactoring of `frontend/src/App.jsx` to improve maintainability. Reduced the file from **6,140 lines to 2,977 lines** (51% reduction, 3,163 lines removed).
+
+### Files Created
+
+#### Utility Modules
+- `frontend/src/utils/topicStorage.js` (~450 lines)
+  - Storage utilities: `getStoredClientId`, `persistTopicSlides`, `loadTopicSlidesFromStorage`, `loadSlidesForTopic`, `removeTopicSlides`, `loadPersistedTopics`, `saveTopicsToStorage`, `createHeaderSlide`
+- `frontend/src/utils/slideHelpers.js` (~100 lines)
+  - Slide utilities: `createSectionDivider`, `getCurrentVersionSlides`, `getCurrentVersionLevel`, `buildTopicSlides`, `isTrivialTranscription`, `pruneSlideCache`
+- `frontend/src/utils/classificationApi.js`
+  - API utilities: `classifyQuery`, `requestChitchatResponse`
+
+#### Custom Hooks
+- `frontend/src/hooks/useSlideAudio.js` (273 lines) - TTS/slide audio management
+- `frontend/src/hooks/useVoiceAgent.js` (238 lines) - Voice agent queue
+- `frontend/src/hooks/useVoiceRecording.js` (327 lines) - Voice recording logic
+- `frontend/src/hooks/useSlideshowNavigation.js` (348 lines) - Slideshow navigation
+- `frontend/src/hooks/useQuestionHandler.js` (~500 lines) - Question handling logic
+- `frontend/src/hooks/useQuizHandlers.js` - Quiz-related handlers
+- `frontend/src/hooks/useSocraticHandlers.js` - Socratic mode handlers
+- `frontend/src/hooks/useTopicManagement.js` (~380 lines) - Topic management
+
+#### Screen Components (`frontend/src/components/screens/`)
+- `HomeScreen.jsx` (158 lines) - Level selection and voice trigger
+- `ListeningScreen.jsx` (99 lines) - Voice input with waveform
+- `GeneratingScreen.jsx` (74 lines) - Generation progress display
+- `ErrorScreen.jsx` (57 lines) - Error state with retry
+- `SlideshowScreen.jsx` - Slideshow UI
+- `SocraticScreen.jsx` - Socratic mode wrapper
+- `QuizPromptScreen.jsx` - Quiz prompt
+- `QuizActiveScreen.jsx` - Active quiz
+- `QuizResultsScreen.jsx` (60 lines) - Quiz results
+- `LoadingTopicScreen.jsx` (37 lines) - Historical topic TTS loading
+
+#### UI Components
+- `frontend/src/components/FollowUpDrawer.jsx` (122 lines) - Mobile drawer
+- `frontend/src/components/FollowUpPanel.jsx` (113 lines) - Desktop side panel
+- `frontend/src/components/RaiseHandButton.jsx` (138 lines) - Floating voice button
+- `frontend/src/components/SlideContent.jsx` (83 lines) - Slide content rendering
+- `frontend/src/components/SlideshowControls.jsx` (95 lines) - Navigation controls
+- `frontend/src/components/LevelIndicator.jsx` (114 lines) - Level display
+- `frontend/src/components/ProgressDots.jsx` (91 lines) - Slide navigation dots
+
+### Optimizations Applied
+1. **Consolidated 6 ref-syncing effects into 1** - Reduced effect overhead
+2. **Moved constants to module scope** - Avoided recreation on each render
+3. **Removed unused code** - `wsConnected`, `DEFAULT_SLIDE_DURATION`, `isQuestionQueued`, unused state variables
+4. **Bug fix discovered** - `isRegenerating` state was used but never declared
+
+### Build Results
+- Build passes: 365KB bundle (99 modules transformed)
+- No errors or warnings
+
+### Metrics
+| Metric | Before | After | Change |
+|--------|--------|-------|--------|
+| App.jsx lines | 6,140 | 2,977 | -51% |
+| Total modules | 79 | 99 | +20 new files |
+| Bundle size | 356 KB | 365 KB | +9 KB |
+
+### Benefits
+1. **Better organization** - Each module has single responsibility
+2. **Reusability** - Hooks and utilities can be used by other components
+3. **Testability** - Utility functions can be unit tested independently
+4. **Maintainability** - Changes isolated to specific modules
+
+### Context for Next Agent
+- App.jsx is now under 3000 lines and much more maintainable
+- Some hooks created but not fully integrated (useVoiceRecording, useSlideshowNavigation) due to complex state dependencies
+- Future work: Further integrate remaining hooks, add unit tests for utilities
