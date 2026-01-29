@@ -2136,4 +2136,56 @@ Major UI cleanup to create a cleaner, more elegant interface:
 
 ### Git Status
 - Branch: feature/world-builder-gamification
-- Ready to commit
+- Committed: 8c518e0
+
+---
+
+## Session 32: World Tab Dedicated View Fix (2026-01-28)
+
+### Bug Fix: World Tab Showing Under Learn Content
+
+**Problem:**
+- Clicking World tab showed World view stacked below Learn content (HOME screen)
+- Expected: World tab should show dedicated World view only
+
+**Root Cause:**
+- UI state (`uiState`) and tab state (`activeTab`) were separate concerns
+- `uiState` tracks what user is doing: HOME, LISTENING, GENERATING, SLIDESHOW, etc.
+- `activeTab` tracks which tab is active: 'learn' or 'world'
+- Original code only checked `uiState`, not `activeTab`
+- When switching to World tab, `uiState` stayed HOME, so both HOME content AND World view rendered
+
+**Fix Applied:** `frontend/src/App.jsx`
+
+Added `activeTab === 'learn'` condition to all Learn-related UI state renders:
+
+```javascript
+// Before (bug):
+{uiState === UI_STATE.HOME && (
+
+// After (fixed):
+{uiState === UI_STATE.HOME && activeTab === 'learn' && (
+```
+
+States updated:
+- `UI_STATE.HOME` - Level selection cards
+- `UI_STATE.LISTENING` - Voice recording UI
+- `UI_STATE.GENERATING` - Loading spinner
+- `UI_STATE.SLIDESHOW` - Slide display
+- `UI_STATE.SOCRATIC` - Socratic questioning
+- `UI_STATE.QUIZ_PROMPT` - Quiz prompt
+- `UI_STATE.QUIZ` - Quiz questions
+- `UI_STATE.QUIZ_RESULTS` - Quiz results
+- `isLoadingTopicAudio` - Historical topic loading
+- Raise hand button (fixed position element)
+
+### Files Modified
+- `frontend/src/App.jsx` - Added activeTab checks to 10 render conditions
+
+### Git Commits
+- c0f6260: fix(ui): show dedicated World view when World tab is active
+
+### Result
+- World tab now shows only the World view
+- Learn tab shows all Learn-related content
+- No content stacking between tabs

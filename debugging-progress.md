@@ -1363,3 +1363,72 @@ body: JSON.stringify({ slides: sanitizedSlides, topicName, language })
 ### Follow-up: World State Fix Verified
 
 **Result:** Confirmed world view renders after backend fallback + stats endpoint fix; docs updated.
+
+---
+
+### Issue 2: World Tab Content Stacking Under Learn Content
+
+**Symptoms:**
+- Clicking World tab showed World view appearing below the Learn content
+- Both HOME screen (level cards) and World view rendered simultaneously
+- Expected: World tab should replace Learn content with dedicated World view
+
+**Root Cause:**
+- Application had two separate state concepts:
+  1. `uiState` - What the user is doing (HOME, LISTENING, GENERATING, SLIDESHOW, etc.)
+  2. `activeTab` - Which tab is selected ('learn' or 'world')
+- UI render conditions only checked `uiState`, not `activeTab`
+- When World tab was clicked, `activeTab` changed to 'world' but `uiState` remained HOME
+- Result: Both `{uiState === UI_STATE.HOME && (...)}` and `{activeTab === 'world' && (...)}` were true
+
+**Code Example (Before - Bug):**
+```javascript
+// HOME content always rendered when uiState is HOME, regardless of tab
+{uiState === UI_STATE.HOME && (
+  <div>Level selection cards...</div>
+)}
+
+// World view rendered when on World tab
+{activeTab === 'world' && (
+  <WorldView ... />
+)}
+```
+
+**Fix Applied:** `frontend/src/App.jsx`
+
+Added `activeTab === 'learn'` to all Learn-related render conditions:
+
+```javascript
+// HOME content only renders when on Learn tab AND uiState is HOME
+{uiState === UI_STATE.HOME && activeTab === 'learn' && (
+  <div>Level selection cards...</div>
+)}
+
+// Similarly for all other Learn states:
+{uiState === UI_STATE.LISTENING && activeTab === 'learn' && (...)}
+{uiState === UI_STATE.GENERATING && activeTab === 'learn' && (...)}
+{uiState === UI_STATE.SLIDESHOW && activeTab === 'learn' && (...)}
+{uiState === UI_STATE.SOCRATIC && activeTab === 'learn' && (...)}
+{uiState === UI_STATE.QUIZ_PROMPT && activeTab === 'learn' && (...)}
+{uiState === UI_STATE.QUIZ && activeTab === 'learn' && (...)}
+{uiState === UI_STATE.QUIZ_RESULTS && activeTab === 'learn' && (...)}
+{isLoadingTopicAudio && activeTab === 'learn' && (...)}
+```
+
+**States Updated (10 total):**
+| State/Condition | Purpose |
+|-----------------|---------|
+| `UI_STATE.HOME` | Level selection cards |
+| `UI_STATE.LISTENING` | Voice recording waveform |
+| `UI_STATE.GENERATING` | Loading spinner + fun fact |
+| `UI_STATE.SLIDESHOW` | Slide display + controls |
+| `UI_STATE.SOCRATIC` | Socratic questioning mode |
+| `UI_STATE.QUIZ_PROMPT` | Quiz prompt screen |
+| `UI_STATE.QUIZ` | Active quiz questions |
+| `UI_STATE.QUIZ_RESULTS` | Quiz results screen |
+| `isLoadingTopicAudio` | Historical topic TTS loading |
+| Raise hand button | Fixed position interaction button |
+
+**Result:** World tab now shows dedicated World view without Learn content stacking underneath.
+
+**Commit:** `c0f6260 fix(ui): show dedicated World view when World tab is active`
