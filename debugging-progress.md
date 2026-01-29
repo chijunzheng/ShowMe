@@ -1432,3 +1432,44 @@ Added `activeTab === 'learn'` to all Learn-related render conditions:
 **Result:** World tab now shows dedicated World view without Learn content stacking underneath.
 
 **Commit:** `c0f6260 fix(ui): show dedicated World view when World tab is active`
+
+---
+
+### Issue 3: Raise Hand Button Misaligned with Content
+
+**Symptoms:**
+- Raise hand button overlapped with the BottomTabBar
+- Button not horizontally centered relative to content area (offset by sidebar)
+
+**Root Cause:** Two positioning issues in `RaiseHandButton.jsx`:
+
+1. **Vertical overlap:** Button used `bottom: 24px` but BottomTabBar is 64px tall (`h-16`), causing overlap
+2. **Horizontal misalignment:** On xl screens, `xl:left-1/2` reset centering to full viewport, ignoring the sidebar offset
+
+**Code Before (Bug):**
+```javascript
+className={`fixed z-50 ... left-1/2 -translate-x-1/2 ${
+  hasSidebar ? 'md:left-[calc(50%+128px)] xl:left-1/2' : ''  // xl resets!
+}`}
+style={{
+  bottom: 'max(24px, env(safe-area-inset-bottom, 24px))',  // Too low!
+}}
+```
+
+**Fix Applied:** `frontend/src/components/RaiseHandButton.jsx`
+
+```javascript
+className={`fixed z-50 ... left-1/2 -translate-x-1/2 ${
+  hasSidebar ? 'md:left-[calc(50%+128px)]' : ''  // Removed xl override
+}`}
+style={{
+  // Position above BottomTabBar (h-16 = 64px) + 16px gap
+  bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
+}}
+```
+
+**Key Changes:**
+1. Changed `bottom` from 24px to 80px (64px tab bar + 16px gap)
+2. Removed `xl:left-1/2` so sidebar offset applies at all breakpoints
+
+**Result:** Button now sits above the tab bar and stays centered relative to the content area when sidebar is present.

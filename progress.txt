@@ -2189,3 +2189,36 @@ States updated:
 - World tab now shows only the World view
 - Learn tab shows all Learn-related content
 - No content stacking between tabs
+
+---
+
+## Session 33: Raise Hand Button Positioning Fix (2026-01-28)
+
+### Bug Fix: Raise Hand Button Misaligned
+
+**Problem:**
+- Button overlapped with BottomTabBar (positioned at 24px from bottom, but tab bar is 64px tall)
+- Button not horizontally centered relative to content area when sidebar present
+
+**Root Cause:**
+1. `bottom: 24px` too low - didn't account for 64px BottomTabBar
+2. `xl:left-1/2` override reset centering to viewport on large screens, ignoring sidebar offset
+
+**Fix Applied:** `frontend/src/components/RaiseHandButton.jsx`
+
+1. Changed bottom positioning:
+   - Before: `bottom: 'max(24px, env(safe-area-inset-bottom, 24px))'`
+   - After: `bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))'`
+   - 80px = 64px (tab bar) + 16px (gap)
+
+2. Removed xl breakpoint override:
+   - Before: `hasSidebar ? 'md:left-[calc(50%+128px)] xl:left-1/2' : ''`
+   - After: `hasSidebar ? 'md:left-[calc(50%+128px)]' : ''`
+   - Sidebar offset (128px = half of 256px sidebar) now applies at all screen sizes
+
+### Files Modified
+- `frontend/src/components/RaiseHandButton.jsx`
+
+### Result
+- Button positioned above tab bar with proper spacing
+- Button centered relative to content area (accounting for sidebar) at all breakpoints
