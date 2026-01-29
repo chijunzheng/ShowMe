@@ -1473,3 +1473,37 @@ style={{
 2. Removed `xl:left-1/2` so sidebar offset applies at all breakpoints
 
 **Result:** Button now sits above the tab bar and stays centered relative to the content area when sidebar is present.
+
+---
+
+## Session 14: 2026-01-29
+
+### Issue: Quiz Prompt Falls Back to Socratic Questions
+
+**Symptoms:**
+- After slides, quiz prompt attempted to load questions but Socratic question UI showed instead.
+- Quiz generation endpoint returned 400 due to missing slides array.
+
+**Root Cause:**
+- Frontend was sending legacy `slideContent` (newline-delimited text).
+- Backend `/api/quiz/generate` expected `slides` array and rejected requests without it.
+
+**Fix Applied:** `backend/src/routes/quiz.js`
+```javascript
+// Normalize slides (supports legacy slideContent string)
+let normalizedSlides = Array.isArray(slides) ? slides : []
+if (normalizedSlides.length === 0 && typeof slideContent === string && slideContent.trim()) {
+  normalizedSlides = slideContent
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(text => ({ subtitle: text }))
+}
+
+const validSlides = normalizedSlides.filter(slide =>
+  slide && (typeof slide.subtitle === string || typeof slide.script === string)
+)
+```
+
+**Result:**
+- Quiz generation accepts both payload formats; quiz now shows after slides without Socratic fallback.

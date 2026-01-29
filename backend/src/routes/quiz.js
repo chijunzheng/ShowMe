@@ -28,6 +28,7 @@ const BONUS_PASS = 10        // Bonus XP for passing
  *
  * Request body:
  * - slides: array - The lesson content with {script, subtitle, imageUrl} per slide
+ * - slideContent: string - Legacy newline-delimited slide text (optional fallback)
  * - topicName: string - The topic being quizzed
  * - language: string - 'en' or 'zh' (optional, auto-detected from topicName)
  *
@@ -52,15 +53,7 @@ router.post('/generate', async (req, res) => {
   const startTime = Date.now()
 
   try {
-    const { slides, topicName, language } = req.body
-
-    // Validate required fields
-    if (!slides || !Array.isArray(slides) || slides.length === 0) {
-      return res.status(400).json({
-        error: 'Missing or invalid slides array',
-        field: 'slides'
-      })
-    }
+    const { slides, slideContent, topicName, language } = req.body
 
     if (!topicName || typeof topicName !== 'string') {
       return res.status(400).json({
@@ -69,8 +62,18 @@ router.post('/generate', async (req, res) => {
       })
     }
 
+    // Normalize slides (supports legacy slideContent string)
+    let normalizedSlides = Array.isArray(slides) ? slides : []
+    if (normalizedSlides.length === 0 && typeof slideContent === 'string' && slideContent.trim()) {
+      normalizedSlides = slideContent
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map(text => ({ subtitle: text }))
+    }
+
     // Validate slide structure (at minimum, need subtitle or script)
-    const validSlides = slides.filter(slide =>
+    const validSlides = normalizedSlides.filter(slide =>
       slide && (typeof slide.subtitle === 'string' || typeof slide.script === 'string')
     )
 

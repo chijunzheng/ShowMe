@@ -2298,3 +2298,19 @@ Massive refactoring of `frontend/src/App.jsx` to improve maintainability. Reduce
 - App.jsx is now under 3000 lines and much more maintainable
 - Some hooks created but not fully integrated (useVoiceRecording, useSlideshowNavigation) due to complex state dependencies
 - Future work: Further integrate remaining hooks, add unit tests for utilities
+
+---
+
+## Session 35: Quiz Generation Payload Fix (2026-01-29)
+
+### Summary
+- Fixed quiz generation when frontend sends legacy `slideContent` payload by normalizing to slides on the backend.
+- Prevents quiz flow from falling back to Socratic questions after slideshow.
+
+### Files Modified
+- `backend/src/routes/quiz.js`
+- `progress.txt`
+- `debugging-progress.md`
+
+### Notes
+- No automated tests run in this session.
