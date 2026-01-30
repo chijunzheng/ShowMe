@@ -543,6 +543,8 @@ function App() {
   const wasManualNavRef = useRef(false)
 
   const raiseHandRequestRef = useRef(false)
+  // Track if audio was paused due to hand raise (to enable resume when lowered)
+  const audioWasPausedForHandRaiseRef = useRef(false)
 
   // Track in-flight slide fetches from the server to avoid duplicate requests
   const slideServerFetchRef = useRef(new Map())
@@ -696,6 +698,9 @@ function App() {
       slideResponseAudioRef.current = null
     }
 
+    // Clear the hand-raise pause flag since we're fully interrupting
+    audioWasPausedForHandRaiseRef.current = false
+
     voiceAgentBusyRef.current = false
     resumeListeningAfterVoiceAgentRef.current = false
     resumeListeningAfterSlideRef.current = false
@@ -709,6 +714,67 @@ function App() {
       clearTimeout(slideTransitionTimeoutRef.current)
       slideTransitionTimeoutRef.current = null
     }
+  }, [])
+
+  /**
+   * Pause slide audio for hand raise without destroying the audio object.
+   * This preserves the playback position so we can resume later.
+   */
+  const pauseSlideAudioForHandRaise = useCallback(() => {
+    // Stop voice agent audio completely (we won't resume this)
+    if (voiceAgentAudioRef.current) {
+      voiceAgentAudioRef.current.pause()
+      voiceAgentAudioRef.current = null
+    }
+    // Stop slide response audio completely (we won't resume this)
+    if (slideResponseAudioRef.current) {
+      slideResponseAudioRef.current.pause()
+      slideResponseAudioRef.current = null
+    }
+
+    // Pause slide narration but keep the audio object so we can resume
+    if (slideAudioRef.current && !slideAudioRef.current.paused && !slideAudioRef.current.ended) {
+      slideAudioRef.current.pause()
+      audioWasPausedForHandRaiseRef.current = true
+      logger.info('AUDIO', 'Paused slide audio for hand raise', {
+        currentTime: slideAudioRef.current.currentTime,
+      })
+    }
+
+    voiceAgentBusyRef.current = false
+    resumeListeningAfterVoiceAgentRef.current = false
+    setIsVoiceAgentSpeaking(false)
+    setIsSlideNarrationPlaying(false)
+    setHighlightPosition(null)
+
+    if (slideTransitionTimeoutRef.current) {
+      clearTimeout(slideTransitionTimeoutRef.current)
+      slideTransitionTimeoutRef.current = null
+    }
+  }, [])
+
+  /**
+   * Resume slide audio after hand is lowered.
+   * Only resumes if the audio was paused by hand raise.
+   * Sets isPlaying to true and lets the effect handle the actual resume.
+   */
+  const resumeSlideAudioAfterHandLower = useCallback(() => {
+    if (!audioWasPausedForHandRaiseRef.current) {
+      return false
+    }
+
+    audioWasPausedForHandRaiseRef.current = false
+
+    if (slideAudioRef.current && slideAudioRef.current.paused && !slideAudioRef.current.ended) {
+      logger.info('AUDIO', 'Resuming slide audio after hand lowered', {
+        currentTime: slideAudioRef.current.currentTime,
+      })
+      // Set isPlaying to true - the slide audio effect will handle the actual resume
+      setIsPlaying(true)
+      return true
+    }
+
+    return false
   }, [])
 
   /**
@@ -1328,6 +1394,8 @@ function App() {
         slideResponseAudioRef.current = null
       }
       setHighlightPosition(null)
+      // Clear hand-raise pause flag since we can't resume to a different slide
+      audioWasPausedForHandRaiseRef.current = false
     }
 
     if (currentSlide?.type === 'header') {
@@ -1405,7 +1473,8 @@ function App() {
         let attempts = 0
         while (!audioPayload?.audioUrl && attempts < maxAttempts) {
           attempts += 1
-          audioPayload = await requestSlideAudio(currentSlide)
+          // Use priority flag for current slide to bypass rate limiting
+          audioPayload = await requestSlideAudio(currentSlide, { priority: true })
           if (cancelled) return
 
           if (audioPayload?.audioUrl || slideAudioFailureRef.current.has(currentSlide.id)) {
@@ -2233,24 +2302,31 @@ function App() {
   }, [isListening, stopListening])
 
   /**
-   * Raise-hand flow: interrupt narration and listen immediately.
+   * Raise-hand flow: pause narration and listen, or lower hand and resume.
    */
   const handleRaiseHandClick = useCallback(() => {
     if (isMicEnabled) {
+      // Lowering hand - stop listening and resume audio if it was paused
       setIsMicEnabled(false)
       cancelRaiseHand()
+      // Resume audio playback if we paused it when raising hand
+      if (uiState === UI_STATE.SLIDESHOW) {
+        resumeSlideAudioAfterHandLower()
+      }
       return
     }
 
+    // Raising hand - pause audio and start listening
     setIsMicEnabled(true)
     setAllowAutoListen(true)
     raiseHandRequestRef.current = false
     setIsRaiseHandPending(false)
     emptyTranscriptRetryRef.current = 0
     setVoiceAgentQueue([])
-    interruptActiveAudio()
 
     if (uiState === UI_STATE.SLIDESHOW) {
+      // Use the new pause function that preserves audio position
+      pauseSlideAudioForHandRaise()
       pauseAfterCurrentSlideRef.current = false
       setIsPlaying(false)
 
@@ -2266,6 +2342,9 @@ function App() {
           topicId: resumePoint.topicId,
         })
       }
+    } else {
+      // Not in slideshow - use full interrupt
+      interruptActiveAudio()
     }
 
     playMicOnSound()
@@ -2278,6 +2357,8 @@ function App() {
     currentIndex,
     startListening,
     interruptActiveAudio,
+    pauseSlideAudioForHandRaise,
+    resumeSlideAudioAfterHandLower,
   ])
 
   // Use the question handler hook
@@ -2627,6 +2708,29 @@ function App() {
       // Persist the new slides with version ID for version-specific storage
       persistTopicSlides(topicId, generateData.slides, newVersion.id)
 
+      // Prefetch TTS for all new slides immediately to reduce audio latency
+      // Filter to content slides only (skip headers, suggestions)
+      const contentSlides = generateData.slides.filter(
+        (slide) =>
+          slide.type !== 'header' &&
+          slide.type !== 'suggestions' &&
+          typeof slide.subtitle === 'string' &&
+          slide.subtitle.trim().length > 0
+      )
+      if (contentSlides.length > 0) {
+        logger.info('REGENERATE', 'Prefetching TTS for regenerated slides', {
+          slideCount: contentSlides.length,
+        })
+        // Request first slide with priority (bypasses rate limiting) for immediate playback
+        // This ensures audio is ready when user starts viewing the regenerated content
+        const [firstSlide, ...remainingSlides] = contentSlides
+        requestSlideAudio(firstSlide, { priority: true })
+        // Prefetch remaining slides in background
+        if (remainingSlides.length > 0) {
+          prefetchSlideNarrationBatch(remainingSlides)
+        }
+      }
+
       // Reset to first slide (header) to show the new version
       setCurrentIndex(0)
 
@@ -2656,7 +2760,7 @@ function App() {
       setIsRegenerating(false)
       regeneratingTopicIdRef.current = null
     }
-  }, [activeTopic, isRegenerating, wsClientId])
+  }, [activeTopic, isRegenerating, wsClientId, prefetchSlideNarrationBatch, requestSlideAudio])
 
   /**
    * Handle switching to a different version of the current topic.
@@ -2731,9 +2835,31 @@ function App() {
       })
     })
 
+    // Prefetch TTS for all slides in the switched version to reduce audio latency
+    const contentSlides = slides.filter(
+      (slide) =>
+        slide.type !== 'header' &&
+        slide.type !== 'suggestions' &&
+        typeof slide.subtitle === 'string' &&
+        slide.subtitle.trim().length > 0
+    )
+    if (contentSlides.length > 0) {
+      logger.info('VERSION', 'Prefetching TTS for version slides', {
+        slideCount: contentSlides.length,
+        versionIndex,
+      })
+      // Request first slide with priority for immediate playback
+      const [firstSlide, ...remainingSlides] = contentSlides
+      requestSlideAudio(firstSlide, { priority: true })
+      // Prefetch remaining slides in background
+      if (remainingSlides.length > 0) {
+        prefetchSlideNarrationBatch(remainingSlides)
+      }
+    }
+
     // Reset to first slide when switching versions
     setCurrentIndex(0)
-  }, [activeTopic, fetchSlidesFromServer])
+  }, [activeTopic, fetchSlidesFromServer, prefetchSlideNarrationBatch, requestSlideAudio])
 
   return (
     // F055, F056, F058: Responsive container with sidebar layout on desktop
@@ -2902,6 +3028,7 @@ function App() {
             wasManualNavRef={wasManualNavRef}
             getSlideDuration={getSlideDuration}
             isSlideNarrationPlaying={isSlideNarrationPlaying}
+            isSlideNarrationLoading={isSlideNarrationLoading}
             slideAudioRef={slideAudioRef}
             isPlaying={isPlaying}
             goToPrevSlide={goToPrevSlide}

@@ -8,6 +8,7 @@ import { useState, useCallback } from 'react'
  * @param {Object} props
  * @param {string} props.question - The question prompt
  * @param {string} props.statement - The statement to evaluate as true/false
+ * @param {string} props.hint - Optional hint referencing slide diagram
  * @param {Function} props.onAnswer - Callback with boolean answer
  * @param {boolean} props.showFeedback - Whether to show feedback state
  * @param {boolean} props.correctAnswer - The correct answer (for feedback)
@@ -16,6 +17,7 @@ import { useState, useCallback } from 'react'
 export default function YesNoQuestion({
   question,
   statement,
+  hint,
   onAnswer,
   showFeedback = false,
   correctAnswer,
@@ -85,6 +87,17 @@ export default function YesNoQuestion({
             "{statement}"
           </p>
         </div>
+
+        {/* Hint referencing diagram (if provided) */}
+        {hint && (
+          <p className="
+            mt-3 text-sm text-amber-600 dark:text-amber-400
+            flex items-center justify-center gap-1.5
+          ">
+            <span className="text-base">💡</span>
+            {hint}
+          </p>
+        )}
       </div>
 
       {/* Yes/No Buttons */}

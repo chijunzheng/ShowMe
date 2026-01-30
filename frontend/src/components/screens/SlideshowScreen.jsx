@@ -29,6 +29,7 @@ import StreamingSubtitle from '../StreamingSubtitle.jsx'
  * @param {Object} props.wasManualNavRef - Ref tracking manual navigation
  * @param {Function} props.getSlideDuration - Function to get slide duration
  * @param {boolean} props.isSlideNarrationPlaying - Whether narration is playing
+ * @param {boolean} props.isSlideNarrationLoading - Whether TTS audio is being fetched
  * @param {Object} props.slideAudioRef - Ref for slide audio element
  * @param {boolean} props.isPlaying - Whether slideshow is playing
  * @param {Function} props.goToPrevSlide - Navigate to previous slide
@@ -60,6 +61,7 @@ export default function SlideshowScreen({
   wasManualNavRef,
   getSlideDuration,
   isSlideNarrationPlaying,
+  isSlideNarrationLoading,
   slideAudioRef,
   isPlaying,
   goToPrevSlide,
@@ -121,6 +123,7 @@ export default function SlideshowScreen({
                     text={displayedSlide?.subtitle}
                     duration={getSlideDuration(displayedSlide)}
                     isPlaying={isSlideNarrationPlaying}
+                    isLoading={isSlideNarrationLoading}
                     showAll={wasManualNavRef.current}
                     audioRef={slideAudioRef}
                   />

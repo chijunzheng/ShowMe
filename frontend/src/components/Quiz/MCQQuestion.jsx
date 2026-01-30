@@ -10,13 +10,36 @@
  * - Keyboard navigation support
  */
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 
 // Option labels (A, B, C, D)
 const OPTION_LABELS = ['A', 'B', 'C', 'D']
 
 // Keyboard shortcuts for options
 const OPTION_KEYS = ['a', 'b', 'c', 'd', '1', '2', '3', '4']
+
+/**
+ * Keyboard icon for typing mode toggle
+ */
+function KeyboardIcon({ className = "w-5 h-5" }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75A2.25 2.25 0 014.5 4.5h15a2.25 2.25 0 012.25 2.25v10.5A2.25 2.25 0 0119.5 19.5h-15a2.25 2.25 0 01-2.25-2.25V6.75z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 8.25h.01M9 8.25h.01M12 8.25h.01M15 8.25h.01M18 8.25h.01M6 11.25h.01M9 11.25h.01M12 11.25h.01M15 11.25h.01M18 11.25h.01M7.5 14.25h9" />
+    </svg>
+  )
+}
+
+/**
+ * Tap/click icon for tap mode toggle
+ */
+function TapIcon({ className = "w-5 h-5" }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zm-7.518-.267A8.25 8.25 0 1120.25 10.5M8.288 14.212A5.25 5.25 0 1117.25 10.5" />
+    </svg>
+  )
+}
 
 export default function MCQQuestion({
   question,
@@ -28,12 +51,67 @@ export default function MCQQuestion({
 }) {
   const [localSelected, setLocalSelected] = useState(selectedIndex)
 
+  // Typing mode state
+  const [preferTyping, setPreferTyping] = useState(false)
+  const [typedAnswer, setTypedAnswer] = useState('')
+  const inputRef = useRef(null)
+
+  // Focus input when typing mode is enabled
+  useEffect(() => {
+    if (preferTyping && !showFeedback && inputRef.current) {
+      inputRef.current.focus()
+    }
+  }, [preferTyping, showFeedback])
+
   // Handle option selection
   const handleSelect = useCallback((index) => {
     if (showFeedback) return // Prevent selection after feedback shown
 
     setLocalSelected(index)
   }, [showFeedback])
+
+  // Handle toggling between typing and tap mode
+  const handleToggleMode = useCallback(() => {
+    if (showFeedback) return
+    setPreferTyping(prev => !prev)
+    // Clear previous selections when switching modes
+    setLocalSelected(null)
+    setTypedAnswer('')
+  }, [showFeedback])
+
+  // Handle typed answer input change
+  const handleTypedChange = useCallback((event) => {
+    if (showFeedback) return
+    const value = event.target.value.toUpperCase()
+
+    // Only allow single letter A-D or number 1-4
+    if (value === '' || /^[A-D1-4]$/.test(value)) {
+      setTypedAnswer(value)
+
+      // Auto-select the corresponding option
+      if (value) {
+        let index = -1
+        if (/^[A-D]$/.test(value)) {
+          index = value.charCodeAt(0) - 65 // A=0, B=1, C=2, D=3
+        } else if (/^[1-4]$/.test(value)) {
+          index = parseInt(value, 10) - 1 // 1=0, 2=1, 3=2, 4=3
+        }
+        if (index >= 0 && index < options.length) {
+          setLocalSelected(index)
+        }
+      } else {
+        setLocalSelected(null)
+      }
+    }
+  }, [showFeedback, options.length])
+
+  // Handle Enter key in typing mode
+  const handleTypedKeyDown = useCallback((event) => {
+    if (event.key === 'Enter' && localSelected !== null && !showFeedback) {
+      event.preventDefault()
+      onAnswer?.(localSelected)
+    }
+  }, [localSelected, showFeedback, onAnswer])
 
   // Handle submit
   const handleSubmit = useCallback(() => {
@@ -167,6 +245,72 @@ export default function MCQQuestion({
         </p>
       </div>
 
+      {/* Mode toggle and typing input */}
+      {!showFeedback && (
+        <div className="mb-4 flex flex-col items-center gap-3">
+          {/* Mode toggle button */}
+          <button
+            onClick={handleToggleMode}
+            className="
+              flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg
+              text-xs font-medium
+              bg-gray-100 dark:bg-slate-700
+              text-gray-600 dark:text-gray-300
+              hover:bg-gray-200 dark:hover:bg-slate-600
+              transition-colors duration-200
+              border border-gray-200 dark:border-slate-600
+            "
+            title={preferTyping ? 'Switch to tap mode' : 'Switch to typing mode'}
+            aria-label={preferTyping ? 'Switch to tap mode' : 'Switch to typing mode'}
+          >
+            {preferTyping ? (
+              <>
+                <TapIcon className="w-4 h-4" />
+                <span>Tap options</span>
+              </>
+            ) : (
+              <>
+                <KeyboardIcon className="w-4 h-4" />
+                <span>Type answer</span>
+              </>
+            )}
+          </button>
+
+          {/* Typing input (visible in typing mode) */}
+          {preferTyping && (
+            <div className="w-full max-w-xs">
+              <input
+                ref={inputRef}
+                type="text"
+                value={typedAnswer}
+                onChange={handleTypedChange}
+                onKeyDown={handleTypedKeyDown}
+                placeholder="Type A, B, C, or D..."
+                maxLength={1}
+                className="
+                  w-full px-4 py-3 rounded-xl border-2
+                  text-lg text-center font-medium uppercase
+                  transition-all duration-200
+                  focus:outline-none focus:ring-2 focus:ring-offset-2
+                  border-gray-200 dark:border-slate-600
+                  bg-white dark:bg-slate-800
+                  text-gray-800 dark:text-gray-100
+                  focus:border-primary focus:ring-primary/30
+                  placeholder:text-gray-400 placeholder:normal-case
+                "
+                aria-label="Type your answer (A, B, C, or D)"
+                autoComplete="off"
+              />
+              {localSelected !== null && (
+                <p className="text-center text-sm text-primary mt-2">
+                  Selected: {OPTION_LABELS[localSelected]} - {options[localSelected]}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Options grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
         {options.map((option, index) => (
@@ -231,7 +375,10 @@ export default function MCQQuestion({
       {/* Keyboard hint */}
       {!showFeedback && (
         <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-3">
-          Press A-D or 1-4 to select, Enter to submit
+          {preferTyping
+            ? 'Type A-D or 1-4, then press Enter to submit'
+            : 'Tap an option or press A-D / 1-4 to select, Enter to submit'
+          }
         </p>
       )}
     </div>

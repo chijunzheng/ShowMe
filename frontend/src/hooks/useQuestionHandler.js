@@ -104,6 +104,9 @@ export default function useQuestionHandler({
     if (isRaiseHandPending) {
       setIsRaiseHandPending(false)
     }
+    // Capture mic state BEFORE disabling so we can restore for chitchat
+    const wasMicEnabled = isMicEnabled
+    const wasAutoListenAllowed = allowAutoListen
     if (isMicEnabled) {
       setIsMicEnabled(false)
     }
@@ -152,31 +155,46 @@ export default function useQuestionHandler({
       })
 
       if (classifyResult.classification === 'chitchat') {
-        try {
-          const chitchatResult = await requestChitchatResponse({
-            query: trimmedQuery,
-            signal,
-            activeTopicName: activeTopic?.name,
-          })
-          const responseText = chitchatResult?.responseText ||
-            classifyResult.responseText ||
-            "I'm ready to help. What would you like to learn?"
-          setVoiceAgentQueue([])
-          enqueueVoiceAgentMessage(responseText, { priority: 'high' })
-          logger.timeEnd('GENERATION', 'full-pipeline')
-          return
-        } catch (error) {
-          if (error.name === 'AbortError') {
-            setUiState(UI_STATE.LISTENING)
-            return
+        // OPTIMIZATION: Use the responseText from classification if available (local pattern match).
+        // Only call /api/chitchat if we need Gemini to generate a response.
+        let responseText = classifyResult.responseText
+
+        if (!responseText) {
+          // No pre-computed response - need Gemini to generate one
+          try {
+            const chitchatResult = await requestChitchatResponse({
+              query: trimmedQuery,
+              signal,
+              activeTopicName: activeTopic?.name,
+            })
+            responseText = chitchatResult?.responseText || "I'm ready to help. What would you like to learn?"
+          } catch (error) {
+            if (error.name === 'AbortError') {
+              setUiState(UI_STATE.LISTENING)
+              return
+            }
+            responseText = "I'm ready to help. What would you like to learn?"
           }
-          const fallbackText = classifyResult.responseText ||
-            "I'm ready to help. What would you like to learn?"
-          setVoiceAgentQueue([])
-          enqueueVoiceAgentMessage(fallbackText, { priority: 'high' })
-          logger.timeEnd('GENERATION', 'full-pipeline')
-          return
         }
+
+        // BUG FIX: Re-enable mic so it resumes listening after voice agent speaks.
+        // Chitchat is conversational - user expects to continue the dialogue.
+        // Use captured values from BEFORE we disabled the mic.
+        const shouldResumeMic = wasMicEnabled || wasAutoListenAllowed
+
+        setVoiceAgentQueue([])
+        enqueueVoiceAgentMessage(responseText, {
+          priority: 'high',
+          onComplete: () => {
+            // Restore mic state after chitchat response finishes
+            if (shouldResumeMic) {
+              setIsMicEnabled(true)
+              setAllowAutoListen(true)
+            }
+          },
+        })
+        logger.timeEnd('GENERATION', 'full-pipeline')
+        return
       }
 
       // Handle complexity for follow-ups
@@ -192,8 +210,18 @@ export default function useQuestionHandler({
           // Complex: Voice choice/prompt
           logger.info('GENERATION', 'Complex complexity - asking for clarification')
           const complexPrompt = "That's a really big topic with many details. I can focus on the history, the mechanism, or real-world examples. Which would you like?"
-          enqueueVoiceAgentMessage(complexPrompt, { priority: 'high' })
+          const shouldResumeMicForComplex = wasMicEnabled || wasAutoListenAllowed
           setVoiceAgentQueue([])
+          enqueueVoiceAgentMessage(complexPrompt, {
+            priority: 'high',
+            onComplete: () => {
+              // Restore mic state so user can respond to the clarification question
+              if (shouldResumeMicForComplex) {
+                setIsMicEnabled(true)
+                setAllowAutoListen(true)
+              }
+            },
+          })
           setUiState(UI_STATE.SLIDESHOW)
           logger.timeEnd('GENERATION', 'full-pipeline')
           return
@@ -260,6 +288,16 @@ export default function useQuestionHandler({
           }
 
           // Play the verbal response audio
+          // Capture mic state for restoration after audio ends
+          const shouldResumeMicAfterSlideResponse = wasMicEnabled || wasAutoListenAllowed
+
+          const restoreMicState = () => {
+            if (shouldResumeMicAfterSlideResponse) {
+              setIsMicEnabled(true)
+              setAllowAutoListen(true)
+            }
+          }
+
           if (respondData.audioUrl) {
             // Stop any existing slide response audio
             if (slideResponseAudioRef.current) {
@@ -269,17 +307,19 @@ export default function useQuestionHandler({
             const audio = new Audio(respondData.audioUrl)
             slideResponseAudioRef.current = audio
 
-            // When audio ends, clear the highlight
+            // When audio ends, clear the highlight and restore mic
             audio.onended = () => {
               logger.debug('UI', 'Slide response audio ended, clearing highlight')
               setHighlightPosition(null)
               slideResponseAudioRef.current = null
+              restoreMicState()
             }
 
             audio.onerror = () => {
               logger.warn('AUDIO', 'Slide response audio playback error')
               setHighlightPosition(null)
               slideResponseAudioRef.current = null
+              restoreMicState()
             }
 
             // Start playback
@@ -287,14 +327,19 @@ export default function useQuestionHandler({
               logger.warn('AUDIO', 'Slide response autoplay blocked', { error: err.message })
               setTimeout(() => {
                 setHighlightPosition(null)
+                restoreMicState()
               }, respondData.duration || 3000)
             })
           } else {
-            // No audio - clear highlight after a delay
+            // No audio - clear highlight after a delay and restore mic
             if (respondData.highlight) {
               setTimeout(() => {
                 setHighlightPosition(null)
+                restoreMicState()
               }, respondData.duration || 3000)
+            } else {
+              // No audio and no highlight - restore mic immediately
+              restoreMicState()
             }
           }
 

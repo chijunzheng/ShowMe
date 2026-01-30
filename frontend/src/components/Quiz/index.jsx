@@ -648,7 +648,8 @@ export default function Quiz({
         {currentQuestion?.type === 'fill_blank' && state === QUIZ_STATE.ANSWERING && (
           <FillBlankQuestion
             key={currentQuestion.id}
-            blankSentence={currentQuestion.question}
+            blankSentence={currentQuestion.blankSentence || currentQuestion.question}
+            wordOptions={currentQuestion.wordOptions || []}
             onAnswer={handleFillBlankAnswer}
             showFeedback={false}
             correctAnswer={
@@ -664,7 +665,8 @@ export default function Quiz({
           <div className="space-y-6">
             <FillBlankQuestion
               key={`${currentQuestion.id}-feedback`}
-              blankSentence={currentQuestion.question}
+              blankSentence={currentQuestion.blankSentence || currentQuestion.question}
+              wordOptions={currentQuestion.wordOptions || []}
               onAnswer={() => {}}
               showFeedback={true}
               correctAnswer={currentFeedback.correctAnswer}
@@ -730,6 +732,7 @@ export default function Quiz({
             key={currentQuestion.id}
             question={currentQuestion.question}
             statement={currentQuestion.statement}
+            hint={currentQuestion.hint}
             onAnswer={handleYesNoAnswer}
             showFeedback={false}
             correctAnswer={currentQuestion.correctAnswer}
@@ -743,6 +746,7 @@ export default function Quiz({
               key={`${currentQuestion.id}-feedback`}
               question={currentQuestion.question}
               statement={currentQuestion.statement}
+              hint={currentQuestion.hint}
               onAnswer={() => {}}
               showFeedback={true}
               correctAnswer={currentQuestion.correctAnswer}

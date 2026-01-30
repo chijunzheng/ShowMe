@@ -44,9 +44,11 @@ export default function useSlideAudio({ onPersistSlideAudio } = {}) {
   /**
    * Request TTS audio for a slide
    * @param {Object} slide - The slide to get audio for
+   * @param {Object} options - Request options
+   * @param {boolean} options.priority - If true, bypass rate limiting (for current slide)
    * @returns {Promise<Object|null>} Audio payload or null
    */
-  const requestSlideAudio = useCallback(async (slide) => {
+  const requestSlideAudio = useCallback(async (slide, { priority = false } = {}) => {
     if (!slide || slide.type === 'header') return null
     if (!slide.subtitle || typeof slide.subtitle !== 'string') return null
     if (slideAudioFailureRef.current.has(slide.id)) return null
@@ -67,9 +69,9 @@ export default function useSlideAudio({ onPersistSlideAudio } = {}) {
     const inFlight = slideAudioRequestRef.current.get(slide.id)
     if (inFlight) return inFlight
 
-    // Check rate limit backoff
+    // Check rate limit backoff (only skip for non-priority requests)
     const now = Date.now()
-    if (now < ttsRateLimitUntilRef.current) {
+    if (!priority && now < ttsRateLimitUntilRef.current) {
       logger.debug('AUDIO', 'Skipping TTS request due to rate limit backoff', {
         slideId: slide.id,
         retryAfter: Math.ceil((ttsRateLimitUntilRef.current - now) / 1000),
@@ -77,9 +79,9 @@ export default function useSlideAudio({ onPersistSlideAudio } = {}) {
       return null
     }
 
-    // Enforce minimum interval between requests
+    // Enforce minimum interval between requests (bypass for priority requests)
     const timeSinceLastRequest = now - lastTtsRequestTimeRef.current
-    if (timeSinceLastRequest < TTS_PREFETCH_CONFIG.MIN_REQUEST_INTERVAL_MS) {
+    if (!priority && timeSinceLastRequest < TTS_PREFETCH_CONFIG.MIN_REQUEST_INTERVAL_MS) {
       logger.debug('AUDIO', 'Skipping TTS request - too soon after last request', {
         slideId: slide.id,
         waitMs: TTS_PREFETCH_CONFIG.MIN_REQUEST_INTERVAL_MS - timeSinceLastRequest,
@@ -89,6 +91,10 @@ export default function useSlideAudio({ onPersistSlideAudio } = {}) {
 
     // Update last request time before making request
     lastTtsRequestTimeRef.current = now
+
+    if (priority) {
+      logger.debug('AUDIO', 'Priority TTS request - bypassing rate limits', { slideId: slide.id })
+    }
 
     const requestPromise = (async () => {
       try {

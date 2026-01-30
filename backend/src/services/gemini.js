@@ -2175,15 +2175,31 @@ LEVEL: SIMPLE (Ages 5-10, K-5 students)
 Generate 3-4 questions that are visual, fun, and encouraging.
 
 REQUIRED QUESTION TYPES (pick from these):
-- yes_no: Simple true/false statements
+- yes_no: Thought-provoking true/false claims (see guidelines below)
 - picture_match: "Which picture shows [concept]?" (references slide images)
 - fill_blank: Single-word answers only
+
+YES/NO QUESTION GUIDELINES (CRITICAL - make these engaging!):
+- Present interesting CLAIMS about the topic, not obvious facts
+- Include COMMON MISCONCEPTIONS as false statements (things kids often get wrong)
+- Reference specific visuals: "Looking at the diagram, [claim about what it shows]"
+- Test understanding, not just memory: "Based on what you learned, [surprising claim]"
+- Mix counter-intuitive truths with plausible-sounding falsehoods
+- GOOD examples:
+  * FALSE: "Dinosaurs and humans lived at the same time" (common misconception)
+  * TRUE: "Some dinosaurs were smaller than chickens" (surprising but true)
+  * FALSE: "The Sun moves around the Earth" (addresses misconception)
+  * TRUE: "Plants breathe in what we breathe out" (requires connecting ideas)
+- BAD examples (too obvious, boring):
+  * "Plants need water" - too easy, no thought required
+  * "Dogs are animals" - trivially true
+  * "Fish can fly" - obviously false, no one believes this
 
 STYLE GUIDELINES:
 - Use everyday language a child can understand
 - Keep question text under 15 words
 - Use encouraging, playful language ("Can you find...", "Which picture shows...")
-- Focus on visual recognition and simple recall
+- Focus on visual recognition and deeper understanding
 - No technical terminology`,
 
   standard: `
@@ -2222,15 +2238,41 @@ const LEVEL_QUESTION_EXAMPLES = {
   simple: `
 QUESTION TYPE EXAMPLES:
 
-yes_no (True/False):
+yes_no (True/False) - MUST be thought-provoking!:
+Example 1 - Counter-intuitive truth:
 {
   "id": "q1",
   "type": "yes_no",
-  "question": "Is this statement true or false?",
-  "statement": "Plants need sunlight to grow.",
+  "question": "Think about this claim:",
+  "statement": "Some plants can survive without any soil at all.",
   "slideReference": 0,
   "correctAnswer": true,
-  "explanation": "Yes! Plants use sunlight to make food."
+  "hint": "Look at the diagram showing different ways plants grow.",
+  "explanation": "Surprise! Plants like air plants and water lilies don't need soil - they get nutrients from air or water!"
+}
+
+Example 2 - Common misconception (FALSE):
+{
+  "id": "q2",
+  "type": "yes_no",
+  "question": "Is this true or false?",
+  "statement": "Plants sleep at night just like people do.",
+  "slideReference": 1,
+  "correctAnswer": false,
+  "hint": "Remember what the slide said about how plants work all the time.",
+  "explanation": "Tricky! Plants don't sleep, but they DO work differently at night - they keep breathing but can't make food without sunlight."
+}
+
+Example 3 - Tests deeper understanding:
+{
+  "id": "q3",
+  "type": "yes_no",
+  "question": "Based on what you learned:",
+  "statement": "A plant in a dark closet could still stay alive for a little while.",
+  "slideReference": 0,
+  "correctAnswer": true,
+  "hint": "Think about the stored energy the slide mentioned.",
+  "explanation": "Yes! Plants store energy, so they can survive in darkness for a short time - but they'll eventually need light to make more food."
 }
 
 picture_match:
@@ -2254,8 +2296,14 @@ fill_blank (simple):
   "blankSentence": "Plants are colored ___.",
   "correctAnswer": "green",
   "acceptableAnswers": ["green", "Green"],
+  "wordOptions": ["green", "blue", "red", "yellow"],
   "explanation": "Plants are green because of chlorophyll!"
-}`,
+}
+
+FILL_BLANK REQUIREMENTS:
+- MUST include wordOptions array with 4 words: the correct answer + 3 plausible distractors
+- Distractors should be related to the topic but incorrect for this specific blank
+- Keep words simple and at the same difficulty level`,
 
   standard: `
 QUESTION TYPE EXAMPLES:
@@ -2281,8 +2329,14 @@ fill_blank:
   "blankSentence": "The process of ___ allows plants to convert sunlight into energy.",
   "correctAnswer": "photosynthesis",
   "acceptableAnswers": ["photosynthesis", "photo-synthesis"],
+  "wordOptions": ["photosynthesis", "respiration", "digestion", "evaporation"],
   "explanation": "This is the key process described in the slide."
 }
+
+FILL_BLANK REQUIREMENTS:
+- MUST include wordOptions array with 4 words: the correct answer + 3 plausible distractors
+- Distractors should be scientifically-related but incorrect terms for this context
+- Words should be at appropriate vocabulary level for middle schoolers
 
 voice (Open-ended):
 {
@@ -2479,15 +2533,31 @@ Generate the quiz questions now:`
           question.acceptableAnswers = Array.isArray(q.acceptableAnswers)
             ? q.acceptableAnswers
             : [question.correctAnswer]
+          // Word options for tap-to-select UI (correct answer + distractors)
+          // Ensure wordOptions includes the correct answer
+          if (Array.isArray(q.wordOptions) && q.wordOptions.length >= 2) {
+            question.wordOptions = q.wordOptions.slice(0, 5) // Max 5 options
+            // Ensure correct answer is in the options
+            if (!question.wordOptions.includes(question.correctAnswer)) {
+              question.wordOptions[0] = question.correctAnswer
+            }
+          } else {
+            // Generate default word options if not provided
+            question.wordOptions = [question.correctAnswer]
+          }
         } else if (question.type === 'voice') {
           question.expectedTopics = Array.isArray(q.expectedTopics)
             ? q.expectedTopics
             : []
           question.sampleAnswer = q.sampleAnswer || ''
         } else if (question.type === 'yes_no') {
-          // Simple level: true/false statement
+          // Simple level: true/false statement with optional hint for diagram reference
           question.statement = q.statement || question.question
           question.correctAnswer = typeof q.correctAnswer === 'boolean' ? q.correctAnswer : true
+          // Include hint if provided (references slide diagram for visual learning)
+          if (q.hint && typeof q.hint === 'string') {
+            question.hint = q.hint
+          }
         } else if (question.type === 'picture_match') {
           // Simple level: match concept to slide image
           question.imageOptions = Array.isArray(q.imageOptions)

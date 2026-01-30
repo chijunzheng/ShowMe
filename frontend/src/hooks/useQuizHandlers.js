@@ -1,10 +1,61 @@
 /**
  * useQuizHandlers - Custom hook for quiz-related handlers
  * Extracts quiz flow logic from App.jsx to reduce complexity
+ *
+ * WB010: After quiz pass, generates world pieces and adds them to user's world
  */
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import { UI_STATE } from '../constants/appConfig.js'
 import logger from '../utils/logger.js'
+
+/**
+ * API base URL from environment
+ */
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
+
+/**
+ * Get client ID from local storage (consistent with useWorldPiece hook)
+ */
+function getClientId() {
+  const storageKey = 'showme_client_id'
+  let clientId = localStorage.getItem(storageKey)
+
+  if (!clientId) {
+    clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    localStorage.setItem(storageKey, clientId)
+  }
+
+  return clientId
+}
+
+/**
+ * Determine zone from topic name using keyword matching
+ */
+function determineZone(topicName) {
+  const topicLower = (topicName || '').toLowerCase()
+
+  // Nature zone keywords
+  const natureKeywords = [
+    'volcano', 'mountain', 'ocean', 'river', 'forest', 'tree', 'plant',
+    'animal', 'dinosaur', 'fish', 'bird', 'insect', 'weather', 'rain',
+    'snow', 'earthquake', 'tornado', 'hurricane', 'ecosystem', 'biology',
+    'earth', 'rock', 'mineral', 'crystal', 'water', 'nature', 'wildlife',
+    'climate', 'environment', 'solar', 'star', 'planet', 'moon', 'sun',
+  ]
+
+  // Civilization zone keywords
+  const civilizationKeywords = [
+    'pyramid', 'castle', 'city', 'building', 'bridge', 'architecture',
+    'history', 'war', 'king', 'queen', 'empire', 'civilization', 'invention',
+    'machine', 'computer', 'robot', 'car', 'train', 'plane', 'ship',
+    'medicine', 'hospital', 'school', 'library', 'museum', 'art', 'music',
+    'sport', 'olympics', 'government', 'law', 'economy', 'money', 'trade',
+  ]
+
+  if (natureKeywords.some(kw => topicLower.includes(kw))) return 'nature'
+  if (civilizationKeywords.some(kw => topicLower.includes(kw))) return 'civilization'
+  return 'arcane'
+}
 
 /**
  * @param {Object} params - Hook parameters
@@ -121,7 +172,8 @@ export default function useQuizHandlers({
   }, [activeTopic, visibleSlidesRef, setIsLoadingQuiz, setQuizTopicId, setQuizTopicName, setQuizQuestions, setQuizSlides, setUiState])
 
   /**
-   * WB018: Handle quiz completion - evaluate and potentially unlock piece
+   * WB018: Handle quiz completion - evaluate, generate piece, and unlock
+   * WB010: After quiz pass, generates world piece image and stores in world state
    */
   const handleQuizComplete = useCallback(async (results) => {
     setQuizResults(results)
@@ -129,44 +181,186 @@ export default function useQuizHandlers({
     // Check if user passed (>= 60% score)
     const passed = results.percentage >= 60
 
-    if (passed && quizTopicId) {
+    if (passed && quizTopicId && quizTopicName) {
       try {
-        // Evaluate quiz and unlock piece via API
-        const response = await fetch('/api/quiz/evaluate', {
+        const clientId = getClientId()
+        const zone = determineZone(quizTopicName)
+
+        logger.info('QUIZ', 'Generating world piece for passed quiz', {
+          topicName: quizTopicName,
+          zone,
+          percentage: results.percentage
+        })
+
+        // Step 1: Generate world piece image via API
+        const generateResponse = await fetch(`${API_BASE}/api/world/piece/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topicName: quizTopicName,
+            zone,
+            summary: '', // Could pass slide summary in future
+          }),
+        })
+
+        let generatedPiece = null
+        if (generateResponse.ok) {
+          const generateData = await generateResponse.json()
+          generatedPiece = generateData.piece
+
+          // Step 2: Add piece to world state with position
+          if (generatedPiece) {
+            // Generate random position for this piece
+            const pieceX = Math.random() * 80 + 10
+            const pieceY = Math.random() * 60 + 20
+
+            // Add required fields for world storage
+            // Note: Backend expects position.x/y but frontend display uses x/y directly
+            const pieceToStore = {
+              ...generatedPiece,
+              topicId: quizTopicId,
+              name: quizTopicName, // WorldPiece component expects 'name'
+              x: pieceX, // Direct x/y for frontend display
+              y: pieceY,
+              position: {
+                // Also store in position object for backend compatibility
+                x: pieceX,
+                y: pieceY,
+              },
+            }
+
+            const addResponse = await fetch(`${API_BASE}/api/world/piece`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                clientId,
+                piece: pieceToStore,
+              }),
+            })
+
+            if (addResponse.ok) {
+              const addData = await addResponse.json()
+              logger.info('QUIZ', 'World piece added successfully', {
+                pieceId: generatedPiece.id,
+                zone
+              })
+
+              // Set unlocked piece for celebration
+              setUnlockedPiece({
+                ...generatedPiece,
+                name: quizTopicName,
+                category: zone,
+              })
+              setShowPieceCelebration(true)
+              // Increment world badge for new piece notification
+              setWorldBadge(prev => prev + 1)
+
+              // UI008: Check for tier upgrade from world state update
+              if (addData.arcaneJustUnlocked) {
+                setTierUpgradeInfo({ from: 'growing', to: 'arcane' })
+              }
+            } else {
+              logger.warn('QUIZ', 'Failed to add piece to world', {
+                status: addResponse.status
+              })
+            }
+          }
+        } else {
+          // Fallback: Create a piece with a placeholder icon if image generation fails
+          logger.warn('QUIZ', 'Failed to generate piece image, using fallback', {
+            status: generateResponse.status
+          })
+
+          // Create a fallback piece with an emoji icon
+          const fallbackPieceId = `piece_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+          const fallbackX = Math.random() * 80 + 10
+          const fallbackY = Math.random() * 60 + 20
+
+          // Select an icon based on the zone
+          const zoneIcons = {
+            nature: ['🌿', '🌳', '🌻', '🦋', '🐦'],
+            civilization: ['🏛️', '🏰', '🏙️', '🚀', '📚'],
+            arcane: ['✨', '🔮', '💫', '⭐', '🌙'],
+          }
+          const icons = zoneIcons[zone] || zoneIcons.nature
+          const icon = icons[Math.floor(Math.random() * icons.length)]
+
+          const fallbackPiece = {
+            id: fallbackPieceId,
+            topicName: quizTopicName,
+            name: quizTopicName, // WorldPiece component expects 'name'
+            zone,
+            icon, // Emoji icon for display
+            imageUrl: null, // No image, will use emoji fallback
+            prompt: `Fallback piece for ${quizTopicName}`,
+            topicId: quizTopicId,
+            x: fallbackX,
+            y: fallbackY,
+            position: {
+              x: fallbackX,
+              y: fallbackY,
+            },
+          }
+
+          // Still try to add the fallback piece to world
+          const addFallbackResponse = await fetch(`${API_BASE}/api/world/piece`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              clientId,
+              piece: fallbackPiece,
+            }),
+          })
+
+          if (addFallbackResponse.ok) {
+            logger.info('QUIZ', 'Fallback piece added successfully', {
+              pieceId: fallbackPieceId,
+              zone
+            })
+
+            setUnlockedPiece({
+              ...fallbackPiece,
+              name: quizTopicName,
+              category: zone,
+            })
+            setShowPieceCelebration(true)
+            setWorldBadge(prev => prev + 1)
+            generatedPiece = fallbackPiece
+          }
+        }
+
+        // Step 3: Award XP via evaluate endpoint (handles tier upgrades)
+        const evalResponse = await fetch('/api/quiz/evaluate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             topicId: quizTopicId,
             topicName: quizTopicName,
-            results,
-            clientId: wsClientId,
+            answers: results.answers || [],
+            questions: results.questions || [],
+            clientId,
+            explanationLevel: results.explanationLevel || 'standard',
           }),
         })
 
-        if (response.ok) {
-          const data = await response.json()
-          if (data.piece) {
-            setUnlockedPiece(data.piece)
-            setShowPieceCelebration(true)
-            // Increment world badge for new piece notification
-            setWorldBadge(prev => prev + 1)
-          }
-          // UI008: Handle tier upgrade celebration
-          if (data.tierUpgrade) {
-            setTierUpgradeInfo(data.tierUpgrade)
-            // Delay tier celebration to show after piece celebration if both occur
-            if (!data.piece) {
+        if (evalResponse.ok) {
+          const evalData = await evalResponse.json()
+          // UI008: Handle tier upgrade celebration from XP award
+          if (evalData.tierInfo?.tierUpgrade) {
+            setTierUpgradeInfo(evalData.tierInfo.tierUpgrade)
+            // Delay tier celebration to show after piece celebration
+            if (!generatedPiece) {
               setShowTierCelebration(true)
             }
           }
         }
       } catch (error) {
-        logger.error('QUIZ', 'Failed to evaluate quiz', { error: error.message })
+        logger.error('QUIZ', 'Failed to complete quiz flow', { error: error.message })
       }
     }
 
     setUiState(UI_STATE.QUIZ_RESULTS)
-  }, [quizTopicId, quizTopicName, wsClientId, setQuizResults, setUiState, setUnlockedPiece, setShowPieceCelebration, setWorldBadge, setTierUpgradeInfo, setShowTierCelebration])
+  }, [quizTopicId, quizTopicName, setQuizResults, setUiState, setUnlockedPiece, setShowPieceCelebration, setWorldBadge, setTierUpgradeInfo, setShowTierCelebration])
 
   /**
    * WB018: Handle quiz skip

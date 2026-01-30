@@ -19,6 +19,30 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
 
 /**
+ * Microphone icon for voice mode
+ */
+function MicIcon({ className = "w-5 h-5" }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+      <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+    </svg>
+  )
+}
+
+/**
+ * Keyboard icon for typing mode
+ */
+function KeyboardIcon({ className = "w-5 h-5" }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75A2.25 2.25 0 014.5 4.5h15a2.25 2.25 0 012.25 2.25v10.5A2.25 2.25 0 0119.5 19.5h-15a2.25 2.25 0 01-2.25-2.25V6.75z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 8.25h.01M9 8.25h.01M12 8.25h.01M15 8.25h.01M18 8.25h.01M6 11.25h.01M9 11.25h.01M12 11.25h.01M15 11.25h.01M18 11.25h.01M7.5 14.25h9" />
+    </svg>
+  )
+}
+
+/**
  * VoiceQuestion component for spoken answer quiz questions
  *
  * @param {Object} props
@@ -50,6 +74,11 @@ export default function VoiceQuestion({
   const [transcript, setTranscript] = useState(userTranscript)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [transcriptionError, setTranscriptionError] = useState(null)
+
+  // Typing mode state
+  const [preferTyping, setPreferTyping] = useState(false)
+  const [typedAnswer, setTypedAnswer] = useState('')
+  const textareaRef = useRef(null)
 
   // Refs for recording
   const mediaRecorderRef = useRef(null)
@@ -84,6 +113,45 @@ export default function VoiceQuestion({
       setTranscript(userTranscript)
     }
   }, [showFeedback, userTranscript])
+
+  // Focus textarea when typing mode is enabled
+  useEffect(() => {
+    if (preferTyping && !showFeedback && textareaRef.current) {
+      textareaRef.current.focus()
+    }
+  }, [preferTyping, showFeedback])
+
+  // Handle toggling between voice and typing mode
+  const handleToggleMode = useCallback(() => {
+    if (showFeedback) return
+    setPreferTyping(prev => !prev)
+    // Clear previous answers when switching modes
+    setTranscript('')
+    setTypedAnswer('')
+    setTranscriptionError(null)
+  }, [showFeedback])
+
+  // Handle typed answer input change
+  const handleTypedChange = useCallback((event) => {
+    if (showFeedback) return
+    setTypedAnswer(event.target.value)
+  }, [showFeedback])
+
+  // Handle keyboard shortcuts for typed answer (Ctrl/Cmd+Enter to submit)
+  const handleTypedKeyDown = useCallback((event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault()
+      if (typedAnswer.trim()) {
+        onAnswer?.(typedAnswer.trim())
+      }
+    }
+  }, [typedAnswer, onAnswer])
+
+  // Handle submit for typed answer
+  const handleTypedSubmit = useCallback(() => {
+    if (!typedAnswer.trim() || showFeedback) return
+    onAnswer?.(typedAnswer.trim())
+  }, [typedAnswer, showFeedback, onAnswer])
 
   /**
    * Start audio recording
@@ -293,9 +361,96 @@ export default function VoiceQuestion({
         </p>
       </div>
 
-      {/* Recording and Transcription Area */}
-      <div className="flex flex-col items-center gap-6">
-        {/* Waveform visualization (shown during recording) */}
+      {/* Mode toggle - only show when not in feedback or recording */}
+      {!showFeedback && !isRecording && !isTranscribing && !transcript && !typedAnswer && (
+        <div className="flex justify-center mb-6">
+          <button
+            onClick={handleToggleMode}
+            className="
+              flex items-center gap-1.5 px-3 py-2 rounded-lg
+              text-sm font-medium
+              bg-gray-100 dark:bg-slate-700
+              text-gray-600 dark:text-gray-300
+              hover:bg-gray-200 dark:hover:bg-slate-600
+              transition-colors duration-200
+              border border-gray-200 dark:border-slate-600
+            "
+            title={preferTyping ? 'Switch to voice mode' : 'Switch to typing mode'}
+            aria-label={preferTyping ? 'Switch to voice mode' : 'Switch to typing mode'}
+          >
+            {preferTyping ? (
+              <>
+                <MicIcon className="w-4 h-4" />
+                <span>Use voice</span>
+              </>
+            ) : (
+              <>
+                <KeyboardIcon className="w-4 h-4" />
+                <span>Type instead</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Typing Input Area (when in typing mode) */}
+      {preferTyping && !showFeedback && (
+        <div className="w-full max-w-md mb-6">
+          <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 text-center mb-2">
+            Type your answer:
+          </label>
+          <textarea
+            ref={textareaRef}
+            value={typedAnswer}
+            onChange={handleTypedChange}
+            onKeyDown={handleTypedKeyDown}
+            placeholder="Type your answer here..."
+            rows={3}
+            className="
+              w-full px-4 py-3 rounded-xl border-2
+              text-base leading-relaxed
+              transition-all duration-200
+              resize-none
+              focus:outline-none focus:ring-2 focus:ring-offset-2
+              border-gray-200 dark:border-slate-600
+              bg-white dark:bg-slate-800
+              text-gray-800 dark:text-gray-100
+              placeholder:text-gray-400 dark:placeholder:text-gray-500
+              focus:border-primary focus:ring-primary/30
+            "
+            aria-label="Type your answer"
+          />
+          <div className="flex justify-between items-center mt-2 text-sm text-gray-500 dark:text-gray-400">
+            <span>
+              {typedAnswer.trim().split(/\s+/).filter(Boolean).length} words
+            </span>
+            <span className="text-xs">Ctrl+Enter to submit</span>
+          </div>
+
+          {/* Submit button for typed answer */}
+          {typedAnswer.trim() && (
+            <div className="flex justify-center mt-4">
+              <button
+                onClick={handleTypedSubmit}
+                className="
+                  px-8 py-3 rounded-full font-medium
+                  bg-gradient-to-r from-primary to-cyan-500 text-white
+                  shadow-lg hover:shadow-xl
+                  transform hover:scale-105 active:scale-95
+                  transition-all duration-200
+                "
+              >
+                Check Answer
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Recording and Transcription Area (when NOT in typing mode) */}
+      {!preferTyping && (
+        <div className="flex flex-col items-center gap-6">
+          {/* Waveform visualization (shown during recording) */}
         {isRecording && (
           <div className="flex items-center justify-center gap-1 h-12">
             {waveformBars.map((height, i) => (
@@ -356,35 +511,6 @@ export default function VoiceQuestion({
                 Record again
               </button>
             </div>
-          </div>
-        )}
-
-        {/* Transcript display with feedback */}
-        {showFeedback && transcript && feedbackStyle && (
-          <div className="w-full max-w-md">
-            <div className={`p-4 border-2 rounded-xl ${feedbackStyle.borderColor} ${feedbackStyle.bgColor}`}>
-              <div className="flex items-start gap-3">
-                <span className={feedbackStyle.textColor}>{feedbackStyle.icon}</span>
-                <div className="flex-1">
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Your answer:</p>
-                  <p className="text-lg text-gray-800 dark:text-gray-100 leading-relaxed">
-                    "{transcript}"
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Show correct answer if wrong */}
-            {!feedback?.correct && correctAnswer && (
-              <div className="mt-4 p-4 bg-success/10 border border-success/20 rounded-xl">
-                <p className="text-sm text-success dark:text-success-400 mb-1">
-                  Sample answer:
-                </p>
-                <p className="text-success dark:text-success-400 font-medium">
-                  {correctAnswer}
-                </p>
-              </div>
-            )}
           </div>
         )}
 
@@ -451,7 +577,37 @@ export default function VoiceQuestion({
             Check Answer
           </button>
         )}
-      </div>
+        </div>
+      )}
+
+      {/* Transcript display with feedback (shown for both voice and typed answers) */}
+      {showFeedback && transcript && feedbackStyle && (
+        <div className="w-full max-w-md mx-auto">
+          <div className={`p-4 border-2 rounded-xl ${feedbackStyle.borderColor} ${feedbackStyle.bgColor}`}>
+            <div className="flex items-start gap-3">
+              <span className={feedbackStyle.textColor}>{feedbackStyle.icon}</span>
+              <div className="flex-1">
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Your answer:</p>
+                <p className="text-lg text-gray-800 dark:text-gray-100 leading-relaxed">
+                  "{transcript}"
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Show correct answer if wrong */}
+          {!feedback?.correct && correctAnswer && (
+            <div className="mt-4 p-4 bg-success/10 border border-success/20 rounded-xl">
+              <p className="text-sm text-success dark:text-success-400 mb-1">
+                Sample answer:
+              </p>
+              <p className="text-success dark:text-success-400 font-medium">
+                {correctAnswer}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

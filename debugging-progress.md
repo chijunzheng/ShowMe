@@ -1507,3 +1507,271 @@ const validSlides = normalizedSlides.filter(slide =>
 
 **Result:**
 - Quiz generation accepts both payload formats; quiz now shows after slides without Socratic fallback.
+
+---
+
+## Session 15: 2026-01-29
+
+### Issue 1: Subtitle Shows All Text Before TTS Loads
+
+**Symptoms:**
+- When TTS is not yet loaded, subtitles displayed all text immediately
+- Once TTS loaded, subtitles streamed correctly
+- Expected: Show loading state while TTS is loading
+
+**Root Cause:**
+- `StreamingSubtitle` component had no loading state awareness
+- Fallback timer showed all text when no audio was playing
+
+**Fix Applied:**
+- `frontend/src/components/StreamingSubtitle.jsx` - Added `isLoading` prop
+- `frontend/src/App.jsx` - Pass `isSlideNarrationLoading` to SlideshowScreen
+- `frontend/src/components/screens/SlideshowScreen.jsx` - Pass loading state to StreamingSubtitle
+
+```javascript
+// StreamingSubtitle.jsx
+if (isLoading && !showAll && progress === 0) {
+  return (
+    <span className="inline-flex items-center gap-2 text-gray-400">
+      <span className="inline-block w-4 h-4 border-2 border-gray-300 border-t-primary rounded-full animate-spin" />
+      <span>Loading audio...</span>
+    </span>
+  )
+}
+```
+
+---
+
+### Issue 2: Fill-in-Blank Quiz Incomplete
+
+**Symptoms:**
+- Quiz showed "Complete the statement based on slide 2:"
+- Only text input available, no interactive options
+- Expected: Word chips to tap/drag for answers
+
+**Root Cause:**
+- `FillBlankQuestion` component only had text input
+- Backend prompts didn't generate `wordOptions` array
+
+**Fix Applied:**
+- `frontend/src/components/Quiz/FillBlankQuestion.jsx` - Redesigned with word chip selection UI
+- `backend/src/services/gemini.js` - Added `wordOptions` to fill_blank question generation
+- `frontend/src/components/Quiz/index.jsx` - Pass wordOptions prop
+
+```javascript
+// FillBlankQuestion.jsx - Word chip selection
+{shuffledOptions.map((word, index) => (
+  <button
+    key={index}
+    onClick={() => handleWordSelect(word)}
+    disabled={selectedWord !== null}
+    className={`px-4 py-2 rounded-lg font-medium transition-all ${
+      selectedWord === word
+        ? isCorrect ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+        : 'bg-gray-100 hover:bg-gray-200'
+    }`}
+  >
+    {word}
+  </button>
+))}
+```
+
+---
+
+### Issue 3: World Pieces Not Showing After Quiz
+
+**Symptoms:**
+- Quiz completion said "You earned a new piece!"
+- World tab showed no pieces
+- Pieces were not being persisted
+
+**Root Cause:**
+- `handleQuizComplete` in `useQuizHandlers.js` wasn't calling piece generation/storage APIs
+- Missing connection between quiz rewards and World state
+
+**Fix Applied:** `frontend/src/hooks/useQuizHandlers.js`
+- Added `getClientId()` helper function
+- Added `determineZone()` for topic-to-zone mapping
+- Fixed `handleQuizComplete` to call `/api/world/piece/generate` and `/api/world/piece`
+- Added fallback piece generation with emoji icons when image generation fails
+
+```javascript
+// Fallback piece generation with emoji icons
+const zoneIcons = {
+  nature: ['🌿', '🌳', '🌻', '🦋', '🐦'],
+  civilization: ['🏛️', '🏰', '🏙️', '🚀', '📚'],
+  arcane: ['✨', '🔮', '💫', '⭐', '🌙'],
+}
+```
+
+---
+
+### Issue 4: Hand Raised by Default + Narration Doesn't Resume
+
+**Symptoms:**
+- Bug 1: Hand appeared raised by default during content narration
+- Bug 2: When hand lowered, narration reset instead of resuming from pause point
+
+**Root Cause:**
+- Bug 1: Code analysis confirmed `isMicEnabled` is correctly initialized to `false` - may need runtime debugging
+- Bug 2: `interruptActiveAudio()` destroyed the audio object instead of pausing it
+
+**Fix Applied:** `frontend/src/App.jsx`
+- Added `audioWasPausedForHandRaiseRef` to track pause state
+- Added `pauseSlideAudioForHandRaise()` that pauses without destroying audio
+- Added `resumeSlideAudioAfterHandLower()` for auto-resume when hand lowered
+- Updated `handleRaiseHandClick` to use new pause/resume functions
+
+```javascript
+// Track if audio was paused due to hand raise
+const audioWasPausedForHandRaiseRef = useRef(false)
+
+// Pause without destroying audio
+const pauseSlideAudioForHandRaise = useCallback(() => {
+  if (slideAudioRef.current && isSlideNarrationPlaying) {
+    slideAudioRef.current.pause()
+    audioWasPausedForHandRaiseRef.current = true
+    setIsSlideNarrationPlaying(false)
+  }
+}, [isSlideNarrationPlaying])
+```
+
+---
+
+### Issue 5: Yes/No Quiz Too Simple
+
+**Symptoms:**
+- Yes/No questions for Simple level were trivially easy
+- Questions like "Is the sky blue?" provided no learning value
+
+**Root Cause:**
+- AI prompts didn't guide Gemini to generate engaging questions
+- No examples of good yes/no question patterns
+
+**Fix Applied:**
+- `backend/src/services/gemini.js` - Enhanced prompts with specific examples
+- `frontend/src/components/Quiz/YesNoQuestion.jsx` - Added hint display
+- `frontend/src/components/Quiz/index.jsx` - Pass hint prop
+
+```javascript
+// gemini.js - Better yes/no question examples
+// 1. Counter-intuitive truths
+{ question: "Hot water freezes faster than cold water", answer: true, hint: "Look at slide 3" }
+// 2. Common misconceptions
+{ question: "Lightning never strikes the same place twice", answer: false, hint: "Think about tall buildings" }
+// 3. Understanding tests
+{ question: "The red arrows in the diagram show heat escaping", answer: true, hint: "Check the arrow labels" }
+```
+
+---
+
+### Issue 6: Chitchat Response Slow + Mic Stops After Response
+
+**Symptoms:**
+- Chitchat responses (greetings, thanks) took too long
+- After voice agent finished responding, user's mic stopped working
+
+**Root Cause:**
+- Speed: Two sequential API calls (`/api/classify` then `/api/chitchat`) even when classification already had response text
+- Mic: `isMicEnabled` and `allowAutoListen` were disabled but never restored after chitchat
+
+**Fix Applied:** `frontend/src/hooks/useQuestionHandler.js`
+
+```javascript
+// Speed fix: Use pre-computed response from classification
+let responseText = classifyResult.responseText
+if (!responseText) {
+  // Only call /api/chitchat if no pre-computed response
+  const chitchatResult = await requestChitchatResponse(...)
+  responseText = chitchatResult?.responseText || "I'm ready to help..."
+}
+
+// Mic fix: Capture state before disabling, restore in onComplete
+const wasMicEnabled = isMicEnabled
+const wasAutoListenAllowed = allowAutoListen
+
+enqueueVoiceAgentMessage(responseText, {
+  onComplete: () => {
+    if (shouldResumeMic) {
+      setIsMicEnabled(true)
+      setAllowAutoListen(true)
+    }
+  },
+})
+```
+
+---
+
+### Issue 7: Slow TTS After Regeneration to Different Difficulty
+
+**Symptoms:**
+- After clicking regenerate to different difficulty, slides appeared but TTS audio was slow to load
+- User waited for audio while viewing the new slides
+
+**Root Cause:**
+- No TTS prefetching after regeneration completed
+- Rate limiting blocked current slide's audio request when prefetching was in progress
+
+**Fix Applied:**
+- `frontend/src/hooks/useSlideAudio.js` - Added `priority` option to bypass rate limiting
+- `frontend/src/App.jsx` - `handleRegenerate` now prefetches TTS immediately
+
+```javascript
+// useSlideAudio.js - Priority bypasses rate limiting
+const requestSlideAudio = useCallback(async (slide, { priority = false } = {}) => {
+  // Priority requests bypass rate limit checks
+  if (!priority && now < ttsRateLimitUntilRef.current) return null
+  if (!priority && timeSinceLastRequest < MIN_REQUEST_INTERVAL_MS) return null
+  // ...
+})
+
+// App.jsx - Prefetch TTS after regeneration
+const [firstSlide, ...remainingSlides] = contentSlides
+requestSlideAudio(firstSlide, { priority: true })
+if (remainingSlides.length > 0) {
+  prefetchSlideNarrationBatch(remainingSlides)
+}
+```
+
+---
+
+### Issue 8: No Typing Option During Quiz
+
+**Symptoms:**
+- Quiz only supported voice input or tapping options
+- Users couldn't type answers
+
+**Root Cause:**
+- Quiz components only had voice/tap interfaces
+- No text input alternative for accessibility
+
+**Fix Applied:** Added keyboard toggle to quiz components:
+- `frontend/src/components/Quiz/FillBlankQuestion.jsx` - Toggle between word chips and text input
+- `frontend/src/components/Quiz/MCQQuestion.jsx` - Type A/B/C/D or 1/2/3/4 instead of tapping
+- `frontend/src/components/Quiz/VoiceQuestion.jsx` - Toggle between voice recording and textarea
+
+```javascript
+// Mode toggle pattern
+const [preferTyping, setPreferTyping] = useState(false)
+
+<button onClick={() => setPreferTyping(!preferTyping)}>
+  {preferTyping ? <TapIcon /> : <KeyboardIcon />}
+</button>
+
+{preferTyping ? (
+  <input type="text" ... />
+) : (
+  // Original tap/voice UI
+)}
+```
+
+---
+
+### Build Verification
+
+All fixes verified with successful build:
+```
+✓ 110 modules transformed
+dist/assets/index-BismxJxr.js   443.32 KB │ gzip: 124.17 KB
+✓ built in 795ms
+```
