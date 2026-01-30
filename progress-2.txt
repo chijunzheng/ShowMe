@@ -176,3 +176,68 @@ deep: {
 - Label diagram question type defined but not yet implemented (standard level)
 
 ---
+
+## Session 37: App.jsx Refactoring - useSlideshowControl Integration (2026-01-29)
+
+### Overview
+Refactored the large App.jsx file (3108 lines) by integrating the `useSlideshowControl` hook, extracting navigation state, callbacks, and effects. Reduced App.jsx to 2909 lines (~7% reduction).
+
+### Problem
+App.jsx had grown to over 3100 lines with tightly coupled state, making it difficult to maintain. Navigation logic, auto-advance effects, and keyboard handling were all inline.
+
+### Solution
+Integrated `useSlideshowControl` hook to extract slideshow-related logic into a reusable hook.
+
+### Changes Made
+
+#### Hook Updated
+- `frontend/src/hooks/useSlideshowControl.js`
+  - Added `isFollowUpDrawerOpen` state and setter
+  - Added effect to close follow-up drawer on slide change
+  - Exports all navigation state, callbacks, refs, and effects
+
+#### App.jsx Refactored
+Removed from App.jsx (now provided by hook):
+- **State**: `currentIndex`, `currentChildIndex`, `isPlaying`, `isFollowUpDrawerOpen`, `slideshowFinished`
+- **Refs**: `isPlayingRef`, `pauseAfterCurrentSlideRef`, `wasManualNavRef`, `hasFinishedSlideshowRef`, `manualFinishTimeoutRef`
+- **Callbacks**: `goToNextSlide`, `goToPrevSlide`, `goToChildNext`, `goToChildPrev`, `togglePlayPause`, `triggerSlideshowFinished`
+- **Computed values**: `activeChildSlides`, `displayedSlide`, `parentSlide`
+- **Effects**: Auto-advance, keyboard navigation, start auto-play, manual finish detection, follow-up drawer close
+
+#### Cleanup
+Deleted unused hooks created by code-simplifier agent:
+- `frontend/src/hooks/useSlideNavigation.js`
+- `frontend/src/hooks/useAudioControl.js`
+- `frontend/src/hooks/useSlideshowFinished.js`
+- `frontend/src/hooks/useAutoAdvance.js`
+- `frontend/src/hooks/useSlideNarration.js`
+
+### Metrics
+- **Before**: 3108 lines in App.jsx
+- **After**: 2909 lines in App.jsx
+- **Reduction**: ~200 lines (6.4%)
+- **Build**: Verified successful (444.83 KB bundle)
+
+### Files Modified
+1. `frontend/src/App.jsx` - Integrated useSlideshowControl, removed duplicate code
+2. `frontend/src/hooks/useSlideshowControl.js` - Added isFollowUpDrawerOpen state
+
+### Files Deleted (5)
+1. `frontend/src/hooks/useSlideNavigation.js`
+2. `frontend/src/hooks/useAudioControl.js`
+3. `frontend/src/hooks/useSlideshowFinished.js`
+4. `frontend/src/hooks/useAutoAdvance.js`
+5. `frontend/src/hooks/useSlideNarration.js`
+
+### Future Refactoring Opportunities
+- `useVoiceRecording.js` exists but not fully integrated (~250 lines potential extraction)
+- `useTopicManagement.js` exists but not integrated
+- Slide audio playback effect (~300 lines) could move to `useSlideAudio.js`
+
+### Context for Next Agent
+- `useSlideshowControl` hook now owns all slideshow navigation and auto-advance logic
+- The hook is called after `getSlideDuration` is available from `useSlideAudio`
+- Slide audio playback effect in App.jsx still handles audio-driven advancement (works with hook's auto-advance)
+- The hook's refs (`wasManualNavRef`, `pauseAfterCurrentSlideRef`, etc.) are used by App.jsx's slide audio effect
+
+---

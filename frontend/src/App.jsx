@@ -22,6 +22,7 @@ import QuickXpToast from './components/QuickXpToast'
 import useWorldStats from './hooks/useWorldStats'
 import useQuizHandlers from './hooks/useQuizHandlers.js'
 import useSocraticHandlers from './hooks/useSocraticHandlers.js'
+import useSlideshowControl from './hooks/useSlideshowControl.js'
 
 // Import constants from centralized config
 import {
@@ -105,11 +106,7 @@ function App() {
   const [selectedLevel, setSelectedLevel] = useState(EXPLANATION_LEVEL.STANDARD)
   // Show text input fallback on home screen
   const [showTextFallback, setShowTextFallback] = useState(false)
-  const [currentIndex, setCurrentIndex] = useState(0)
-  // CORE032: Vertical navigation state for 2D slides
-  const [currentChildIndex, setCurrentChildIndex] = useState(null)
-  const [isFollowUpDrawerOpen, setIsFollowUpDrawerOpen] = useState(false)
-  const [isPlaying, setIsPlaying] = useState(false)
+  // Note: currentIndex, currentChildIndex, isFollowUpDrawerOpen, isPlaying are managed by useSlideshowControl
   const [liveTranscription, setLiveTranscription] = useState('')
   const [lastTranscription, setLastTranscription] = useState('')
   const [textInput, setTextInput] = useState('')
@@ -274,19 +271,7 @@ function App() {
     visibleSlidesRef.current = visibleSlides
   }, [activeTopic, visibleSlides])
 
-  const activeChildSlides = useMemo(() => {
-    const currentParent = visibleSlides[currentIndex]
-    if (!currentParent) return []
-    return allTopicSlides.filter(s => s.parentId === currentParent.id)
-  }, [allTopicSlides, visibleSlides, currentIndex])
-
-  const displayedSlide = useMemo(() => {
-    if (currentChildIndex !== null && activeChildSlides[currentChildIndex]) {
-      return activeChildSlides[currentChildIndex]
-    }
-    return visibleSlides[currentIndex]
-  }, [visibleSlides, currentIndex, activeChildSlides, currentChildIndex])
-  const parentSlide = visibleSlides[currentIndex] || null
+  // Note: activeChildSlides, displayedSlide, parentSlide come from useSlideshowControl hook (after slideAudio hook)
 
   // Wrapper for pruneSlideCache helper with local MAX_CACHED_TOPICS
   const pruneSlideCache = useCallback((topicList, keepTopicId) => {
@@ -468,22 +453,20 @@ function App() {
   const allowAutoListenRef = useRef(true)
   const isRaiseHandPendingRef = useRef(false)
   const selectedLevelRef = useRef(EXPLANATION_LEVEL.STANDARD)
-  const isPlayingRef = useRef(false)
+  // Note: isPlayingRef now comes from useSlideshowControl
   const handleQuestionRef = useRef(null)
 
   // Sync state to refs for use in callbacks
+  // Note: isPlayingRef is synced inside useSlideshowControl hook
   useEffect(() => {
     isListeningRef.current = isListening
     isMicEnabledRef.current = isMicEnabled
     allowAutoListenRef.current = allowAutoListen
     isRaiseHandPendingRef.current = isRaiseHandPending
     selectedLevelRef.current = selectedLevel
-    isPlayingRef.current = isPlaying
-  }, [isListening, isMicEnabled, allowAutoListen, isRaiseHandPending, selectedLevel, isPlaying])
+  }, [isListening, isMicEnabled, allowAutoListen, isRaiseHandPending, selectedLevel])
 
-  useEffect(() => {
-    setIsFollowUpDrawerOpen(false)
-  }, [currentIndex, activeChildSlides.length])
+  // Note: Effect to close follow-up drawer on slide change is now in useSlideshowControl
 
   // Audio refs - these persist across renders without causing re-renders
   const audioContextRef = useRef(null)
@@ -501,15 +484,7 @@ function App() {
   const startListeningRef = useRef(null)
   const stopListeningRef = useRef(null)
 
-  // Track whether slideshow just finished (for auto-trigger of queued questions - F048)
-  const hasFinishedSlideshowRef = useRef(false)
-  // State version to trigger re-renders for Socratic mode
-  const [slideshowFinished, setSlideshowFinished] = useState(false)
-  const triggerSlideshowFinished = useCallback(() => {
-    if (hasFinishedSlideshowRef.current) return
-    hasFinishedSlideshowRef.current = true
-    setSlideshowFinished(true)
-  }, [])
+  // Note: hasFinishedSlideshowRef, slideshowFinished, triggerSlideshowFinished now come from useSlideshowControl
 
   // Voice agent queue - use hook for state/refs, add app-specific refs
   const {
@@ -534,13 +509,9 @@ function App() {
   const lastSlideIdRef = useRef(null)
   const resumeListeningAfterSlideRef = useRef(false)
 
-  // Track if we should pause after the current slide (raise-hand flow)
-  const pauseAfterCurrentSlideRef = useRef(false)
+  // Note: pauseAfterCurrentSlideRef, manualFinishTimeoutRef, wasManualNavRef now come from useSlideshowControl
   // Track the transition timeout for cleanup when slide changes or unmounts
   const slideTransitionTimeoutRef = useRef(null)
-  const manualFinishTimeoutRef = useRef(null)
-  // CORE036: Track if the last navigation was manual (for streaming subtitles)
-  const wasManualNavRef = useRef(false)
 
   const raiseHandRequestRef = useRef(false)
   // Track if audio was paused due to hand raise (to enable resume when lowered)
@@ -683,6 +654,45 @@ function App() {
 
   // Use slide audio functions from hook
   const { requestSlideAudio, prefetchSlideAudio, prefetchSlideNarrationBatch, getCachedSlideAudio, getSlideDuration, slideAudioCacheRef, slideAudioFailureRef, ttsRateLimitUntilRef, lastTtsRequestTimeRef } = slideAudio
+
+  // REFACTOR: Slideshow control hook for navigation, playback, and auto-advance
+  const slideshowControl = useSlideshowControl({
+    visibleSlides,
+    allTopicSlides,
+    uiState,
+    isVoiceAgentSpeaking,
+    isSlideNarrationPlaying,
+    isSlideNarrationReady,
+    getSlideDuration,
+  })
+
+  // Destructure slideshow control values
+  const {
+    currentIndex,
+    currentChildIndex,
+    isPlaying,
+    slideshowFinished,
+    isFollowUpDrawerOpen,
+    activeChildSlides,
+    displayedSlide,
+    parentSlide,
+    setCurrentIndex,
+    setCurrentChildIndex,
+    setIsPlaying,
+    setSlideshowFinished,
+    setIsFollowUpDrawerOpen,
+    goToNextSlide,
+    goToPrevSlide,
+    goToChildNext,
+    goToChildPrev,
+    togglePlayPause,
+    triggerSlideshowFinished,
+    resetSlideshowFinished,
+    wasManualNavRef,
+    pauseAfterCurrentSlideRef,
+    hasFinishedSlideshowRef,
+    isPlayingRef,
+  } = slideshowControl
 
   const interruptActiveAudio = useCallback(() => {
     if (voiceAgentAudioRef.current) {
@@ -901,48 +911,9 @@ function App() {
   }, [topics])
 
 
-  // Navigation helper functions with bounds checking (F044)
-  // CORE032: 2D Navigation Logic
-  const goToNextSlide = useCallback(() => {
-    wasManualNavRef.current = true // CORE036: Mark as manual navigation
-    setCurrentIndex((prev) => {
-      const nextIndex = Math.min(visibleSlides.length - 1, prev + 1)
-      if (nextIndex !== prev) {
-        setCurrentChildIndex(null) // Reset vertical position when moving horizontally
-      }
-      return nextIndex
-    })
-  }, [visibleSlides.length])
+  // Note: Navigation callbacks (goToNextSlide, goToPrevSlide, goToChildNext, goToChildPrev, togglePlayPause)
+  // are now provided by useSlideshowControl hook
 
-  const goToPrevSlide = useCallback(() => {
-    wasManualNavRef.current = true // CORE036: Mark as manual navigation
-    setCurrentIndex((prev) => {
-      const nextIndex = Math.max(0, prev - 1)
-      if (nextIndex !== prev) {
-        setCurrentChildIndex(null)
-      }
-      return nextIndex
-    })
-  }, [])
-
-  const goToChildNext = useCallback(() => {
-    if (activeChildSlides.length === 0) return
-    wasManualNavRef.current = true // CORE036: Mark as manual navigation
-    setCurrentChildIndex((prev) => {
-      if (prev === null) return 0
-      return Math.min(activeChildSlides.length - 1, prev + 1)
-    })
-  }, [activeChildSlides.length])
-
-  const goToChildPrev = useCallback(() => {
-    wasManualNavRef.current = true // CORE036: Mark as manual navigation
-    setCurrentChildIndex((prev) => {
-      if (prev === null || prev === 0) return null
-      return prev - 1
-    })
-  }, [])
-
-  const togglePlayPause = useCallback(() => setIsPlaying((prev) => !prev), [])
   const showToast = useCallback((message) => setToast({ visible: true, message }), [])
   const hideToast = useCallback(() => setToast({ visible: false, message: '' }), [])
 
@@ -1144,177 +1115,8 @@ function App() {
     // race condition where suggestions narrate after slides are ready
   }, [engagement, enqueueVoiceAgentMessage, refreshFunFact])
 
-  // Auto-advance slideshow for non-audio slides (F044)
-  // - Header slides: advance after 2 seconds (no audio)
-  // - Suggestions slides: advance after duration (no audio)
-  // - Regular slides with audio: handled by audio onended, NOT this timer
-  // - Regular slides with failed audio: fallback timer advancement
-  useEffect(() => {
-    // Only run auto-advance when in slideshow state, playing, and slides exist
-    if (uiState !== UI_STATE.SLIDESHOW || !isPlaying || isVoiceAgentSpeaking || visibleSlides.length === 0) {
-      return
-    }
-
-    const currentSlide = displayedSlide
-
-    // Wait for narration to be ready (header slides are always "ready")
-    if (currentSlide?.type !== 'header' && currentSlide?.type !== 'suggestions' && !isSlideNarrationReady) {
-      return
-    }
-
-    // For regular slides with audio playing, let audio onended handle advancement
-    // This timer only handles: headers, suggestions, and audio failure fallback
-    if (currentSlide?.type !== 'header' && currentSlide?.type !== 'suggestions' && isSlideNarrationPlaying) {
-      return
-    }
-
-    // Get duration for current slide (in milliseconds)
-    // Header slides advance faster since they're just dividers (2 seconds)
-    // Add transition pause for non-header slides
-    const baseDuration = currentSlide?.type === 'header'
-      ? 2000
-      : getSlideDuration(currentSlide)
-    const duration = currentSlide?.type === 'header'
-      ? baseDuration
-      : baseDuration + SLIDE_TRANSITION_PAUSE_MS
-
-    const timeoutId = setTimeout(() => {
-      if (pauseAfterCurrentSlideRef.current) {
-        pauseAfterCurrentSlideRef.current = false
-        setIsPlaying(false)
-        return
-      }
-
-      // CORE036: Reset manual nav flag for auto-advance (enables streaming subtitles)
-      wasManualNavRef.current = false
-
-      // CORE032: 2D Auto-advance Logic
-      // Try to go to next child first
-      if (activeChildSlides.length > 0) {
-        if (currentChildIndex === null) {
-          setCurrentChildIndex(0)
-          return
-        } else if (currentChildIndex < activeChildSlides.length - 1) {
-          setCurrentChildIndex(prev => prev + 1)
-          return
-        }
-      }
-
-      // If no more children, go to next parent
-      setCurrentIndex((prev) => {
-        const nextIndex = prev + 1
-        // If we reach the end, stop playing and mark slideshow as finished (F048)
-        if (nextIndex >= visibleSlides.length) {
-          setIsPlaying(false)
-          // Trigger state update outside setter for Socratic mode
-          setTimeout(() => triggerSlideshowFinished(), 0)
-          return prev
-        }
-        setCurrentChildIndex(null) // Reset child index when moving to next parent
-        return nextIndex
-      })
-    }, duration)
-
-    // Cleanup timeout on unmount or when dependencies change
-    return () => clearTimeout(timeoutId)
-  }, [
-    uiState,
-    isPlaying,
-    isVoiceAgentSpeaking,
-    isSlideNarrationReady,
-    isSlideNarrationPlaying,
-    currentIndex,
-    currentChildIndex,
-    activeChildSlides.length,
-    visibleSlides,
-    displayedSlide,
-    getSlideDuration,
-    triggerSlideshowFinished,
-  ])
-
-  // Keyboard navigation for slideshow (Arrow keys + Space)
-  useEffect(() => {
-    if (uiState !== UI_STATE.SLIDESHOW) return
-
-    const keyActions = {
-      ArrowRight: goToNextSlide,
-      ArrowLeft: goToPrevSlide,
-      ArrowDown: goToChildNext,
-      ArrowUp: goToChildPrev,
-      ' ': togglePlayPause,
-    }
-
-    const handleKeyDown = (event) => {
-      if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return
-      const action = keyActions[event.key]
-      if (action) {
-        event.preventDefault()
-        action()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [uiState, goToNextSlide, goToPrevSlide, goToChildNext, goToChildPrev, togglePlayPause])
-
-  // Start auto-play when entering slideshow state
-  useEffect(() => {
-    if (uiState === UI_STATE.SLIDESHOW && visibleSlides.length > 0) {
-      setIsPlaying(true)
-    }
-  }, [uiState, visibleSlides.length])
-
-  // Mark slideshow finished when user manually pauses on the final slide.
-  useEffect(() => {
-    if (manualFinishTimeoutRef.current) {
-      clearTimeout(manualFinishTimeoutRef.current)
-      manualFinishTimeoutRef.current = null
-    }
-
-    if (uiState !== UI_STATE.SLIDESHOW || slideshowFinished) {
-      return
-    }
-
-    if (isPlaying || isSlideNarrationPlaying || visibleSlides.length === 0) {
-      return
-    }
-
-    const isAtLastParent = currentIndex >= visibleSlides.length - 1
-    if (!isAtLastParent) {
-      return
-    }
-
-    const hasChildren = activeChildSlides.length > 0
-    const isAtLastChild = hasChildren
-      ? currentChildIndex !== null && currentChildIndex >= activeChildSlides.length - 1
-      : currentChildIndex === null
-
-    if (!isAtLastChild) {
-      return
-    }
-
-    manualFinishTimeoutRef.current = setTimeout(() => {
-      manualFinishTimeoutRef.current = null
-      triggerSlideshowFinished()
-    }, MANUAL_FINISH_GRACE_MS)
-
-    return () => {
-      if (manualFinishTimeoutRef.current) {
-        clearTimeout(manualFinishTimeoutRef.current)
-        manualFinishTimeoutRef.current = null
-      }
-    }
-  }, [
-    uiState,
-    slideshowFinished,
-    isPlaying,
-    isSlideNarrationPlaying,
-    currentIndex,
-    currentChildIndex,
-    activeChildSlides.length,
-    visibleSlides.length,
-    triggerSlideshowFinished,
-  ])
+  // Note: Auto-advance, keyboard navigation, start auto-play, and manual finish detection
+  // effects are now handled by useSlideshowControl hook
 
   // Prefetch TTS for upcoming slides (limited to avoid rate limits)
   useEffect(() => {
