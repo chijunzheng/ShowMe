@@ -1,0 +1,178 @@
+=== ShowMe Progress Report (Part 2) ===
+Project: ShowMe
+Last Updated: 2026-01-29
+
+---
+
+## Session 36: Quiz Gamification & Visual Engagement (2026-01-29)
+
+### Overview
+Transformed the text-only quiz into an engaging, visually-rich game experience that adapts to learner's explanation level (Simple/Standard/Deep). Added gamification with streaks, XP scaling, and level-appropriate question types.
+
+### Plan Document
+- `/Users/jasonchi/.claude/plans/reflective-wobbling-dragon.md` - Full implementation plan
+
+### Phase 1: Visual Diagrams Foundation
+
+#### Files Modified
+- `frontend/src/App.jsx` - Added `quizSlides` state for storing slides with images
+- `frontend/src/hooks/useQuizHandlers.js` - Pass slides and explanationLevel to Quiz component
+
+#### Files Created
+- `frontend/src/components/Quiz/QuizSlidePreview.jsx` - Thumbnail with tap-to-zoom modal for slide diagrams
+
+### Phase 2: Level-Aware Backend Generation
+
+#### Files Modified
+- `backend/src/routes/quiz.js`
+  - Added `LEVEL_CONFIG` with level-specific thresholds and XP rewards
+  - Added evaluation logic for new question types (yes_no, picture_match, find_error, apply_concept, spot_it, sequence)
+  - Added level-based XP calculation with deep level bonus
+
+- `backend/src/services/gemini.js`
+  - Added `QUIZ_LEVEL_INSTRUCTIONS` for simple/standard/deep prompts
+  - Added `LEVEL_QUESTION_EXAMPLES` with JSON schemas for each type
+  - Extended validation for new question types
+
+### Phase 3: New Question Type Components
+
+#### Simple Level Components
+- `frontend/src/components/Quiz/YesNoQuestion.jsx` - Large thumbs up/down buttons for true/false
+- `frontend/src/components/Quiz/PictureMatchQuestion.jsx` - 2x2 grid of slide images to select
+- `frontend/src/components/Quiz/SpotItQuestion.jsx` - Tap-on-diagram with forgiving hit detection
+
+#### Standard Level Components
+- `frontend/src/components/Quiz/SequenceQuestion.jsx` - Drag-and-drop ordering with numbered slots
+
+#### Deep Level Components
+- `frontend/src/components/Quiz/FindErrorQuestion.jsx` - Identify mistakes in statements
+- `frontend/src/components/Quiz/ApplyConceptQuestion.jsx` - Novel scenario analysis
+
+#### Quiz Orchestrator
+- `frontend/src/components/Quiz/index.jsx` - Updated with all new handlers and rendering for all question types
+
+### Phase 4: Gamification Layer
+
+#### Files Created
+- `frontend/src/components/Quiz/useQuizGamification.js` - Hook for streak tracking, XP calculation, combo multipliers
+  - Level-specific rules (baseXpPerCorrect, passBonus, perfectBonus, streakThresholds, multipliers)
+  - Speed bonus tracking for standard/deep levels
+  - Celebration triggers for streaks and combo ups
+
+- `frontend/src/components/Quiz/StreakCelebration.jsx` - Animated overlay celebrating streaks
+  - Three styles: playful (stars/rainbows), balanced (confetti), intense (fire/lightning)
+  - 2.5s animation sequence with floating emojis
+
+- `frontend/src/components/Quiz/ComboIndicator.jsx` - Persistent multiplier badge
+  - Shows current multiplier (x1.25, x1.5, x2)
+  - Pulses on combo level up
+  - Style variations per celebration style
+
+- `frontend/src/components/Quiz/QuizTimer.jsx` - Timer for speed bonus tracking
+  - Hidden for simple level
+  - Informational for standard level
+  - Prominent countdown for deep level
+
+#### Quiz Integration
+- `frontend/src/components/Quiz/index.jsx` - Integrated gamification hook and visual components
+  - Added `level` prop
+  - All answer handlers now call `gamification.recordAnswer()`
+  - Timer starts/stops with question state
+  - Gamification results passed to onComplete
+
+### Phase 5: Enhanced Results Screen
+
+#### Files Modified
+- `frontend/src/components/Quiz/QuizResults.jsx`
+  - Added level-aware display components
+  - `StarRating` - 1-3 stars for simple level (instead of percentage)
+  - `StreakBadge` - Shows max streak achieved
+  - `DeepChallengeBadge` - Highlights bonus XP for deep level
+  - `SpeedBonusSummary` - Shows speed bonuses and avg time
+  - Level-appropriate messages and thresholds
+
+### XP Reward System
+
+| Level | Per Question | Pass Bonus | Perfect Bonus | 5Q Perfect Total |
+|-------|-------------|------------|---------------|------------------|
+| Simple | 3 XP | +5 XP | +5 XP | **25 XP** |
+| Standard | 5 XP | +10 XP | +15 XP | **50 XP** |
+| Deep | 8 XP | +20 XP | +30 XP | **90 XP** |
+
+### Gamification Rules by Level
+
+```javascript
+simple: {
+  streakThresholds: [2, 4],
+  multipliers: [1, 1.25, 1.5],
+  speedBonusEnabled: false,
+  hintsAllowed: 3,
+  celebrationStyle: 'playful'
+}
+
+standard: {
+  streakThresholds: [3, 5],
+  multipliers: [1, 1.5, 2],
+  speedBonusEnabled: true,
+  speedThreshold: 15s,
+  hintsAllowed: 1,
+  celebrationStyle: 'balanced'
+}
+
+deep: {
+  streakThresholds: [3, 5],
+  multipliers: [1, 1.5, 2],
+  speedBonusEnabled: true,
+  speedThreshold: 10s,
+  hintsAllowed: 0,
+  celebrationStyle: 'intense'
+}
+```
+
+### Question Types by Level
+
+| Level | Question Types |
+|-------|---------------|
+| Simple | yes_no, picture_match, spot_it, sequence (max 4 items) |
+| Standard | mcq, fill_blank, sequence (4-5 items), label_diagram |
+| Deep | mcq (analytical), find_error, sequence (6-8 items), apply_concept |
+
+### Build Verification
+- Frontend build: **427 KB** bundle (110 modules)
+- Build time: 828ms
+- No errors or warnings
+
+### Files Summary
+
+#### New Files Created (13)
+1. `frontend/src/components/Quiz/QuizSlidePreview.jsx`
+2. `frontend/src/components/Quiz/YesNoQuestion.jsx`
+3. `frontend/src/components/Quiz/PictureMatchQuestion.jsx`
+4. `frontend/src/components/Quiz/SpotItQuestion.jsx`
+5. `frontend/src/components/Quiz/SequenceQuestion.jsx`
+6. `frontend/src/components/Quiz/FindErrorQuestion.jsx`
+7. `frontend/src/components/Quiz/ApplyConceptQuestion.jsx`
+8. `frontend/src/components/Quiz/useQuizGamification.js`
+9. `frontend/src/components/Quiz/StreakCelebration.jsx`
+10. `frontend/src/components/Quiz/ComboIndicator.jsx`
+11. `frontend/src/components/Quiz/QuizTimer.jsx`
+12. `docs/features/quiz-gamification.json`
+13. `progress-2.txt`
+
+#### Files Modified (5)
+1. `frontend/src/App.jsx` - Added quizSlides state
+2. `frontend/src/hooks/useQuizHandlers.js` - Pass slides and level
+3. `frontend/src/components/Quiz/index.jsx` - All new question types and gamification
+4. `frontend/src/components/Quiz/QuizResults.jsx` - Level-aware results display
+5. `backend/src/routes/quiz.js` - Level-based generation and XP calculation
+6. `backend/src/services/gemini.js` - Level-specific prompts and validation
+
+### Context for Next Agent
+- Quiz gamification is fully implemented with level-aware question types
+- XP system rewards harder difficulty levels (3.6x multiplier between simple and deep)
+- All visual components support three celebration styles (playful/balanced/intense)
+- Timer hidden for simple level to reduce pressure on younger learners
+- Consider adding sound effects (playCorrectSound, playStreakSound) for enhanced feedback
+- Label diagram question type defined but not yet implemented (standard level)
+
+---

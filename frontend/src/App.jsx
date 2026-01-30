@@ -192,6 +192,7 @@ function App() {
   const [quizTopicName, setQuizTopicName] = useState('')
   const [isLoadingQuiz, setIsLoadingQuiz] = useState(false)
   const [quizResults, setQuizResults] = useState(null)
+  const [quizSlides, setQuizSlides] = useState([]) // Slides with images for visual quiz questions
   const [unlockedPiece, setUnlockedPiece] = useState(null)
   const [showPieceCelebration, setShowPieceCelebration] = useState(false)
   // WB015: Quick mode XP toast state
@@ -1722,6 +1723,7 @@ function App() {
     setQuizTopicId,
     setQuizTopicName,
     setQuizQuestions,
+    setQuizSlides,
     setQuizResults,
     setUiState,
     setUnlockedPiece,
@@ -2847,6 +2849,7 @@ function App() {
         {uiState === UI_STATE.QUIZ && activeTab === 'learn' && quizQuestions.length > 0 && (
           <QuizActiveScreen
             questions={quizQuestions}
+            slides={quizSlides}
             onComplete={handleQuizComplete}
             onSkip={handleQuizSkip}
           />

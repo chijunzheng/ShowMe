@@ -147,6 +147,93 @@ function TierUpgradeBanner({ tierUpgrade }) {
 }
 
 /**
+ * Star Rating Display for Simple Level
+ */
+function StarRating({ stars, maxStars = 3 }) {
+  return (
+    <div className="flex justify-center gap-2 my-4">
+      {[...Array(maxStars)].map((_, i) => (
+        <span
+          key={i}
+          className={`text-5xl transition-all duration-300 ${
+            i < stars ? 'animate-bounce-in scale-100' : 'opacity-30 scale-75'
+          }`}
+          style={{ animationDelay: `${i * 0.15}s` }}
+        >
+          {i < stars ? '⭐' : '☆'}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * Streak Achievement Badge
+ */
+function StreakBadge({ maxStreak, celebrationStyle }) {
+  if (!maxStreak || maxStreak < 2) return null
+
+  const styles = {
+    playful: 'from-pink-400 to-purple-400',
+    balanced: 'from-primary to-cyan-500',
+    intense: 'from-orange-500 to-red-500'
+  }
+
+  return (
+    <div className={`
+      inline-flex items-center gap-2 px-4 py-2 rounded-full
+      bg-gradient-to-r ${styles[celebrationStyle] || styles.balanced}
+      text-white font-bold shadow-lg animate-bounce-in
+    `}>
+      <span className="text-xl">🔥</span>
+      <span>{maxStreak} streak!</span>
+    </div>
+  )
+}
+
+/**
+ * Deep Challenge Bonus Badge
+ */
+function DeepChallengeBadge({ bonusXp }) {
+  return (
+    <div className="
+      inline-flex items-center gap-2 px-4 py-2 rounded-lg
+      bg-gradient-to-r from-purple-600 to-indigo-600
+      text-white font-bold shadow-lg animate-bounce-in
+      border-2 border-purple-400
+    ">
+      <span className="text-xl">💎</span>
+      <span>Deep Challenge +{bonusXp} XP</span>
+    </div>
+  )
+}
+
+/**
+ * Speed Bonus Summary
+ */
+function SpeedBonusSummary({ speedBonuses, avgTime }) {
+  if (!speedBonuses || speedBonuses === 0) return null
+
+  return (
+    <div className="
+      flex items-center justify-center gap-3 text-sm
+      text-gray-600 dark:text-gray-400 mt-2
+    ">
+      <span className="flex items-center gap-1">
+        <span>⚡</span>
+        <span>{speedBonuses} speed bonus{speedBonuses > 1 ? 'es' : ''}</span>
+      </span>
+      {avgTime && (
+        <span className="flex items-center gap-1">
+          <span>⏱️</span>
+          <span>Avg: {avgTime}s</span>
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
  * Main QuizResults component
  *
  * @param {Object} props
@@ -157,6 +244,15 @@ function TierUpgradeBanner({ tierUpgrade }) {
  * @param {number} props.xpEarned - XP earned from the quiz
  * @param {Object|null} props.tierUpgrade - Tier upgrade info { from, to } or null
  * @param {Object|null} props.piece - World piece earned (only if passed)
+ * @param {string} props.level - Explanation level: 'simple', 'standard', or 'deep'
+ * @param {number} props.stars - Star rating (1-3) for simple level
+ * @param {number} props.maxStreak - Best answer streak
+ * @param {number} props.speedBonuses - Number of speed bonuses earned
+ * @param {number} props.avgTime - Average answer time in seconds
+ * @param {string} props.celebrationStyle - Style for celebrations
+ * @param {number} props.baseXp - Base XP before bonuses
+ * @param {number} props.passBonus - Bonus XP for passing
+ * @param {number} props.perfectBonus - Bonus XP for perfect score
  * @param {Function} props.onViewWorld - Callback to view world
  * @param {Function} props.onRetry - Callback to retry quiz
  * @param {Function} props.onContinue - Callback to continue
@@ -169,6 +265,15 @@ export default function QuizResults({
   xpEarned = 0,
   tierUpgrade = null,
   piece = null,
+  level = 'standard',
+  stars = 0,
+  maxStreak = 0,
+  speedBonuses = 0,
+  avgTime = null,
+  celebrationStyle = 'balanced',
+  baseXp = 0,
+  passBonus = 0,
+  perfectBonus = 0,
   onViewWorld,
   onRetry,
   onContinue
@@ -268,7 +373,7 @@ export default function QuizResults({
             </div>
           </div>
 
-          {/* Result header */}
+          {/* Result header - Level-specific messages */}
           <h2
             className={`
               text-3xl font-bold mb-2
@@ -278,36 +383,75 @@ export default function QuizResults({
               }
             `}
           >
-            {passed ? 'Passed!' : 'Not Quite!'}
+            {level === 'simple'
+              ? (passed ? 'You did it!' : 'Good try!')
+              : level === 'deep'
+              ? (passed ? 'Excellent Work!' : 'Keep Pushing!')
+              : (passed ? 'Passed!' : 'Not Quite!')}
           </h2>
 
-          {/* Encouraging subtext for fail */}
+          {/* Encouraging subtext - Level appropriate */}
           {!passed && (
             <p className="text-gray-600 dark:text-gray-300 mb-4">
-              You're so close! Give it another shot.
+              {level === 'simple'
+                ? "You're learning so much! Try again!"
+                : level === 'deep'
+                ? "Deep questions are tough - that's how we grow!"
+                : "You're so close! Give it another shot."}
             </p>
           )}
 
-          {/* Score display */}
-          <div className="mb-4">
-            <div className="flex items-baseline justify-center gap-1">
-              <span className="text-5xl font-bold text-gray-800 dark:text-gray-100">
-                {score}
-              </span>
-              <span className="text-2xl text-gray-400 dark:text-gray-500">/</span>
-              <span className="text-2xl text-gray-500 dark:text-gray-400">
-                {maxScore}
-              </span>
+          {/* Simple Level: Star Rating */}
+          {level === 'simple' && (
+            <div className="mb-4">
+              <StarRating stars={stars} />
+              <p className="text-lg text-gray-600 dark:text-gray-400">
+                {stars === 3 ? 'Perfect!' : stars === 2 ? 'Great job!' : stars === 1 ? 'Good start!' : 'Keep practicing!'}
+              </p>
             </div>
-            <p className="text-lg text-gray-500 dark:text-gray-400 mt-1">
-              ({percentage}%)
-            </p>
-          </div>
+          )}
+
+          {/* Standard/Deep Level: Score display */}
+          {level !== 'simple' && (
+            <div className="mb-4">
+              <div className="flex items-baseline justify-center gap-1">
+                <span className="text-5xl font-bold text-gray-800 dark:text-gray-100">
+                  {score}
+                </span>
+                <span className="text-2xl text-gray-400 dark:text-gray-500">/</span>
+                <span className="text-2xl text-gray-500 dark:text-gray-400">
+                  {maxScore}
+                </span>
+              </div>
+              <p className="text-lg text-gray-500 dark:text-gray-400 mt-1">
+                ({percentage}%)
+              </p>
+            </div>
+          )}
+
+          {/* Deep Level: Challenge Badge */}
+          {level === 'deep' && passed && (
+            <div className="mb-4">
+              <DeepChallengeBadge bonusXp={passBonus + perfectBonus} />
+            </div>
+          )}
+
+          {/* Streak Badge (standard and deep levels) */}
+          {level !== 'simple' && maxStreak >= 2 && (
+            <div className="mb-4">
+              <StreakBadge maxStreak={maxStreak} celebrationStyle={celebrationStyle} />
+            </div>
+          )}
+
+          {/* Speed Bonus Summary (deep level only) */}
+          {level === 'deep' && (
+            <SpeedBonusSummary speedBonuses={speedBonuses} avgTime={avgTime} />
+          )}
 
           {/* Passing threshold hint for fail */}
-          {!passed && (
+          {!passed && level !== 'simple' && (
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-              You need <span className="font-semibold">75%</span> to pass
+              You need <span className="font-semibold">{level === 'deep' ? '75%' : '60%'}</span> to pass
             </p>
           )}
 

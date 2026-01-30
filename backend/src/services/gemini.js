@@ -2168,17 +2168,193 @@ Additional style requirements for world piece:
   return { imageUrl: null, error: lastError || 'NO_IMAGE_GENERATED' }
 }
 
+// Level-specific quiz generation instructions
+const QUIZ_LEVEL_INSTRUCTIONS = {
+  simple: `
+LEVEL: SIMPLE (Ages 5-10, K-5 students)
+Generate 3-4 questions that are visual, fun, and encouraging.
+
+REQUIRED QUESTION TYPES (pick from these):
+- yes_no: Simple true/false statements
+- picture_match: "Which picture shows [concept]?" (references slide images)
+- fill_blank: Single-word answers only
+
+STYLE GUIDELINES:
+- Use everyday language a child can understand
+- Keep question text under 15 words
+- Use encouraging, playful language ("Can you find...", "Which picture shows...")
+- Focus on visual recognition and simple recall
+- No technical terminology`,
+
+  standard: `
+LEVEL: STANDARD (Ages 10-14, Middle school)
+Generate 4-5 questions with balanced difficulty.
+
+REQUIRED QUESTION TYPES:
+- 2-3 mcq questions (standard multiple choice)
+- 1-2 fill_blank questions
+- Optionally 1 voice question
+
+STYLE GUIDELINES:
+- Clear, direct language
+- Mix recall with comprehension questions
+- Can use key vocabulary but explain if technical
+- Progress from easier to harder`,
+
+  deep: `
+LEVEL: DEEP (Ages 14+, High school and advanced)
+Generate 5-6 challenging questions that test deep understanding.
+
+REQUIRED QUESTION TYPES:
+- 2-3 mcq questions (analytical, "which is BEST", "what would happen if...")
+- 1-2 find_error questions (spot the mistake in a statement)
+- 1 apply_concept question (apply knowledge to new scenario)
+
+STYLE GUIDELINES:
+- Use proper technical terminology
+- Focus on WHY and HOW, not just WHAT
+- Include questions requiring reasoning and analysis
+- Test ability to apply concepts to new situations`
+}
+
+// Level-specific question type examples for the prompt
+const LEVEL_QUESTION_EXAMPLES = {
+  simple: `
+QUESTION TYPE EXAMPLES:
+
+yes_no (True/False):
+{
+  "id": "q1",
+  "type": "yes_no",
+  "question": "Is this statement true or false?",
+  "statement": "Plants need sunlight to grow.",
+  "slideReference": 0,
+  "correctAnswer": true,
+  "explanation": "Yes! Plants use sunlight to make food."
+}
+
+picture_match:
+{
+  "id": "q2",
+  "type": "picture_match",
+  "question": "Which picture shows photosynthesis happening?",
+  "slideReference": 1,
+  "imageOptions": [0, 1, 2, 3],
+  "correctSlideIndex": 1,
+  "correctAnswer": "Slide 1 shows photosynthesis",
+  "explanation": "This picture shows a plant using sunlight!"
+}
+
+fill_blank (simple):
+{
+  "id": "q3",
+  "type": "fill_blank",
+  "question": "Fill in the word:",
+  "slideReference": 2,
+  "blankSentence": "Plants are colored ___.",
+  "correctAnswer": "green",
+  "acceptableAnswers": ["green", "Green"],
+  "explanation": "Plants are green because of chlorophyll!"
+}`,
+
+  standard: `
+QUESTION TYPE EXAMPLES:
+
+mcq (Multiple Choice):
+{
+  "id": "q1",
+  "type": "mcq",
+  "question": "What is the main purpose of photosynthesis?",
+  "slideReference": 0,
+  "options": ["To produce oxygen", "To convert sunlight into food", "To absorb water", "To release carbon dioxide"],
+  "correctIndex": 1,
+  "correctAnswer": "To convert sunlight into food",
+  "explanation": "Photosynthesis converts light energy into chemical energy (glucose) that plants use for food."
+}
+
+fill_blank:
+{
+  "id": "q2",
+  "type": "fill_blank",
+  "question": "Complete the statement:",
+  "slideReference": 1,
+  "blankSentence": "The process of ___ allows plants to convert sunlight into energy.",
+  "correctAnswer": "photosynthesis",
+  "acceptableAnswers": ["photosynthesis", "photo-synthesis"],
+  "explanation": "This is the key process described in the slide."
+}
+
+voice (Open-ended):
+{
+  "id": "q3",
+  "type": "voice",
+  "question": "In your own words, explain how photosynthesis works.",
+  "slideReference": 2,
+  "expectedTopics": ["sunlight", "carbon dioxide", "glucose", "oxygen"],
+  "sampleAnswer": "Plants absorb sunlight and carbon dioxide, then produce glucose for energy and release oxygen.",
+  "correctAnswer": "A good answer mentions sunlight, CO2 absorption, glucose production, and oxygen release",
+  "explanation": "This tests deeper understanding of the complete process."
+}`,
+
+  deep: `
+QUESTION TYPE EXAMPLES:
+
+mcq (Analytical):
+{
+  "id": "q1",
+  "type": "mcq",
+  "question": "Which statement BEST explains why plants appear green?",
+  "slideReference": 0,
+  "options": [
+    "Chlorophyll absorbs green light and reflects other colors",
+    "Chlorophyll reflects green light and absorbs other wavelengths",
+    "Plants produce green pigments as a waste product",
+    "Green light is the most efficient for photosynthesis"
+  ],
+  "correctIndex": 1,
+  "correctAnswer": "Chlorophyll reflects green light and absorbs other wavelengths",
+  "explanation": "Chlorophyll primarily absorbs red and blue light for photosynthesis, reflecting green wavelengths which is why we see plants as green."
+}
+
+find_error:
+{
+  "id": "q2",
+  "type": "find_error",
+  "question": "What is wrong with this statement?",
+  "slideReference": 1,
+  "incorrectStatement": "During photosynthesis, plants release carbon dioxide and absorb oxygen from the air.",
+  "correctAnswer": "It's reversed - plants absorb carbon dioxide and release oxygen during photosynthesis",
+  "explanation": "Photosynthesis uses CO2 as an input and produces O2 as a byproduct. Respiration is the opposite process."
+}
+
+apply_concept:
+{
+  "id": "q3",
+  "type": "apply_concept",
+  "question": "Apply what you learned:",
+  "slideReference": 2,
+  "scenario": "A scientist places a plant in a sealed container with no carbon dioxide. What would happen to the plant's ability to photosynthesize, and why?",
+  "expectedTopics": ["CO2 required", "photosynthesis stops", "glucose production", "starvation"],
+  "sampleAnswer": "The plant would be unable to photosynthesize because CO2 is a required reactant. Without it, the plant cannot produce glucose and would eventually starve.",
+  "correctAnswer": "Photosynthesis would stop because CO2 is essential for the process",
+  "explanation": "This tests the ability to apply knowledge of photosynthesis requirements to a novel situation."
+}`
+}
+
 /**
  * Generate quiz questions based on slideshow content
  * WB001: Quiz generation from slides for World Builder gamification
  *
- * Generates 4-6 questions of varying types (MCQ, fill_blank, voice) that
- * reference specific slide content and test comprehension of the material.
+ * Now level-aware: generates different question types based on explanation level
+ * - Simple: yes_no, picture_match, simple fill_blank (K-5)
+ * - Standard: mcq, fill_blank, voice (Middle school)
+ * - Deep: analytical mcq, find_error, apply_concept (High school+)
  *
  * @param {Object} params - Parameters for quiz generation
  * @param {Array} params.slides - The generated slides with script, subtitle, and imageUrl
  * @param {string} params.topicName - The topic being quizzed
  * @param {string} params.language - Language code: 'en' or 'zh'
+ * @param {string} params.explanationLevel - 'simple' | 'standard' | 'deep'
  * @param {string} [params.slideContent] - Legacy newline-delimited slide text (fallback)
  * @returns {Promise<{questions: Array, error: string|null}>}
  */
@@ -2188,7 +2364,10 @@ export async function generateQuizQuestions(params) {
     return { questions: null, error: 'API_NOT_AVAILABLE' }
   }
 
-  const { slides = [], topicName = '', language = 'en', slideContent = '' } = params
+  const { slides = [], topicName = '', language = 'en', explanationLevel = 'standard', slideContent = '' } = params
+
+  // Normalize level
+  const level = ['simple', 'standard', 'deep'].includes(explanationLevel) ? explanationLevel : 'standard'
 
   // Normalize slide input (supports legacy slideContent string)
   let normalizedSlides = Array.isArray(slides) ? slides : []
@@ -2221,6 +2400,10 @@ export async function generateQuizQuestions(params) {
     ? 'Generate all questions, options, and explanations in Simplified Chinese (简体中文).'
     : 'Generate all questions, options, and explanations in English.'
 
+  // Get level-specific instructions and examples
+  const levelInstructions = QUIZ_LEVEL_INSTRUCTIONS[level]
+  const levelExamples = LEVEL_QUESTION_EXAMPLES[level]
+
   const prompt = `You are an educational quiz generator. Based on the slideshow content below, generate quiz questions that test comprehension of the material.
 
 TOPIC: "${topicName}"
@@ -2230,68 +2413,17 @@ ${slideContext}
 
 ${languageInstruction}
 
-REQUIREMENTS:
-1. Generate exactly 4-6 questions total
-2. Mix question types:
-   - 2-3 MCQ (multiple choice) questions
-   - 1-2 fill_blank questions
-   - 1 voice question (open-ended spoken response)
-3. Questions should progress in difficulty (easier first, harder later)
-4. Each question MUST reference a specific slide number (0-indexed)
-5. Questions should test understanding, not just recall of exact words
-6. Every question MUST have a correctAnswer field
+${levelInstructions}
 
-QUESTION TYPES:
+GENERAL REQUIREMENTS:
+1. Each question MUST reference a specific slide number (0-indexed: Slide 0, Slide 1, etc.)
+2. Questions should test understanding, not just recall of exact words
+3. Every question MUST have a correctAnswer field
+4. For picture_match questions, imageOptions should reference existing slide indices (0 to ${usableSlides.length - 1})
 
-MCQ (Multiple Choice):
-- Provide exactly 4 options
-- correctIndex is the 0-based index of the correct option
-- Options should be plausible but only one correct
+${levelExamples}
 
-fill_blank:
-- blankSentence has ___ where the answer goes
-- correctAnswer is the word/phrase that fills the blank
-- acceptableAnswers lists variations that should also be accepted
-
-voice (Open-ended):
-- expectedTopics lists key concepts a good answer should mention
-- sampleAnswer shows what a complete answer might look like
-
-OUTPUT FORMAT (JSON):
-{
-  "questions": [
-    {
-      "id": "q1",
-      "type": "mcq",
-      "question": "What is the main purpose of X?",
-      "slideReference": 0,
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correctIndex": 1,
-      "correctAnswer": "Option B",
-      "explanation": "Brief explanation of why this is correct"
-    },
-    {
-      "id": "q2",
-      "type": "fill_blank",
-      "question": "Complete the following statement about Y:",
-      "slideReference": 1,
-      "blankSentence": "The process of ___ allows plants to convert sunlight into energy.",
-      "correctAnswer": "photosynthesis",
-      "acceptableAnswers": ["photosynthesis", "photo-synthesis"],
-      "explanation": "This is the key process described in the slide"
-    },
-    {
-      "id": "q3",
-      "type": "voice",
-      "question": "In your own words, explain how Z works and why it matters.",
-      "slideReference": 2,
-      "expectedTopics": ["concept1", "concept2", "concept3"],
-      "sampleAnswer": "A complete answer would explain that...",
-      "correctAnswer": "A good answer mentions concept1, concept2, and concept3",
-      "explanation": "This tests deeper understanding of the topic"
-    }
-  ]
-}
+OUTPUT FORMAT: Return a JSON object with a "questions" array containing the questions.
 
 Generate the quiz questions now:`
 
@@ -2315,7 +2447,8 @@ Generate the quiz questions now:`
     }
 
     // Validate and normalize each question
-    const validTypes = ['mcq', 'fill_blank', 'voice']
+    // Extended types: simple level adds yes_no, picture_match; deep level adds find_error, apply_concept
+    const validTypes = ['mcq', 'fill_blank', 'voice', 'yes_no', 'picture_match', 'find_error', 'apply_concept']
     const validatedQuestions = parsed.questions
       .filter(q => q && typeof q === 'object')
       .map((q, index) => {
@@ -2327,7 +2460,7 @@ Generate the quiz questions now:`
           slideReference: typeof q.slideReference === 'number'
             ? Math.max(0, Math.min(usableSlides.length - 1, q.slideReference))
             : 0,
-          correctAnswer: q.correctAnswer || '',
+          correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : '',
           explanation: q.explanation || '',
         }
 
@@ -2351,14 +2484,37 @@ Generate the quiz questions now:`
             ? q.expectedTopics
             : []
           question.sampleAnswer = q.sampleAnswer || ''
+        } else if (question.type === 'yes_no') {
+          // Simple level: true/false statement
+          question.statement = q.statement || question.question
+          question.correctAnswer = typeof q.correctAnswer === 'boolean' ? q.correctAnswer : true
+        } else if (question.type === 'picture_match') {
+          // Simple level: match concept to slide image
+          question.imageOptions = Array.isArray(q.imageOptions)
+            ? q.imageOptions.map(i => Math.max(0, Math.min(usableSlides.length - 1, i))).slice(0, 4)
+            : [0, 1, 2, 3].filter(i => i < usableSlides.length)
+          question.correctSlideIndex = typeof q.correctSlideIndex === 'number'
+            ? Math.max(0, Math.min(usableSlides.length - 1, q.correctSlideIndex))
+            : 0
+        } else if (question.type === 'find_error') {
+          // Deep level: identify incorrect statement
+          question.incorrectStatement = q.incorrectStatement || ''
+        } else if (question.type === 'apply_concept') {
+          // Deep level: apply knowledge to new scenario
+          question.scenario = q.scenario || ''
+          question.expectedTopics = Array.isArray(q.expectedTopics)
+            ? q.expectedTopics
+            : []
+          question.sampleAnswer = q.sampleAnswer || ''
         }
 
         return question
       })
-      .filter(q => q.question && q.correctAnswer) // Only keep valid questions
+      .filter(q => q.question && (q.correctAnswer !== undefined && q.correctAnswer !== '')) // Only keep valid questions
 
-    // Validate we have enough questions
-    if (validatedQuestions.length < 4) {
+    // Validate we have minimum questions (varies by level)
+    const minQuestions = level === 'simple' ? 3 : 4
+    if (validatedQuestions.length < minQuestions) {
       return { questions: null, error: 'INSUFFICIENT_QUESTIONS' }
     }
 

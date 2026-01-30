@@ -16,7 +16,33 @@ import logger from '../utils/logger.js'
 
 const router = Router()
 
-// Quiz scoring constants
+// Level-based quiz configuration
+// Harder levels = bigger rewards, higher thresholds
+const LEVEL_CONFIG = {
+  simple: {
+    passThreshold: 0.50,    // 50% to pass (forgiving for young learners)
+    xpPerCorrect: 3,        // Base XP per correct answer
+    passBonus: 5,           // Bonus for passing
+    perfectBonus: 5,        // Bonus for 100%
+    questionCount: { min: 3, max: 4 }
+  },
+  standard: {
+    passThreshold: 0.60,    // 60% to pass
+    xpPerCorrect: 5,        // Base XP per correct answer
+    passBonus: 10,          // Bonus for passing
+    perfectBonus: 15,       // Bonus for 100%
+    questionCount: { min: 4, max: 5 }
+  },
+  deep: {
+    passThreshold: 0.75,    // 75% to pass (challenging)
+    xpPerCorrect: 8,        // Higher reward for harder questions
+    passBonus: 20,          // Big bonus for passing hard quiz
+    perfectBonus: 30,       // Major achievement
+    questionCount: { min: 5, max: 6 }
+  }
+}
+
+// Legacy constants (used as fallback for standard level)
 const PASS_THRESHOLD = 0.75  // 75% required to pass
 const XP_PER_CORRECT = 5     // 5 XP per correct answer
 const BONUS_PERFECT = 15     // Bonus XP for 100%
@@ -31,6 +57,7 @@ const BONUS_PASS = 10        // Bonus XP for passing
  * - slideContent: string - Legacy newline-delimited slide text (optional fallback)
  * - topicName: string - The topic being quizzed
  * - language: string - 'en' or 'zh' (optional, auto-detected from topicName)
+ * - explanationLevel: string - 'simple' | 'standard' | 'deep' (determines question types)
  *
  * Response:
  * - questions: array - Array of QuizQuestion objects
@@ -53,7 +80,12 @@ router.post('/generate', async (req, res) => {
   const startTime = Date.now()
 
   try {
-    const { slides, slideContent, topicName, language } = req.body
+    const { slides, slideContent, topicName, language, explanationLevel } = req.body
+
+    // Normalize explanation level (default to 'standard')
+    const normalizedLevel = ['simple', 'standard', 'deep'].includes(explanationLevel)
+      ? explanationLevel
+      : 'standard'
 
     if (!topicName || typeof topicName !== 'string') {
       return res.status(400).json({
@@ -90,13 +122,15 @@ router.post('/generate', async (req, res) => {
     logger.info('QUIZ', 'Generating quiz questions', {
       topicName,
       slideCount: validSlides.length,
-      language: detectedLanguage
+      language: detectedLanguage,
+      explanationLevel: normalizedLevel
     })
 
     const result = await generateQuizQuestions({
       slides: validSlides,
       topicName,
-      language: detectedLanguage
+      language: detectedLanguage,
+      explanationLevel: normalizedLevel
     })
 
     if (result.error) {
@@ -140,10 +174,12 @@ router.post('/generate', async (req, res) => {
     return res.json({
       questions: result.questions,
       topicId,
+      explanationLevel: normalizedLevel,
       metadata: {
         topicName,
         slideCount: validSlides.length,
         questionCount: result.questions.length,
+        explanationLevel: normalizedLevel,
         generatedAt: new Date().toISOString()
       }
     })
@@ -280,6 +316,81 @@ function evaluateAnswer(answer, question) {
       break
     }
 
+    case 'yes_no': {
+      // Simple level: true/false answer
+      const userAnswer = typeof answer.answer === 'boolean'
+        ? answer.answer
+        : String(answer.answer).toLowerCase() === 'true'
+      const correctAnswer = question.correctAnswer === true
+      result.correct = userAnswer === correctAnswer
+      result.correctAnswer = correctAnswer ? 'True' : 'False'
+      break
+    }
+
+    case 'picture_match': {
+      // Simple level: match concept to slide image
+      const userIndex = typeof answer.answer === 'number'
+        ? answer.answer
+        : parseInt(answer.answer, 10)
+      const correctIndex = question.correctSlideIndex
+      result.correct = userIndex === correctIndex
+      result.correctAnswer = `Slide ${correctIndex}`
+      break
+    }
+
+    case 'find_error': {
+      // Deep level: identify error in statement
+      const userText = String(answer.answer || '')
+      const correctAnswer = question.correctAnswer || ''
+
+      // Use fuzzy matching for the error identification
+      const matchResult = fuzzyMatch(userText, correctAnswer)
+      if (matchResult.match) {
+        result.correct = true
+      } else if (matchResult.partial) {
+        result.partial = true
+      } else {
+        // Check if user mentions key correction terms
+        const normalizedUser = normalizeString(userText)
+        const normalizedCorrect = normalizeString(correctAnswer)
+        // If user's answer contains at least 30% of correct answer words, give partial credit
+        const correctWords = normalizedCorrect.split(' ').filter(w => w.length > 3)
+        const matchedWords = correctWords.filter(w => normalizedUser.includes(w))
+        if (correctWords.length > 0 && matchedWords.length / correctWords.length >= 0.3) {
+          result.partial = true
+        }
+      }
+      break
+    }
+
+    case 'apply_concept': {
+      // Deep level: apply knowledge to new scenario (similar to voice)
+      const userText = String(answer.answer || '')
+      const correctAnswer = question.correctAnswer || ''
+
+      // Check against expected topics
+      const expectedTopics = question.expectedTopics || []
+      let topicsMatched = 0
+      for (const topic of expectedTopics) {
+        if (normalizeString(userText).includes(normalizeString(topic))) {
+          topicsMatched++
+        }
+      }
+
+      // More strict for deep level: need 60% of topics
+      if (expectedTopics.length > 0 && topicsMatched / expectedTopics.length >= 0.6) {
+        result.correct = true
+      } else if (expectedTopics.length > 0 && topicsMatched / expectedTopics.length >= 0.3) {
+        result.partial = true
+      } else {
+        // Fallback to fuzzy matching
+        const matchResult = fuzzyMatch(userText, correctAnswer)
+        result.correct = matchResult.match
+        result.partial = matchResult.partial && !result.correct
+      }
+      break
+    }
+
     default:
       // Unknown type - mark as incorrect
       logger.warn('QUIZ', 'Unknown question type', { type, questionId: question.id })
@@ -298,22 +409,32 @@ function evaluateAnswer(answer, question) {
  * - questions: array - Original questions for reference
  * - topicId: string - ID of the topic being quizzed
  * - clientId: string - The client identifier
+ * - explanationLevel: string - 'simple' | 'standard' | 'deep' (affects XP and pass threshold)
  *
  * Response:
  * - score: number - Number of correct answers (partial credit = 0.5)
  * - maxScore: number - Total number of questions
  * - percentage: number - Score as a percentage (0-100)
- * - passed: boolean - True if percentage >= 75%
- * - xpEarned: number - XP earned based on performance
+ * - passed: boolean - True if percentage >= pass threshold for level
+ * - xpEarned: number - XP earned based on performance and level
  * - results: array - Per-question results [{ questionId, correct, partial, userAnswer, correctAnswer }]
  * - canRetry: boolean - True if the quiz was failed (can retry)
- * - xpBreakdown: object - Breakdown of XP earned { base, bonus, streak, total }
+ * - xpBreakdown: object - Breakdown of XP earned { base, bonus, streak, level, total }
+ * - levelBonus: object - Level-specific information { level, passThreshold, xpMultiplier }
  */
 router.post('/evaluate', async (req, res) => {
   const startTime = Date.now()
 
   try {
-    const { answers, questions, topicId, clientId } = req.body
+    const { answers, questions, topicId, clientId, explanationLevel } = req.body
+
+    // Normalize explanation level (default to 'standard')
+    const normalizedLevel = ['simple', 'standard', 'deep'].includes(explanationLevel)
+      ? explanationLevel
+      : 'standard'
+
+    // Get level-specific configuration
+    const levelConfig = LEVEL_CONFIG[normalizedLevel]
 
     // Validate required fields
     if (!answers || !Array.isArray(answers) || answers.length === 0) {
@@ -409,26 +530,36 @@ router.post('/evaluate', async (req, res) => {
     const score = correctCount + (partialCount * 0.5)
     const maxScore = questions.length
     const percentage = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0
-    const passed = percentage >= (PASS_THRESHOLD * 100)
 
-    // Calculate XP earned based on performance
+    // Use level-specific pass threshold
+    const passThresholdPercent = levelConfig.passThreshold * 100
+    const passed = percentage >= passThresholdPercent
+
+    // Calculate XP earned based on performance AND level
+    // Harder levels reward more XP
     let baseXP = 0
     let bonusXP = 0
+    let levelBonusXP = 0
 
     if (passed) {
-      // Base XP: per correct answer
-      baseXP = Math.round(score * XP_PER_CORRECT)
+      // Base XP: per correct answer (level-specific rate)
+      baseXP = Math.round(score * levelConfig.xpPerCorrect)
 
-      // Bonus for passing
-      bonusXP += BONUS_PASS
+      // Bonus for passing (level-specific)
+      bonusXP += levelConfig.passBonus
 
-      // Perfect score bonus
+      // Perfect score bonus (level-specific)
       if (score === maxScore && maxScore > 0) {
-        bonusXP += BONUS_PERFECT
+        bonusXP += levelConfig.perfectBonus
+      }
+
+      // Additional level bonus for deep level (challenges deserve extra reward)
+      if (normalizedLevel === 'deep') {
+        levelBonusXP = Math.round(baseXP * 0.2)  // 20% extra for deep challenge
       }
     }
 
-    const totalXP = baseXP + bonusXP
+    const totalXP = baseXP + bonusXP + levelBonusXP
 
     // Award XP if passed using the worldState service
     let xpResult = null
@@ -453,7 +584,9 @@ router.post('/evaluate', async (req, res) => {
       passed,
       xpEarned: xpResult?.newXP || totalXP,
       correctCount,
-      partialCount
+      partialCount,
+      level: normalizedLevel,
+      passThreshold: passThresholdPercent
     })
 
     return res.json({
@@ -461,14 +594,23 @@ router.post('/evaluate', async (req, res) => {
       maxScore,
       percentage,
       passed,
+      passThreshold: passThresholdPercent,
       xpEarned: xpResult?.newXP || totalXP,
       results,
       canRetry: !passed,
+      explanationLevel: normalizedLevel,
       xpBreakdown: {
         base: baseXP,
         bonus: bonusXP,
+        levelBonus: levelBonusXP,
         streak: 0,  // Streak bonus handled by awardQuizXP
         total: totalXP
+      },
+      levelInfo: {
+        level: normalizedLevel,
+        passThreshold: passThresholdPercent,
+        xpPerCorrect: levelConfig.xpPerCorrect,
+        isDeepChallenge: normalizedLevel === 'deep'
       },
       // Include tier info if available from XP award
       tierInfo: xpResult ? {

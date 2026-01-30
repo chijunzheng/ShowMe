@@ -15,6 +15,7 @@ import logger from '../utils/logger.js'
  * @param {Function} params.setQuizTopicId - Setter for quiz topic ID
  * @param {Function} params.setQuizTopicName - Setter for quiz topic name
  * @param {Function} params.setQuizQuestions - Setter for quiz questions
+ * @param {Function} params.setQuizSlides - Setter for quiz slides (with images for visual questions)
  * @param {Function} params.setQuizResults - Setter for quiz results
  * @param {Function} params.setUiState - Setter for UI state
  * @param {Function} params.setUnlockedPiece - Setter for unlocked piece
@@ -37,6 +38,7 @@ export default function useQuizHandlers({
   setQuizTopicId,
   setQuizTopicName,
   setQuizQuestions,
+  setQuizSlides,
   setQuizResults,
   setUiState,
   setUnlockedPiece,
@@ -82,6 +84,9 @@ export default function useQuizHandlers({
       const languageText = languageSample?.subtitle || languageSample?.script || ''
       const language = /[\u4e00-\u9fff]/.test(languageText) ? 'zh' : 'en'
 
+      // Get explanation level from topic (affects question types and difficulty)
+      const explanationLevel = activeTopic.explanationLevel || 'standard'
+
       const response = await fetch('/api/quiz/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -89,6 +94,7 @@ export default function useQuizHandlers({
           slides: slidesPayload,
           topicName: activeTopic.name || 'this topic',
           language,
+          explanationLevel,
         }),
       })
 
@@ -102,6 +108,8 @@ export default function useQuizHandlers({
         throw new Error('Quiz generation returned no questions')
       }
       setQuizQuestions(data.questions || [])
+      // Store full slides with images for visual quiz questions
+      setQuizSlides(contentSlides)
       setUiState(UI_STATE.QUIZ)
     } catch (error) {
       logger.error('QUIZ', 'Failed to generate quiz', { error: error.message })
@@ -110,7 +118,7 @@ export default function useQuizHandlers({
     } finally {
       setIsLoadingQuiz(false)
     }
-  }, [activeTopic, visibleSlidesRef, setIsLoadingQuiz, setQuizTopicId, setQuizTopicName, setQuizQuestions, setUiState])
+  }, [activeTopic, visibleSlidesRef, setIsLoadingQuiz, setQuizTopicId, setQuizTopicName, setQuizQuestions, setQuizSlides, setUiState])
 
   /**
    * WB018: Handle quiz completion - evaluate and potentially unlock piece
