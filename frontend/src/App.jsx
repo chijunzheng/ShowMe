@@ -23,6 +23,8 @@ import useWorldStats from './hooks/useWorldStats'
 import useQuizHandlers from './hooks/useQuizHandlers.js'
 import useSocraticHandlers from './hooks/useSocraticHandlers.js'
 import useSlideshowControl from './hooks/useSlideshowControl.js'
+import useCelebrations from './hooks/useCelebrations.js'
+import useTabNavigation from './hooks/useTabNavigation.js'
 // WB020: Evolution and pocket scene gamification
 import useEvolution from './hooks/useEvolution'
 import usePocketScene from './hooks/usePocketScene'
@@ -45,6 +47,9 @@ import {
   STORAGE_LIMITS,
   LEVEL_CONFIG,
   API_ENDPOINTS,
+  LOCAL_PROGRESS,
+  GENERATION_PROGRESS_PERCENT,
+  PROGRESS_MESSAGES,
 } from './constants/appConfig.js'
 
 // Import storage utilities
@@ -71,34 +76,9 @@ import {
 const MAX_CACHED_TOPICS = STORAGE_LIMITS.MAX_CACHED_TOPICS
 const MAX_VERSIONS_PER_TOPIC = STORAGE_LIMITS.MAX_VERSIONS_PER_TOPIC
 
-// Local progress stage for TTS loading (not from WebSocket)
-const LOCAL_PROGRESS = {
-  TTS_LOADING: 'tts_loading',
-}
-
-const GENERATION_PROGRESS_PERCENT = {
-  [PROGRESS_TYPES.START]: 10,
-  [PROGRESS_TYPES.SCRIPT_READY]: 35,
-  [PROGRESS_TYPES.IMAGES_GENERATING]: 65,
-  [PROGRESS_TYPES.AUDIO_GENERATING]: 85,
-  [LOCAL_PROGRESS.TTS_LOADING]: 92,
-  [PROGRESS_TYPES.COMPLETE]: 100,
-  [PROGRESS_TYPES.ERROR]: 100,
-}
-
 // Extract timing constants from SLIDE_TIMING
 const SLIDE_TRANSITION_PAUSE_MS = SLIDE_TIMING.TRANSITION_PAUSE_MS
 const MANUAL_FINISH_GRACE_MS = SLIDE_TIMING.MANUAL_FINISH_GRACE_MS
-
-// Progress stage messages for WebSocket updates
-const PROGRESS_MESSAGES = {
-  [PROGRESS_TYPES.START]: 'Starting generation...',
-  [PROGRESS_TYPES.SCRIPT_READY]: 'Script ready, creating visuals...',
-  [PROGRESS_TYPES.IMAGES_GENERATING]: 'Generating diagrams...',
-  [PROGRESS_TYPES.AUDIO_GENERATING]: 'Creating narration...',
-  [PROGRESS_TYPES.COMPLETE]: 'Complete!',
-  [PROGRESS_TYPES.ERROR]: 'Error occurred',
-}
 
 function App() {
   // CORE027: Load persisted topics on initial mount
@@ -178,19 +158,45 @@ function App() {
     lastTtsRequestTimeRef: slideAudio.lastTtsRequestTimeRef,
   })
 
-  // POLISH-001: Celebration state
-  const [showConfetti, setShowConfetti] = useState(false)
-  const [currentToastBadge, setCurrentToastBadge] = useState(null)
+  // POLISH-001: Celebration state (managed by useCelebrations hook)
+  const celebrations = useCelebrations()
+  const {
+    showConfetti,
+    currentToastBadge,
+    showBadgeCelebration,
+    handleToastDismiss,
+    handleConfettiComplete,
+    unlockedPiece,
+    showPieceCelebration,
+    showPieceUnlock,
+    dismissPieceCelebration,
+    showTierCelebration,
+    tierUpgradeInfo,
+    showTierUpgrade,
+    dismissTierCelebration,
+    showQuickXpToast,
+    quickXpEarned,
+    showQuickXp,
+    dismissQuickXpToast,
+    pendingSceneReveal,
+    showSceneReveal,
+    dismissSceneReveal,
+  } = celebrations
 
   // SOCRATIC-003: State for Socratic mode data
   const [socraticSlides, setSocraticSlides] = useState([])
   const [socraticTopicName, setSocraticTopicName] = useState('')
   const [socraticLanguage, setSocraticLanguage] = useState('en')
 
-  // WB018: World Builder gamification state
-  const [activeTab, setActiveTab] = useState('learn') // 'learn' | 'world' | 'quiz'
-  const [worldBadge, setWorldBadge] = useState(0) // New piece notification count
-  const [learnMode, setLearnMode] = useState('full') // 'quick' | 'full'
+  // WB018: World Builder gamification state (managed by useTabNavigation hook)
+  const {
+    activeTab,
+    setActiveTab,
+    worldBadge,
+    setWorldBadge,
+    learnMode,
+    setLearnMode,
+  } = useTabNavigation()
 
   // WB021: Quiz tab specific state
   const [quizTabState, setQuizTabState] = useState('home') // 'home' | 'active' | 'results'
@@ -204,15 +210,7 @@ function App() {
   const [isLoadingQuiz, setIsLoadingQuiz] = useState(false)
   const [quizResults, setQuizResults] = useState(null)
   const [quizSlides, setQuizSlides] = useState([]) // Slides with images for visual quiz questions
-  const [unlockedPiece, setUnlockedPiece] = useState(null)
-  const [showPieceCelebration, setShowPieceCelebration] = useState(false)
-  // WB015: Quick mode XP toast state
-  const [showQuickXpToast, setShowQuickXpToast] = useState(false)
-  const [quickXpEarned, setQuickXpEarned] = useState(0)
-  // UI008: Tier upgrade celebration state
-  const [showTierCelebration, setShowTierCelebration] = useState(false)
-  const [tierUpgradeInfo, setTierUpgradeInfo] = useState(null)
-  // Regeneration state
+  // Regeneration state (celebration state now managed by useCelebrations hook)
   const [isRegenerating, setIsRegenerating] = useState(false)
   const regeneratingTopicIdRef = useRef(null)
 
@@ -231,29 +229,8 @@ function App() {
     shouldRegenerateScene,
   } = usePocketScene()
 
-  // WB020: Pending scene reveal state for ConnectionSceneReveal celebration
-  const [pendingSceneReveal, setPendingSceneReveal] = useState(null)
-
-  /**
-   * WB019: Handle pocket scene generation completion
-   * Called when a pocket generates or updates its connection scene.
-   * This triggers the ConnectionSceneReveal celebration overlay.
-   *
-   * @param {Object} params - Scene reveal parameters
-   * @param {Object} params.scene - The generated scene data { imageUrl, evolutionLevel }
-   * @param {string} params.pocketName - Display name for the pocket
-   * @param {string} params.pocketIcon - Emoji icon for the pocket
-   * @param {number} params.pieceCount - Number of pieces in the pocket
-   */
-  const handlePocketSceneGenerated = useCallback((params) => {
-    if (!params?.scene?.imageUrl) return
-    setPendingSceneReveal({
-      scene: params.scene,
-      pocketName: params.pocketName,
-      pocketIcon: params.pocketIcon,
-      pieceCount: params.pieceCount,
-    })
-  }, [])
+  // WB019: handlePocketSceneGenerated now uses showSceneReveal from useCelebrations hook
+  const handlePocketSceneGenerated = showSceneReveal
 
   // WB020: World pieces state for review session (loaded from API)
   const [worldPieces, setWorldPieces] = useState([])
@@ -648,23 +625,17 @@ function App() {
   // POLISH-001: Handle new badge unlocks with celebration
   useEffect(() => {
     if (newBadges && newBadges.length > 0) {
-      // Show the first badge toast
-      setCurrentToastBadge(newBadges[0])
-      setShowConfetti(true)
+      // Show the first badge toast using celebrations hook
+      showBadgeCelebration(newBadges[0])
       playAchievementSound()
     }
-  }, [newBadges])
+  }, [newBadges, showBadgeCelebration])
 
-  // POLISH-001: Handle toast dismissal
-  const handleToastDismiss = useCallback(() => {
-    setCurrentToastBadge(null)
+  // POLISH-001: Wrap toast dismissal to also clear badges from user progress
+  const handleBadgeToastDismiss = useCallback(() => {
+    handleToastDismiss()
     clearNewBadges()
-  }, [clearNewBadges])
-
-  // POLISH-001: Handle confetti completion
-  const handleConfettiComplete = useCallback(() => {
-    setShowConfetti(false)
-  }, [])
+  }, [handleToastDismiss, clearNewBadges])
 
   /**
    * Returns the currently playing audio element, if any.
@@ -1607,8 +1578,7 @@ function App() {
 
       if (response.ok) {
         const data = await response.json()
-        setQuickXpEarned(data.xpEarned)
-        setShowQuickXpToast(true)
+        showQuickXp(data.xpEarned)
         logger.info('QUICK_XP', 'Quick mode XP awarded', { xpEarned: data.xpEarned, totalXP: data.totalXP })
 
         // Refresh world stats to reflect new XP
@@ -1744,11 +1714,11 @@ function App() {
     setQuizSlides,
     setQuizResults,
     setUiState,
-    setUnlockedPiece,
-    setShowPieceCelebration,
+    showPieceUnlock,
+    dismissPieceCelebration,
     setWorldBadge,
-    setTierUpgradeInfo,
-    setShowTierCelebration,
+    showTierUpgrade,
+    dismissTierCelebration,
     setActiveTab,
     refreshWorldStats,
     quizTopicId,
@@ -2816,15 +2786,15 @@ function App() {
     <div className="h-screen flex overflow-hidden">
       {/* POLISH-001: Achievement celebration components */}
       <Confetti isActive={showConfetti} onComplete={handleConfettiComplete} />
-      <AchievementToast badge={currentToastBadge} onDismiss={handleToastDismiss} />
+      <AchievementToast badge={currentToastBadge} onDismiss={handleBadgeToastDismiss} />
 
       {/* WB015: Quick mode XP toast */}
       <QuickXpToast
         xpEarned={quickXpEarned}
         visible={showQuickXpToast}
-        onDismiss={() => setShowQuickXpToast(false)}
+        onDismiss={dismissQuickXpToast}
         onSwitchMode={() => {
-          setShowQuickXpToast(false)
+          dismissQuickXpToast()
           setLearnMode('full')
         }}
       />
@@ -3087,10 +3057,10 @@ function App() {
           pocketIcon={pendingSceneReveal.pocketIcon || '✨'}
           pieceCount={pendingSceneReveal.pieceCount || 3}
           onViewPocket={() => {
-            setPendingSceneReveal(null)
+            dismissSceneReveal()
             setActiveTab('world')
           }}
-          onContinue={() => setPendingSceneReveal(null)}
+          onContinue={dismissSceneReveal}
         />
       )}
 

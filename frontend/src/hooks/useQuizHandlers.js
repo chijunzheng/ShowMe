@@ -55,11 +55,11 @@ function determineZone(topicName) {
  * @param {Function} params.setQuizSlides - Setter for quiz slides (with images for visual questions)
  * @param {Function} params.setQuizResults - Setter for quiz results
  * @param {Function} params.setUiState - Setter for UI state
- * @param {Function} params.setUnlockedPiece - Setter for unlocked piece
- * @param {Function} params.setShowPieceCelebration - Setter for piece celebration visibility
+ * @param {Function} params.showPieceUnlock - Celebration hook: show piece unlock celebration
+ * @param {Function} params.dismissPieceCelebration - Celebration hook: dismiss piece celebration
  * @param {Function} params.setWorldBadge - Setter for world badge count
- * @param {Function} params.setTierUpgradeInfo - Setter for tier upgrade info
- * @param {Function} params.setShowTierCelebration - Setter for tier celebration visibility
+ * @param {Function} params.showTierUpgrade - Celebration hook: show tier upgrade celebration
+ * @param {Function} params.dismissTierCelebration - Celebration hook: dismiss tier celebration
  * @param {Function} params.setActiveTab - Setter for active tab
  * @param {Function} params.refreshWorldStats - Function to refresh world stats
  * @param {string} params.quizTopicId - Current quiz topic ID
@@ -79,11 +79,11 @@ export default function useQuizHandlers({
   setQuizSlides,
   setQuizResults,
   setUiState,
-  setUnlockedPiece,
-  setShowPieceCelebration,
+  showPieceUnlock,
+  dismissPieceCelebration,
   setWorldBadge,
-  setTierUpgradeInfo,
-  setShowTierCelebration,
+  showTierUpgrade,
+  dismissTierCelebration,
   setActiveTab,
   refreshWorldStats,
   quizTopicId,
@@ -233,19 +233,18 @@ export default function useQuizHandlers({
                 zone
               })
 
-              // Set unlocked piece for celebration
-              setUnlockedPiece({
+              // Set unlocked piece for celebration (using celebrations hook)
+              showPieceUnlock({
                 ...generatedPiece,
                 name: quizTopicName,
                 category: zone,
               })
-              setShowPieceCelebration(true)
               // Increment world badge for new piece notification
               setWorldBadge(prev => prev + 1)
 
               // UI008: Check for tier upgrade from world state update
               if (addData.arcaneJustUnlocked) {
-                setTierUpgradeInfo({ from: 'growing', to: 'arcane' })
+                showTierUpgrade({ from: 'growing', to: 'arcane' })
               }
 
               // WB020: Check for piece evolutions after unlock
@@ -317,12 +316,11 @@ export default function useQuizHandlers({
               zone
             })
 
-            setUnlockedPiece({
+            showPieceUnlock({
               ...fallbackPiece,
               name: quizTopicName,
               category: zone,
             })
-            setShowPieceCelebration(true)
             setWorldBadge(prev => prev + 1)
             generatedPiece = fallbackPiece
 
@@ -365,10 +363,9 @@ export default function useQuizHandlers({
           const evalData = await evalResponse.json()
           // UI008: Handle tier upgrade celebration from XP award
           if (evalData.tierInfo?.tierUpgrade) {
-            setTierUpgradeInfo(evalData.tierInfo.tierUpgrade)
-            // Delay tier celebration to show after piece celebration
+            // Show tier upgrade celebration (delay if piece celebration is showing)
             if (!generatedPiece) {
-              setShowTierCelebration(true)
+              showTierUpgrade(evalData.tierInfo.tierUpgrade)
             }
           }
         }
@@ -378,7 +375,7 @@ export default function useQuizHandlers({
     }
 
     setUiState(UI_STATE.QUIZ_RESULTS)
-  }, [quizTopicId, quizTopicName, setQuizResults, setUiState, setUnlockedPiece, setShowPieceCelebration, setWorldBadge, setTierUpgradeInfo, setShowTierCelebration, checkEvolutions])
+  }, [quizTopicId, quizTopicName, setQuizResults, setUiState, showPieceUnlock, setWorldBadge, showTierUpgrade, checkEvolutions])
 
   /**
    * WB018: Handle quiz skip
@@ -402,55 +399,51 @@ export default function useQuizHandlers({
    * WB018: Handle piece celebration close
    */
   const handlePieceCelebrationClose = useCallback(() => {
-    setShowPieceCelebration(false)
-    setUnlockedPiece(null)
+    dismissPieceCelebration()
     // UI002: Refresh world stats after piece unlock
     refreshWorldStats()
     // UI008: Show tier celebration if pending after piece celebration
     if (tierUpgradeInfo) {
-      setShowTierCelebration(true)
+      showTierUpgrade(tierUpgradeInfo)
     } else {
       setUiState(UI_STATE.HOME)
     }
-  }, [tierUpgradeInfo, refreshWorldStats, setShowPieceCelebration, setUnlockedPiece, setShowTierCelebration, setUiState])
+  }, [tierUpgradeInfo, refreshWorldStats, dismissPieceCelebration, showTierUpgrade, setUiState])
 
   /**
    * WB018: Handle view world from celebration
    */
   const handleViewWorldFromCelebration = useCallback(() => {
-    setShowPieceCelebration(false)
-    setUnlockedPiece(null)
+    dismissPieceCelebration()
     // UI002: Refresh world stats after piece unlock
     refreshWorldStats()
     // UI008: Show tier celebration if pending, then go to world
     if (tierUpgradeInfo) {
-      setShowTierCelebration(true)
+      showTierUpgrade(tierUpgradeInfo)
     } else {
       setActiveTab('world')
       setWorldBadge(0) // Clear badge since they're viewing world
       setUiState(UI_STATE.HOME)
     }
-  }, [tierUpgradeInfo, refreshWorldStats, setShowPieceCelebration, setUnlockedPiece, setShowTierCelebration, setActiveTab, setWorldBadge, setUiState])
+  }, [tierUpgradeInfo, refreshWorldStats, dismissPieceCelebration, showTierUpgrade, setActiveTab, setWorldBadge, setUiState])
 
   /**
    * UI008: Handle tier celebration close
    */
   const handleTierCelebrationClose = useCallback(() => {
-    setShowTierCelebration(false)
-    setTierUpgradeInfo(null)
+    dismissTierCelebration()
     setUiState(UI_STATE.HOME)
-  }, [setShowTierCelebration, setTierUpgradeInfo, setUiState])
+  }, [dismissTierCelebration, setUiState])
 
   /**
    * UI008: Handle view world from tier celebration
    */
   const handleTierViewWorld = useCallback(() => {
-    setShowTierCelebration(false)
-    setTierUpgradeInfo(null)
+    dismissTierCelebration()
     setActiveTab('world')
     setWorldBadge(0) // Clear badge since they're viewing world
     setUiState(UI_STATE.HOME)
-  }, [setShowTierCelebration, setTierUpgradeInfo, setActiveTab, setWorldBadge, setUiState])
+  }, [dismissTierCelebration, setActiveTab, setWorldBadge, setUiState])
 
   /**
    * WB018: Handle continue from quiz results

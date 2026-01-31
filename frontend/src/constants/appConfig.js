@@ -185,3 +185,40 @@ export const TRIVIAL_TRANSCRIPT_TOKENS = new Set([
 export const SHORT_QUESTION_WORDS = new Set([
   'why', 'how', 'what', 'when', 'where', 'who', 'which',
 ])
+
+/**
+ * Local progress stage for TTS loading (not from WebSocket).
+ * This is used for client-side progress tracking during TTS audio loading.
+ */
+export const LOCAL_PROGRESS = {
+  TTS_LOADING: 'tts_loading',
+}
+
+/**
+ * Progress stage to percentage mapping for the generation progress bar.
+ * Maps both WebSocket PROGRESS_TYPES and local progress stages to percentages.
+ * Note: Uses string keys that match PROGRESS_TYPES values from useWebSocket.js
+ */
+export const GENERATION_PROGRESS_PERCENT = {
+  start: 10,
+  script_ready: 35,
+  images_generating: 65,
+  audio_generating: 85,
+  [LOCAL_PROGRESS.TTS_LOADING]: 92,
+  complete: 100,
+  error: 100,
+}
+
+/**
+ * Progress stage messages for WebSocket updates.
+ * Provides human-readable messages for each generation stage.
+ * Note: Uses string keys that match PROGRESS_TYPES values from useWebSocket.js
+ */
+export const PROGRESS_MESSAGES = {
+  start: 'Starting generation...',
+  script_ready: 'Script ready, creating visuals...',
+  images_generating: 'Generating diagrams...',
+  audio_generating: 'Creating narration...',
+  complete: 'Complete!',
+  error: 'Error occurred',
+}
