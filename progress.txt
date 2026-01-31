@@ -2314,3 +2314,29 @@ Massive refactoring of `frontend/src/App.jsx` to improve maintainability. Reduce
 
 ### Notes
 - No automated tests run in this session.
+
+---
+
+## Session 36: Living World Persistence + Topic-Aware Evolution (2026-01-31)
+
+### Summary
+- Living World now persists across refresh/server restarts (dev) and evolves on each passed quiz without re-creating the world.
+- Evolution adds a topic-specific grounded element (with placement hint) and preserves previously added elements to avoid sky overlays.
+
+### Files Modified
+- `backend/src/routes/world.js`
+- `backend/src/services/gemini.js`
+- `backend/src/services/livingWorldStore.js`
+- `backend/src/services/worldEvolution.js`
+- `backend/src/services/worldPromptBuilder.js`
+- `frontend/src/hooks/useLivingWorld.js`
+- `frontend/src/hooks/useQuizHandlers.js`
+- `frontend/src/components/LivingWorld/LivingWorldView.jsx`
+
+### Git Commits
+- b0bbee7: feat(living-world): persist and evolve world
+
+### Tests
+- backend: `npx vitest run`
+- frontend (Living World): `npx vitest run src/hooks/__tests__/useLivingWorld.test.js src/components/LivingWorld/__tests__/LivingWorldView.test.jsx`
+- frontend build: `npm run build`
