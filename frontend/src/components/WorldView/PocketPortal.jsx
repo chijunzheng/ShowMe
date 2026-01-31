@@ -35,7 +35,7 @@ const CATEGORY_THEMES = {
     label: 'Space Pocket',
     bgGradient: 'from-indigo-500 to-purple-800',
     glowColor: 'rgba(99, 102, 241, 0.6)',
-    ringColor: 'border-indigo-300',
+    ringColor: 'border-primary-300',
   },
   dinosaurs: {
     icon: '🦖',
@@ -91,7 +91,7 @@ const CATEGORY_THEMES = {
     label: 'Knowledge Pocket',
     bgGradient: 'from-violet-400 to-purple-600',
     glowColor: 'rgba(139, 92, 246, 0.6)',
-    ringColor: 'border-violet-300',
+    ringColor: 'border-secondary-300',
   },
 }
 

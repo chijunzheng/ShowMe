@@ -90,7 +90,7 @@ export default function SocraticFeedback({
         {/* Suggestions for improvement */}
         {suggestions.length > 0 && (
           <div className="mb-4">
-            <h4 className="text-sm font-semibold text-blue-600 dark:text-blue-400 mb-2 flex items-center gap-2">
+            <h4 className="text-sm font-semibold text-primary-600 dark:text-primary-400 mb-2 flex items-center gap-2">
               <span>💡</span> To explore further:
             </h4>
             <ul className="space-y-1">

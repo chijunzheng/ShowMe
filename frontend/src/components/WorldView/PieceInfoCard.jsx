@@ -39,8 +39,8 @@ const ZONE_STYLES = {
   },
   civilization: {
     bgGradient: 'from-indigo-50 to-violet-100',
-    borderColor: 'border-indigo-400',
-    accentColor: 'text-indigo-600',
+    borderColor: 'border-primary-400',
+    accentColor: 'text-primary-600',
   },
   arcane: {
     bgGradient: 'from-purple-50 to-fuchsia-100',

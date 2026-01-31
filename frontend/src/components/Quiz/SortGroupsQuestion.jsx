@@ -420,8 +420,8 @@ export default function SortGroupsQuestion({
 
       {/* Explanation (shown in feedback) */}
       {showFeedback && explanation && (
-        <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/30 rounded-xl border border-blue-200 dark:border-blue-800">
-          <p className="text-sm text-blue-800 dark:text-blue-200 text-center">
+        <div className="mb-6 p-4 bg-primary-50 dark:bg-primary-900/30 rounded-xl border border-primary-200 dark:border-primary-700">
+          <p className="text-sm text-primary-700 dark:text-primary-200 text-center">
             {explanation}
           </p>
         </div>

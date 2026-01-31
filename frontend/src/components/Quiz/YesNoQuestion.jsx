@@ -80,8 +80,8 @@ export default function YesNoQuestion({
         {/* Statement in a highlighted box */}
         <div className="
           inline-block px-6 py-4 rounded-xl
-          bg-blue-50 dark:bg-blue-900/20
-          border-2 border-blue-200 dark:border-blue-800
+          bg-primary-50 dark:bg-primary-900/20
+          border-2 border-primary-200 dark:border-primary-700
         ">
           <p className="text-base text-gray-800 dark:text-gray-200 italic">
             "{statement}"

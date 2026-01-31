@@ -36,9 +36,9 @@ const EVOLUTION_INFO = {
   enhanced: {
     label: 'Scene Evolved',
     badge: 'Enhanced',
-    badgeColor: 'bg-blue-500',
+    badgeColor: 'bg-secondary-500',
     description: 'Your pocket grows stronger!',
-    glowColor: 'rgba(59, 130, 246, 0.5)',
+    glowColor: 'rgba(0, 180, 160, 0.5)',
   },
   legendary: {
     label: 'Legendary Scene',

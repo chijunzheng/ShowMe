@@ -30,8 +30,16 @@ import QuizSlidePreview from './QuizSlidePreview'
 import ComboIndicator from './ComboIndicator'
 import StreakCelebration from './StreakCelebration'
 import QuizTimer from './QuizTimer'
+import MicroCelebration from './MicroCelebration'
 import useQuizGamification from './useQuizGamification'
 import { fuzzyMatch } from '../../utils/fuzzyMatch'
+import {
+  playCorrectSound,
+  playIncorrectSound,
+  playPartialSound,
+  playSelectSound,
+} from '../../utils/soundEffects'
+import { vibrateSuccess, vibrateError, vibrateShort } from '../../utils/haptics'
 
 /**
  * Question types supported by the quiz
@@ -80,6 +88,10 @@ export default function Quiz({
   const [answers, setAnswers] = useState([])
   const [currentFeedback, setCurrentFeedback] = useState(null)
   const [timerActive, setTimerActive] = useState(true)
+
+  // MicroCelebration state
+  const [showMicroCelebration, setShowMicroCelebration] = useState(false)
+  const [celebrationData, setCelebrationData] = useState({ xpGained: 0, streak: 0 })
 
   // Initialize gamification system based on level
   const gamification = useQuizGamification(level)
@@ -132,6 +144,55 @@ export default function Quiz({
     }
   }, [answers, totalQuestions])
 
+  /**
+   * Play sound and haptic feedback based on answer result
+   * Gracefully handles errors if audio/vibration not available
+   */
+  const playAnswerFeedback = useCallback((isCorrect, isPartial = false) => {
+    try {
+      if (isCorrect) {
+        playCorrectSound()
+        vibrateSuccess()
+      } else if (isPartial) {
+        playPartialSound()
+        vibrateSuccess() // Partial is still positive
+      } else {
+        playIncorrectSound()
+        vibrateError()
+      }
+    } catch {
+      // Silently ignore audio/haptic errors
+    }
+  }, [])
+
+  /**
+   * Play select sound and short haptic when user selects an option
+   * Called by question components when user taps an option
+   */
+  const handleOptionSelect = useCallback(() => {
+    try {
+      playSelectSound()
+      vibrateShort()
+    } catch {
+      // Silently ignore audio/haptic errors
+    }
+  }, [])
+
+  /**
+   * Trigger MicroCelebration for correct answers
+   */
+  const triggerCelebration = useCallback((xpGained, streak) => {
+    setCelebrationData({ xpGained, streak })
+    setShowMicroCelebration(true)
+  }, [])
+
+  /**
+   * Handle MicroCelebration completion
+   */
+  const handleCelebrationComplete = useCallback(() => {
+    setShowMicroCelebration(false)
+  }, [])
+
   // Handle MCQ answer
   const handleMCQAnswer = useCallback((selectedIndex) => {
     if (!currentQuestion || currentQuestion.type !== 'mcq') return
@@ -140,6 +201,14 @@ export default function Quiz({
 
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, false)
+
+    // Play sound and haptic feedback
+    playAnswerFeedback(isCorrect, false)
+
+    // Trigger celebration for correct answers
+    if (isCorrect) {
+      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+    }
 
     const feedback = {
       isCorrect,
@@ -155,7 +224,7 @@ export default function Quiz({
 
     setCurrentFeedback(feedback)
     setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification])
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
 
   // Handle Fill-in-blank answer
   const handleFillBlankAnswer = useCallback((userAnswer) => {
@@ -170,6 +239,14 @@ export default function Quiz({
 
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(matchResult.isCorrect, matchResult.isPartial)
+
+    // Play sound and haptic feedback
+    playAnswerFeedback(matchResult.isCorrect, matchResult.isPartial)
+
+    // Trigger celebration for correct/partial answers
+    if (matchResult.isCorrect || matchResult.isPartial) {
+      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+    }
 
     const feedback = {
       isCorrect: matchResult.isCorrect,
@@ -187,7 +264,7 @@ export default function Quiz({
 
     setCurrentFeedback(feedback)
     setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification])
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
 
   // Handle Voice answer
   // Voice answers are evaluated semantically: user's response should cover expectedTopics
@@ -236,6 +313,14 @@ export default function Quiz({
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, isPartial)
 
+    // Play sound and haptic feedback
+    playAnswerFeedback(isCorrect, isPartial)
+
+    // Trigger celebration for correct/partial answers
+    if (isCorrect || isPartial) {
+      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+    }
+
     const feedback = {
       isCorrect,
       isPartial,
@@ -250,7 +335,7 @@ export default function Quiz({
 
     setCurrentFeedback(feedback)
     setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification])
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
 
   // Handle Yes/No answer
   // yes_no type expects a boolean answer (true/false)
@@ -261,6 +346,14 @@ export default function Quiz({
 
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, false)
+
+    // Play sound and haptic feedback
+    playAnswerFeedback(isCorrect, false)
+
+    // Trigger celebration for correct answers
+    if (isCorrect) {
+      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+    }
 
     const feedback = {
       isCorrect,
@@ -276,7 +369,7 @@ export default function Quiz({
 
     setCurrentFeedback(feedback)
     setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification])
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
 
   // Handle Picture Match answer
   // picture_match type expects a slide index selection
@@ -287,6 +380,14 @@ export default function Quiz({
 
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, false)
+
+    // Play sound and haptic feedback
+    playAnswerFeedback(isCorrect, false)
+
+    // Trigger celebration for correct answers
+    if (isCorrect) {
+      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+    }
 
     const feedback = {
       isCorrect,
@@ -302,7 +403,7 @@ export default function Quiz({
 
     setCurrentFeedback(feedback)
     setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification])
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
 
   // Handle Odd One Out answer
   // odd_one_out type expects the index of the item user selected
@@ -315,6 +416,14 @@ export default function Quiz({
 
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, false)
+
+    // Play sound and haptic feedback
+    playAnswerFeedback(isCorrect, false)
+
+    // Trigger celebration for correct answers
+    if (isCorrect) {
+      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+    }
 
     const feedback = {
       isCorrect,
@@ -330,7 +439,7 @@ export default function Quiz({
 
     setCurrentFeedback(feedback)
     setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification])
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
 
   // Handle Sort Groups answer
   // sort_groups type expects an object mapping group names to arrays of items
@@ -371,6 +480,14 @@ export default function Quiz({
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, isPartial)
 
+    // Play sound and haptic feedback
+    playAnswerFeedback(isCorrect, isPartial)
+
+    // Trigger celebration for correct/partial answers
+    if (isCorrect || isPartial) {
+      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+    }
+
     const feedback = {
       isCorrect,
       isPartial,
@@ -385,7 +502,7 @@ export default function Quiz({
 
     setCurrentFeedback(feedback)
     setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification])
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
 
   // Handle Find Error answer
   // find_error type expects text input describing the error
@@ -401,6 +518,14 @@ export default function Quiz({
 
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(matchResult.isCorrect, matchResult.isPartial)
+
+    // Play sound and haptic feedback
+    playAnswerFeedback(matchResult.isCorrect, matchResult.isPartial)
+
+    // Trigger celebration for correct/partial answers
+    if (matchResult.isCorrect || matchResult.isPartial) {
+      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+    }
 
     const feedback = {
       isCorrect: matchResult.isCorrect,
@@ -418,7 +543,7 @@ export default function Quiz({
 
     setCurrentFeedback(feedback)
     setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification])
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
 
   // Handle Spot It answer
   // spot_it type expects {x, y} coordinates where user tapped on the image
@@ -448,6 +573,14 @@ export default function Quiz({
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, false)
 
+    // Play sound and haptic feedback
+    playAnswerFeedback(isCorrect, false)
+
+    // Trigger celebration for correct answers
+    if (isCorrect) {
+      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+    }
+
     const feedback = {
       isCorrect,
       isPartial: false,
@@ -462,7 +595,7 @@ export default function Quiz({
 
     setCurrentFeedback(feedback)
     setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification])
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
 
   // Handle Sequence answer
   // sequence type expects an array of indices representing the order
@@ -500,6 +633,14 @@ export default function Quiz({
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, isPartial)
 
+    // Play sound and haptic feedback
+    playAnswerFeedback(isCorrect, isPartial)
+
+    // Trigger celebration for correct/partial answers
+    if (isCorrect || isPartial) {
+      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+    }
+
     const feedback = {
       isCorrect,
       isPartial,
@@ -514,7 +655,7 @@ export default function Quiz({
 
     setCurrentFeedback(feedback)
     setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification])
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
 
   // Handle Apply Concept answer
   // apply_concept type expects text input applying a concept to a new scenario
@@ -560,6 +701,14 @@ export default function Quiz({
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, isPartial)
 
+    // Play sound and haptic feedback
+    playAnswerFeedback(isCorrect, isPartial)
+
+    // Trigger celebration for correct/partial answers
+    if (isCorrect || isPartial) {
+      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+    }
+
     const feedback = {
       isCorrect,
       isPartial,
@@ -576,7 +725,7 @@ export default function Quiz({
 
     setCurrentFeedback(feedback)
     setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification])
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
 
   // Handle continue after feedback
   const handleContinue = useCallback(() => {
@@ -647,6 +796,14 @@ export default function Quiz({
         show={gamification.showStreakCelebration}
       />
 
+      {/* MicroCelebration Overlay - shows on correct answer */}
+      <MicroCelebration
+        isActive={showMicroCelebration}
+        xpGained={celebrationData.xpGained}
+        streak={celebrationData.streak}
+        onComplete={handleCelebrationComplete}
+      />
+
       {/* Combo Indicator - Top right corner */}
       <ComboIndicator
         multiplier={gamification.currentMultiplier}
@@ -702,6 +859,7 @@ export default function Quiz({
             question={currentQuestion.question}
             options={currentQuestion.options}
             onAnswer={handleMCQAnswer}
+            onOptionSelect={handleOptionSelect}
             showFeedback={false}
             correctIndex={currentQuestion.correctIndex}
             selectedIndex={null}
@@ -1131,6 +1289,7 @@ export {
   AnimatedXP,
   ComboIndicator,
   StreakCelebration,
+  MicroCelebration,
   QuizTimer,
   useQuizGamification,
   ReviewQuiz,

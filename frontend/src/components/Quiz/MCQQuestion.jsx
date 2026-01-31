@@ -45,6 +45,7 @@ export default function MCQQuestion({
   question,
   options = [],
   onAnswer,
+  onOptionSelect,
   showFeedback = false,
   correctIndex,
   selectedIndex = null
@@ -68,7 +69,9 @@ export default function MCQQuestion({
     if (showFeedback) return // Prevent selection after feedback shown
 
     setLocalSelected(index)
-  }, [showFeedback])
+    // Notify parent of selection for sound/haptic feedback
+    onOptionSelect?.()
+  }, [showFeedback, onOptionSelect])
 
   // Handle toggling between typing and tap mode
   const handleToggleMode = useCallback(() => {

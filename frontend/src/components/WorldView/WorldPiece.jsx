@@ -78,7 +78,7 @@ const ZONE_STYLES = {
   civilization: {
     // Midground - structured, built pieces
     glowColor: 'rgba(99, 102, 241, 0.4)', // Indigo glow
-    borderColor: 'border-indigo-400',
+    borderColor: 'border-primary-400',
     shadowColor: 'shadow-indigo-500/30',
     bgGradient: 'from-indigo-50 to-violet-100',
   },

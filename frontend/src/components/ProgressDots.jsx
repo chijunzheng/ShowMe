@@ -47,7 +47,7 @@ export default function ProgressDots({
       return `w-4 h-3 rounded ${isActive ? 'bg-primary' : 'bg-gray-400'}`
     }
     if (isSection) {
-      return `w-3 h-3 rounded-sm ${isActive ? 'bg-indigo-500' : 'bg-gray-300'}`
+      return `w-3 h-3 rounded-sm ${isActive ? 'bg-primary-500' : 'bg-gray-300'}`
     }
     if (isSuggestions) {
       return `w-3 h-3 rotate-45 ${isActive ? 'bg-primary' : 'bg-gray-300'}`

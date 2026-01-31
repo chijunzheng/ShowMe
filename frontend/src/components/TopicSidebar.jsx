@@ -238,7 +238,7 @@ function TopicSidebar({
       {/* Mobile hamburger button - fixed position, top left */}
       <button
         onClick={toggleSidebar}
-        className="fixed top-4 left-4 z-50 md:hidden w-10 h-10 min-w-[44px] min-h-[44px] flex items-center justify-center bg-white rounded-lg shadow-md border border-gray-200 hover:bg-gray-50 transition-colors"
+        className="fixed top-4 left-4 z-50 md:hidden w-10 h-10 min-w-[44px] min-h-[44px] flex items-center justify-center bg-cream-100 rounded-lg shadow-md border border-cream-200 hover:bg-cream-200 transition-colors"
         aria-label={isOpen ? 'Close sidebar' : 'Open sidebar'}
         aria-expanded={isOpen}
         aria-controls="topic-sidebar"
@@ -284,7 +284,7 @@ function TopicSidebar({
         id="topic-sidebar"
         className={`
           fixed top-0 left-0 h-full z-40
-          w-64 bg-white border-r border-gray-200
+          w-64 bg-cream-50 border-r border-cream-200
           flex flex-col
           transition-transform duration-300 ease-in-out
           md:translate-x-0 md:static md:z-auto md:flex-shrink-0
@@ -294,7 +294,7 @@ function TopicSidebar({
         aria-label="Topic navigation"
       >
         {/* New Topic Button - TOP */}
-        <div className="p-3 border-b border-gray-100">
+        <div className="p-3 border-b border-cream-200">
           <button
             onClick={handleNewTopicClick}
             className="
@@ -322,7 +322,7 @@ function TopicSidebar({
         </div>
 
         {/* Compact Stats Row */}
-        <div className="px-3 py-2 border-b border-gray-100 bg-gray-50/50">
+        <div className="px-3 py-2 border-b border-cream-200 bg-gray-50/50">
           {/* Tier + XP row */}
           <div className="flex items-center justify-between text-sm mb-1.5">
             <span className={`flex items-center gap-1 font-medium ${TIER_CONFIG[tier]?.color || 'text-gray-500'}`}>
@@ -335,9 +335,9 @@ function TopicSidebar({
           {/* XP Progress bar + Streak row */}
           <div className="flex items-center gap-2">
             {/* XP Progress bar */}
-            <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+            <div className="flex-1 h-1.5 bg-primary-100 rounded-full overflow-hidden">
               <div
-                className="h-full bg-primary rounded-full transition-all duration-500"
+                className="h-full bg-gradient-to-r from-primary-400 to-primary-500 rounded-full transition-all duration-500"
                 style={{ width: `${Math.min(100, (xpProgress.current / xpProgress.target) * 100)}%` }}
               />
             </div>
@@ -436,7 +436,7 @@ function TopicSidebar({
                   {isMenuOpen && (
                     <div
                       ref={menuRef}
-                      className="fixed z-[100] w-36 bg-white rounded-lg shadow-lg border border-gray-200 py-1 animate-fade-in"
+                      className="fixed z-[100] w-36 bg-cream-50 rounded-lg shadow-lg border border-cream-200 py-1 animate-fade-in"
                       style={{
                         top: `${menuPosition.top}px`,
                         left: `${menuPosition.left}px`,

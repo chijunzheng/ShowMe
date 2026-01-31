@@ -1,12 +1,13 @@
 /**
  * QuizResults Component
- * UI006: Quiz results screen with pass/fail states
+ * UI006: Mission results screen with pass/fail states
  *
  * Features:
- * - Pass screen: Celebration, score, XP earned, world piece preview
- * - Fail screen: Encouraging message, retry option
+ * - Mission Complete screen: Celebration, score, XP earned, world piece preview
+ * - Almost There screen: Encouraging message, retry mission option
  * - Animated XP counter from 0 to earned amount
  * - Tier upgrade celebration when applicable
+ * - Level-specific adventure messages
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -373,7 +374,7 @@ export default function QuizResults({
             </div>
           </div>
 
-          {/* Result header - Level-specific messages */}
+          {/* Result header - Level-specific adventure messages */}
           <h2
             className={`
               text-3xl font-bold mb-2
@@ -386,18 +387,18 @@ export default function QuizResults({
             {level === 'simple'
               ? (passed ? 'You did it!' : 'Good try!')
               : level === 'deep'
-              ? (passed ? 'Excellent Work!' : 'Keep Pushing!')
-              : (passed ? 'Passed!' : 'Not Quite!')}
+              ? (passed ? 'Master Explorer!' : 'Keep Exploring!')
+              : (passed ? 'Mission Complete!' : 'Almost There!')}
           </h2>
 
-          {/* Encouraging subtext - Level appropriate */}
+          {/* Encouraging subtext - Level appropriate adventure messages */}
           {!passed && (
             <p className="text-gray-600 dark:text-gray-300 mb-4">
               {level === 'simple'
-                ? "You're learning so much! Try again!"
+                ? "You're learning so much! Try the mission again!"
                 : level === 'deep'
-                ? "Deep questions are tough - that's how we grow!"
-                : "You're so close! Give it another shot."}
+                ? "Deep challenges are tough - that's how explorers grow!"
+                : "You're so close to completing the mission!"}
             </p>
           )}
 
@@ -448,10 +449,10 @@ export default function QuizResults({
             <SpeedBonusSummary speedBonuses={speedBonuses} avgTime={avgTime} />
           )}
 
-          {/* Passing threshold hint for fail */}
+          {/* Mission completion threshold hint for fail */}
           {!passed && level !== 'simple' && (
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-              You need <span className="font-semibold">{level === 'deep' ? '75%' : '60%'}</span> to pass
+              You need <span className="font-semibold">{level === 'deep' ? '75%' : '60%'}</span> to complete the mission
             </p>
           )}
 
@@ -524,7 +525,7 @@ export default function QuizResults({
               </>
             ) : (
               <>
-                {/* Try Again button (primary for fail) */}
+                {/* Retry Mission button (primary for fail) */}
                 <button
                   onClick={onRetry}
                   className="
@@ -536,7 +537,7 @@ export default function QuizResults({
                     transition-all duration-200
                   "
                 >
-                  Try Again
+                  Retry Mission
                 </button>
 
                 {/* Review Slides button (secondary for fail) */}
@@ -562,7 +563,7 @@ export default function QuizResults({
         <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-4">
           {passed
             ? 'Your piece has been added to your World!'
-            : 'Don\'t worry - you can retry as many times as you need!'}
+            : 'Every explorer fails sometimes - retry the mission whenever you are ready!'}
         </p>
       </div>
     </div>

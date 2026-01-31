@@ -1,14 +1,22 @@
 /**
  * QuizFeedback Component
- * WB002/WB003: Per-question feedback display
+ * WB002/WB003: Per-challenge feedback display
  *
  * Features:
  * - Shows checkmark or X based on correctness
+ * - Randomized encouraging messages for each result type
  * - Displays explanation text
  * - Shows correct answer if user was wrong
  * - Animated entry
- * - Continue button to proceed
+ * - "Next Challenge" button to proceed
  */
+
+import { useMemo } from 'react'
+import {
+  getRandomCorrectMessage,
+  getRandomIncorrectMessage,
+  getRandomPartialMessage,
+} from './quizMessages'
 
 export default function QuizFeedback({
   isCorrect,
@@ -18,6 +26,17 @@ export default function QuizFeedback({
   userAnswer,
   onContinue
 }) {
+  // Get randomized message - memoized to stay consistent during component lifecycle
+  const feedbackMessage = useMemo(() => {
+    if (isCorrect) {
+      return getRandomCorrectMessage()
+    }
+    if (isPartial) {
+      return getRandomPartialMessage()
+    }
+    return getRandomIncorrectMessage()
+  }, [isCorrect, isPartial])
+
   // Get feedback icon and colors based on result
   const getFeedbackStyle = () => {
     if (isCorrect) {
@@ -27,7 +46,7 @@ export default function QuizFeedback({
             <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" />
           </svg>
         ),
-        title: 'Correct!',
+        title: feedbackMessage,
         titleColor: 'text-success',
         bgColor: 'bg-success/10',
         borderColor: 'border-success/30',
@@ -42,7 +61,7 @@ export default function QuizFeedback({
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
         ),
-        title: 'Almost there!',
+        title: feedbackMessage,
         titleColor: 'text-yellow-600 dark:text-yellow-400',
         bgColor: 'bg-yellow-50 dark:bg-yellow-900/20',
         borderColor: 'border-yellow-200 dark:border-yellow-800',
@@ -56,7 +75,7 @@ export default function QuizFeedback({
           <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" />
         </svg>
       ),
-      title: 'Not quite right',
+      title: feedbackMessage,
       titleColor: 'text-red-600 dark:text-red-400',
       bgColor: 'bg-red-50 dark:bg-red-900/20',
       borderColor: 'border-red-200 dark:border-red-800',
@@ -120,7 +139,7 @@ export default function QuizFeedback({
         )}
       </div>
 
-      {/* Continue button */}
+      {/* Next Challenge button */}
       <div className="flex justify-center mt-6">
         <button
           onClick={onContinue}
@@ -132,7 +151,7 @@ export default function QuizFeedback({
             transition-all duration-200
           "
         >
-          Continue
+          Next Challenge
         </button>
       </div>
     </div>

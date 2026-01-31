@@ -29,6 +29,8 @@ import usePocketScene from './hooks/usePocketScene'
 import useReviewSession from './hooks/useReviewSession'
 import { EvolutionCelebration } from './components/Celebrations'
 import ConnectionSceneReveal from './components/WorldView/ConnectionSceneReveal'
+// WB021: Quiz Tab for dedicated quiz experience
+import QuizTab from './components/QuizTab'
 
 // Import constants from centralized config
 import {
@@ -186,9 +188,15 @@ function App() {
   const [socraticLanguage, setSocraticLanguage] = useState('en')
 
   // WB018: World Builder gamification state
-  const [activeTab, setActiveTab] = useState('learn') // 'learn' | 'world'
+  const [activeTab, setActiveTab] = useState('learn') // 'learn' | 'world' | 'quiz'
   const [worldBadge, setWorldBadge] = useState(0) // New piece notification count
   const [learnMode, setLearnMode] = useState('full') // 'quick' | 'full'
+
+  // WB021: Quiz tab specific state
+  const [quizTabState, setQuizTabState] = useState('home') // 'home' | 'active' | 'results'
+  const [selectedQuizMode, setSelectedQuizMode] = useState(null)
+  const [selectedQuizTopic, setSelectedQuizTopic] = useState(null)
+
   // Quiz flow state
   const [quizQuestions, setQuizQuestions] = useState([])
   const [quizTopicId, setQuizTopicId] = useState(null)
@@ -1679,7 +1687,39 @@ function App() {
       // Clear world badge when user views world
       setWorldBadge(0)
     }
+    if (tab === 'learn') {
+      setUiState(UI_STATE.HOME)
+    }
+    if (tab === 'quiz') {
+      // Reset quiz tab state when navigating to Quiz tab
+      setQuizTabState('home')
+    }
     setActiveTab(tab)
+  }, [])
+
+  // WB021: Handle quiz start from Quiz tab
+  const handleQuizTabStartQuiz = useCallback(({ mode, topic }) => {
+    setSelectedQuizMode(mode)
+    setSelectedQuizTopic(topic)
+
+    // If topic is provided, start quiz for that topic
+    // If not, will need to pick random topic based on mode
+    if (topic) {
+      // Use existing quiz generation logic
+      // Set up quiz slides from the topic's content
+      setQuizTopicId(topic.topicId || topic.id)
+      setQuizTopicName(topic.topicName || topic.name)
+    }
+
+    // For now, just trigger quiz generation
+    // This will be expanded to handle different modes
+    setQuizTabState('active')
+  }, [])
+
+  // WB021: Handle navigation from Quiz empty state to Learn tab
+  const handleNavigateToLearn = useCallback(() => {
+    setActiveTab('learn')
+    setUiState(UI_STATE.HOME)
   }, [])
 
   // WB018: Quiz and celebration handlers
@@ -2918,6 +2958,18 @@ function App() {
           />
         )}
 
+        {/* WB021: Quiz Tab - shown when Quiz tab is active */}
+        {activeTab === 'quiz' && (
+          <div className="min-h-screen bg-cream-100 dark:bg-night-900 pt-4">
+            <QuizTab
+              worldPieces={worldPieces}
+              onStartQuiz={handleQuizTabStartQuiz}
+              onNavigateToLearn={handleNavigateToLearn}
+              streak={{ current: 0, todayCompleted: false }} // TODO: Add real streak state
+            />
+          </div>
+        )}
+
         {/* Loading screen for historical topic TTS */}
         {isLoadingTopicAudio && activeTopic && activeTab === 'learn' && (
           <LoadingTopicScreen
@@ -2988,11 +3040,12 @@ function App() {
           onDismiss={hideToast}
         />
 
-        {/* WB018: Bottom Tab Bar for Learn/World navigation */}
+        {/* WB018: Bottom Tab Bar for Learn/World/Quiz navigation */}
         <BottomTabBar
           activeTab={activeTab}
           onTabChange={handleTabChange}
           worldBadge={worldBadge}
+          quizBadge={piecesNeedingReview?.length || 0}
           hasSidebar={topics.length > 0}
         />
       </div>

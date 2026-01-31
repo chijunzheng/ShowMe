@@ -1,12 +1,14 @@
 /**
  * QuizProgress Component
- * WB002/WB003: Shows progress through quiz questions
+ * WB002/WB003: Shows progress through quiz challenges
  *
  * Features:
- * - Displays current question number and total
- * - Shows question type with icon
+ * - Displays "Challenge X" counter with "Boss Challenge!" for final question
+ * - Shows game-like question type labels
  * - Animated progress bar
  */
+
+import { getChallengeLabel, getGameTypeLabel } from './quizMessages'
 
 const QUESTION_TYPE_CONFIG = {
   mcq: {
@@ -15,7 +17,7 @@ const QUESTION_TYPE_CONFIG = {
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
       </svg>
     ),
-    label: 'Multiple Choice'
+    label: 'Pick the Answer'
   },
   fill_blank: {
     icon: (
@@ -23,7 +25,7 @@ const QUESTION_TYPE_CONFIG = {
         <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
       </svg>
     ),
-    label: 'Fill in the Blank'
+    label: 'Fill the Gap'
   },
   true_false: {
     icon: (
@@ -39,17 +41,19 @@ const QUESTION_TYPE_CONFIG = {
         <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
       </svg>
     ),
-    label: 'Voice Answer'
+    label: 'Speak Up'
   }
 }
 
 export default function QuizProgress({ current, total, questionType = 'mcq' }) {
   const config = QUESTION_TYPE_CONFIG[questionType] || QUESTION_TYPE_CONFIG.mcq
   const progressPercent = ((current) / total) * 100
+  const isBossChallenge = current === total
+  const challengeLabel = getChallengeLabel(current, total)
 
   return (
     <div className="w-full mb-6">
-      {/* Top row: Question type and counter */}
+      {/* Top row: Question type and challenge counter */}
       <div className="flex items-center justify-between mb-2">
         {/* Question type badge */}
         <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
@@ -57,14 +61,20 @@ export default function QuizProgress({ current, total, questionType = 'mcq' }) {
           <span className="font-medium">{config.label}</span>
         </div>
 
-        {/* Question counter */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-            {current}
-          </span>
-          <span className="text-gray-400 dark:text-gray-500">/</span>
-          <span className="text-gray-500 dark:text-gray-400">
-            {total}
+        {/* Challenge counter */}
+        <div className={`
+          flex items-center gap-1.5 px-3 py-1 rounded-full
+          ${isBossChallenge
+            ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold animate-pulse'
+            : 'bg-gray-100 dark:bg-slate-700'
+          }
+        `}>
+          {isBossChallenge && <span className="text-sm">&#128293;</span>}
+          <span className={`
+            text-sm font-semibold
+            ${isBossChallenge ? 'text-white' : 'text-gray-800 dark:text-gray-200'}
+          `}>
+            {challengeLabel}
           </span>
         </div>
       </div>

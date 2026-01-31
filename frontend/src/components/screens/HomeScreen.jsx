@@ -12,6 +12,13 @@ import { StrengthSection } from '../Home'
 import { playMicOnSound } from '../../utils/soundEffects.js'
 import { LEVEL_CONFIG, EXPLANATION_LEVEL, UI_STATE } from '../../constants/appConfig.js'
 
+/** Color mapping for each explanation level */
+const LEVEL_COLORS = {
+  [EXPLANATION_LEVEL.SIMPLE]: 'light',
+  [EXPLANATION_LEVEL.STANDARD]: 'medium',
+  [EXPLANATION_LEVEL.DEEP]: 'rich',
+}
+
 /**
  * @param {Object} props
  * @param {string} props.homeHeadline - Random headline to display
@@ -81,8 +88,9 @@ export default function HomeScreen({
 
       {/* Headline */}
       <div className="text-center">
-        <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
-          {homeHeadline}
+        <p className="text-lg text-gray-500 mb-1">Hi there! 👋</p>
+        <h1 className="text-2xl md:text-3xl font-display font-bold text-gray-800 dark:text-gray-100 mb-2">
+          What should we explore today?
         </h1>
         <p className="text-gray-500">
           Tap a level and start talking
@@ -99,6 +107,7 @@ export default function HomeScreen({
           >
             <LevelCard
               level={level}
+              color={LEVEL_COLORS[level]}
               icon={config.icon}
               title={config.title}
               description={config.description}

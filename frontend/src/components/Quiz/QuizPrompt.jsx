@@ -2,15 +2,15 @@
  * QuizPrompt Component
  * UI004: Post-slideshow quiz prompt screen
  *
- * Shows after slideshow ends in Full mode, prompting user to take the quiz.
- * Displays topic summary, quiz info, and action buttons.
+ * Shows after slideshow ends in Full mode, prompting user to start their mission.
+ * Displays topic summary, mission info, and action buttons.
  *
  * Features:
  * - Topic summary card with slide count
- * - "Test your knowledge!" header
- * - "Take Quiz" primary button
- * - "Review Slides" secondary button
- * - Info about earning world piece
+ * - "Ready for an Adventure?" header
+ * - "Start Mission" primary button
+ * - "Review Slides First" secondary button
+ * - Info about earning world piece through challenges
  */
 
 import { useState } from 'react'
@@ -82,7 +82,7 @@ export default function QuizPrompt({
 
         {/* Header */}
         <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-2">
-          Test Your Knowledge!
+          Ready for an Adventure?
         </h2>
 
         {/* Topic summary */}
@@ -98,9 +98,9 @@ export default function QuizPrompt({
           </p>
         </div>
 
-        {/* Quiz info */}
+        {/* Mission info */}
         <p className="text-gray-600 dark:text-gray-300 mb-6">
-          Answer {questionCount} questions to unlock a{' '}
+          Complete {questionCount} challenges to unlock a{' '}
           <span className="font-semibold text-primary">world piece</span>
         </p>
 
@@ -116,7 +116,7 @@ export default function QuizPrompt({
           <span>Pass to earn a piece for your World!</span>
         </div>
 
-        {/* Primary action: Take Quiz */}
+        {/* Primary action: Start Mission */}
         <button
           onClick={onStartQuiz}
           className="
@@ -129,7 +129,7 @@ export default function QuizPrompt({
             mb-3
           "
         >
-          Take Quiz
+          Start Mission
         </button>
 
         {/* Secondary action: Review Slides */}
@@ -164,7 +164,7 @@ export default function QuizPrompt({
 
       {/* Passing score info */}
       <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-4">
-        You need 75% or higher to pass and unlock rewards
+        Get 75% or more to complete the mission and unlock rewards
       </p>
     </div>
   )

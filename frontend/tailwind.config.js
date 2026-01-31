@@ -8,30 +8,50 @@ export default {
   theme: {
     extend: {
       colors: {
-        // POLISH-002: Updated color palette for student-focused branding
+        // Curious Explorer: Kid-friendly color palette
         primary: {
-          DEFAULT: '#6366F1', // Indigo
-          dark: '#818CF8',
-          50: '#EEF2FF',
-          100: '#E0E7FF',
-          200: '#C7D2FE',
-          300: '#A5B4FC',
-          400: '#818CF8',
-          500: '#6366F1',
-          600: '#4F46E5',
-          700: '#4338CA',
+          DEFAULT: '#FF6B4A',
+          50: '#FFF5F2',
+          100: '#FFE8E2',
+          200: '#FFCFC4',
+          300: '#FFB0A0',
+          400: '#FF8A6E',
+          500: '#FF6B4A',
+          600: '#E85A3C',
+          700: '#C44830',
         },
-        // T001: Primary gradient colors
-        cyan: {
-          DEFAULT: '#06B6D4',
-          dark: '#22D3EE',
-          50: '#ECFEFF',
-          100: '#CFFAFE',
-          200: '#A5F3FC',
-          300: '#67E8F9',
-          400: '#22D3EE',
-          500: '#06B6D4',
-          600: '#0891B2',
+        secondary: {
+          DEFAULT: '#00B4A0',
+          50: '#ECFDF9',
+          100: '#D1FAF0',
+          200: '#A7F3E2',
+          300: '#6EE7D0',
+          400: '#2DD4C4',
+          500: '#00B4A0',
+          600: '#009688',
+          700: '#007A6E',
+        },
+        accent: {
+          DEFAULT: '#FFB830',
+          50: '#FFFBEB',
+          100: '#FEF3C7',
+          200: '#FDE68A',
+          300: '#FFCB5C',
+          400: '#FFB830',
+          500: '#F5A623',
+          600: '#D97706',
+        },
+        cream: {
+          50: '#FFFDFB',
+          100: '#FFF9F5',
+          200: '#FFF5EE',
+          300: '#FFEEE3',
+        },
+        night: {
+          900: '#1A1625',
+          800: '#252033',
+          700: '#2D2640',
+          600: '#3D3555',
         },
         surface: {
           DEFAULT: '#F8FAFC',
@@ -41,13 +61,6 @@ export default {
           DEFAULT: '#FFFFFF',
           dark: '#0F172A',
         },
-        // T002: Accent orange color
-        accent: {
-          DEFAULT: '#F59E0B', // Orange for accents
-          dark: '#FBBF24',
-          orange: '#F59E0B',
-        },
-        // T003: Success green for streaks
         success: {
           DEFAULT: '#22C55E',
           dark: '#4ADE80',
@@ -59,14 +72,14 @@ export default {
           500: '#22C55E',
           600: '#16A34A',
         },
-        // Streak gradient colors (orange to red)
         streak: {
           orange: '#F59E0B',
           red: '#EF4444',
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['Nunito', 'Inter', 'system-ui', 'sans-serif'],
+        display: ['Quicksand', 'Nunito', 'system-ui', 'sans-serif'],
       },
       animation: {
         'pulse-slow': 'pulse 1.5s ease-in-out infinite',
@@ -88,6 +101,13 @@ export default {
         'fade-in-up': 'fadeInUp 0.5s ease-out forwards',
         // WB020: Evolution celebration animation
         'evolution-particle': 'evolutionParticle 1.5s ease-out forwards',
+        // Mic pulse animation for selected level cards
+        'pulse-mic': 'pulseMic 2s ease-in-out infinite',
+        // GAMIFY-004: Mission UI animations
+        'claim': 'claim 0.4s ease-out',
+        'scale-in': 'scaleIn 0.3s ease-out forwards',
+        'bounce-once': 'bounceOnce 0.6s ease-out',
+        'fade-out-down': 'fadeOutDown 0.3s ease-in forwards',
       },
       keyframes: {
         waveform: {
@@ -213,12 +233,40 @@ export default {
             opacity: '0',
           },
         },
+        // Mic pulse animation keyframes
+        pulseMic: {
+          '0%, 100%': { transform: 'scale(1)', opacity: '1' },
+          '50%': { transform: 'scale(1.1)', opacity: '0.8' },
+        },
+        // GAMIFY-004: Mission UI keyframes
+        claim: {
+          '0%': { transform: 'scale(1)' },
+          '30%': { transform: 'scale(1.05)' },
+          '60%': { transform: 'scale(0.98)' },
+          '100%': { transform: 'scale(1)' },
+        },
+        scaleIn: {
+          '0%': { transform: 'scale(0.9)', opacity: '0' },
+          '100%': { transform: 'scale(1)', opacity: '1' },
+        },
+        bounceOnce: {
+          '0%': { transform: 'scale(0.8)', opacity: '0' },
+          '50%': { transform: 'scale(1.1)' },
+          '70%': { transform: 'scale(0.95)' },
+          '100%': { transform: 'scale(1)', opacity: '1' },
+        },
+        fadeOutDown: {
+          '0%': { transform: 'translateY(0)', opacity: '1' },
+          '100%': { transform: 'translateY(20px)', opacity: '0' },
+        },
       },
-      // T004: Gradient backgrounds for mic button
+      // Curious Explorer: Kid-friendly gradients
       backgroundImage: {
-        'gradient-primary': 'linear-gradient(135deg, #6366F1, #06B6D4)',
-        'gradient-streak': 'linear-gradient(135deg, #F59E0B, #EF4444)',
-        'gradient-success': 'linear-gradient(135deg, #22C55E, #06B6D4)',
+        'gradient-primary': 'linear-gradient(135deg, #FF6B4A 0%, #FFB830 100%)',
+        'gradient-success': 'linear-gradient(135deg, #4ADE80 0%, #00B4A0 100%)',
+        'gradient-mastery': 'linear-gradient(135deg, #00B4A0 0%, #60A5FA 100%)',
+        'gradient-streak': 'linear-gradient(135deg, #FFB830 0%, #FF6B4A 100%)',
+        'gradient-ambient': 'radial-gradient(ellipse at top, #FFF5EE 0%, #FFF9F5 100%)',
       },
     },
   },

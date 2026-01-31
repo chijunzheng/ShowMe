@@ -403,6 +403,152 @@ export function playEvolutionSound() {
 }
 
 /**
+ * Play the "correct answer" sound.
+ * Quick ascending chime that rewards correct answers in quizzes.
+ * Uses bright, cheerful tones that feel satisfying without being overwhelming.
+ */
+export function playCorrectSound() {
+  // Ascending two-note chime: G5 -> C6 (perfect fourth up)
+  // Bright and affirming, quick reward feedback
+  playSequence([
+    {
+      frequency: 783.99, // G5 - affirming start
+      duration: 0.1,
+      volume: 0.18,
+      waveform: 'sine',
+      attackTime: 0.005,
+      releaseTime: 0.06,
+    },
+    {
+      frequency: 1046.50, // C6 - happy resolution
+      delay: 0.08,
+      duration: 0.15,
+      volume: 0.2,
+      waveform: 'sine',
+      attackTime: 0.005,
+      releaseTime: 0.1,
+    },
+  ])
+}
+
+/**
+ * Play the "partial credit" sound.
+ * Encouraging tone for partially correct answers.
+ * Warm and supportive, not as triumphant as correct but still positive.
+ */
+export function playPartialSound() {
+  // Single warm tone with slight rise: E5 -> F5
+  // Encouraging but indicates room for improvement
+  playSequence([
+    {
+      frequency: 659.25, // E5 - warm, encouraging
+      endFrequency: 698.46, // F5 - slight upward bend
+      duration: 0.2,
+      volume: 0.16,
+      waveform: 'triangle',
+      attackTime: 0.01,
+      releaseTime: 0.12,
+    },
+  ])
+}
+
+/**
+ * Play the "incorrect answer" sound.
+ * Gentle low tone for wrong answers - not punishing, just informative.
+ * Designed to be kind to kids while signaling "try again".
+ */
+export function playIncorrectSound() {
+  // Single soft, low tone: A3
+  // Gentle and brief, not discouraging
+  playSequence([
+    {
+      frequency: 220.00, // A3 - soft low note
+      duration: 0.18,
+      volume: 0.12, // Quieter than success sounds
+      waveform: 'sine',
+      attackTime: 0.02,
+      releaseTime: 0.12,
+    },
+  ])
+}
+
+/**
+ * Play the "option select" sound.
+ * Soft tap/click when selecting an option in quizzes.
+ * Very brief and subtle, just tactile feedback.
+ */
+export function playSelectSound() {
+  // Ultra-short high tap: B5
+  // Like a soft button click
+  playSequence([
+    {
+      frequency: 987.77, // B5 - crisp tap
+      duration: 0.04,
+      volume: 0.1, // Very quiet
+      waveform: 'triangle',
+      attackTime: 0.003,
+      releaseTime: 0.025,
+    },
+  ])
+}
+
+/**
+ * Play the "build-up" sound.
+ * Anticipation effect before revealing quiz answer.
+ * Rising tension that builds excitement.
+ */
+export function playBuildUpSound() {
+  // Ascending sequence with increasing tempo: C5 -> D5 -> E5 -> F5 -> G5
+  // Creates anticipation and excitement
+  playSequence([
+    {
+      frequency: 523.25, // C5
+      duration: 0.08,
+      volume: 0.1,
+      waveform: 'triangle',
+      attackTime: 0.005,
+      releaseTime: 0.05,
+    },
+    {
+      frequency: 587.33, // D5
+      delay: 0.1,
+      duration: 0.08,
+      volume: 0.12,
+      waveform: 'triangle',
+      attackTime: 0.005,
+      releaseTime: 0.05,
+    },
+    {
+      frequency: 659.25, // E5
+      delay: 0.18,
+      duration: 0.08,
+      volume: 0.14,
+      waveform: 'triangle',
+      attackTime: 0.005,
+      releaseTime: 0.05,
+    },
+    {
+      frequency: 698.46, // F5
+      delay: 0.24,
+      duration: 0.08,
+      volume: 0.16,
+      waveform: 'triangle',
+      attackTime: 0.005,
+      releaseTime: 0.05,
+    },
+    {
+      frequency: 783.99, // G5 - peak anticipation
+      delay: 0.28,
+      duration: 0.1,
+      volume: 0.18,
+      waveform: 'sine',
+      attackTime: 0.005,
+      releaseTime: 0.06,
+    },
+  ])
+}
+
+/**
  * Preload the audio context to reduce latency on first sound.
  * Call this on user interaction (e.g., first button click).
  */
@@ -414,6 +560,15 @@ export function preloadAudioContext() {
   }
 }
 
+/**
+ * Reset the audio context (for testing purposes only).
+ * This allows tests to inject mocked AudioContext instances.
+ * @private
+ */
+export function _resetAudioContext() {
+  audioContext = null
+}
+
 // Export all functions as named exports
 export default {
   playMicOnSound,
@@ -422,5 +577,10 @@ export default {
   playTierUpSound,
   playStreakSound,
   playEvolutionSound,
+  playCorrectSound,
+  playPartialSound,
+  playIncorrectSound,
+  playSelectSound,
+  playBuildUpSound,
   preloadAudioContext,
 }
