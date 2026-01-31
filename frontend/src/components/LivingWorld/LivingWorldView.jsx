@@ -220,8 +220,10 @@ function LivingWorldView({
   }, [worldImageUrl])
 
   // Extract topics learned from world state
-  const topicsLearned = worldState?.topicsLearned || []
-  const totalTopics = topicsLearned.length
+  const topicsLearned = Array.isArray(worldState?.topicsLearned) ? worldState.topicsLearned : []
+  const totalTopics = typeof worldState?.totalTopics === 'number'
+    ? worldState.totalTopics
+    : topicsLearned.length
   const recentTopics = topicsLearned.slice(-3).reverse()
 
   // Determine what to render
@@ -229,6 +231,7 @@ function LivingWorldView({
   const showEmpty = !isLoading && !worldState && !error
   const showError = !isLoading && error
   const showWorld = !isLoading && worldState && worldImageUrl
+  const showGenerating = !isLoading && worldState && !worldImageUrl && !error
 
   return (
     <div
@@ -239,6 +242,9 @@ function LivingWorldView({
     >
       {/* Loading State */}
       {showLoading && <LoadingSkeleton />}
+
+      {/* Generating State (world exists but image not ready) */}
+      {showGenerating && <LoadingSkeleton />}
 
       {/* Empty State */}
       {showEmpty && (

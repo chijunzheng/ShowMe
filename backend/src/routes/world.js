@@ -35,7 +35,14 @@
 import express from 'express'
 import logger from '../utils/logger.js'
 import { sanitizeQuery, sanitizeId } from '../utils/sanitize.js'
-import { isGeminiAvailable, classifyTopicZone, generateWorldPiecePrompt, generateWorldPieceImage } from '../services/gemini.js'
+import {
+  isGeminiAvailable,
+  classifyTopicZone,
+  generateWorldPiecePrompt,
+  generateWorldPieceImage,
+  generateLivingWorldEvolutionPlan,
+  generateLivingWorldImage,
+} from '../services/gemini.js'
 import {
   getWorldState,
   addWorldPiece,
@@ -68,9 +75,12 @@ import {
 import {
   createInitialWorldState,
   evolveWorld,
-  getEvolutionWorldState
+  getEvolutionWorldState,
+  setEvolutionWorldState,
+  resetEvolutionWorldState,
 } from '../services/worldEvolution.js'
-import { buildBaseWorldPrompt } from '../services/worldPromptBuilder.js'
+import { buildBaseWorldPrompt, buildEvolutionPrompt, getTerrainElement } from '../services/worldPromptBuilder.js'
+import { loadLivingWorldState, saveLivingWorldState } from '../services/livingWorldStore.js'
 
 const router = express.Router()
 
@@ -1414,6 +1424,110 @@ router.get('/scene-levels', (req, res) => {
 // Living World Endpoints (WB023)
 // ============================================================================
 
+async function hydrateLivingWorldState(clientId) {
+  const cached = getEvolutionWorldState(clientId).worldState
+  if (cached) return cached
+
+  const stored = await loadLivingWorldState(clientId)
+  if (stored) {
+    setEvolutionWorldState(clientId, stored)
+    return stored
+  }
+
+  return null
+}
+
+function getLivingWorldElements(worldState) {
+  const elements = []
+
+  // Prefer explicit per-topic elements when available (more faithful than generic terrain summaries).
+  try {
+    const compositionMap = worldState?.compositionMap
+    if (compositionMap && typeof compositionMap === 'object') {
+      const candidates = []
+      for (const layerName of ['sky', 'background', 'midground', 'foreground']) {
+        const layer = compositionMap?.[layerName]
+        const topics = layer?.topics
+        if (!Array.isArray(topics)) continue
+
+        for (const topic of topics) {
+          const elementAdded = topic?.elementAdded
+          if (typeof elementAdded !== 'string' || !elementAdded.trim()) continue
+
+          let timestamp = 0
+          const rawAddedAt = topic?.addedAt
+          if (rawAddedAt instanceof Date) {
+            timestamp = rawAddedAt.getTime()
+          } else if (typeof rawAddedAt === 'string' || typeof rawAddedAt === 'number') {
+            const parsed = new Date(rawAddedAt).getTime()
+            timestamp = Number.isFinite(parsed) ? parsed : 0
+          }
+
+          candidates.push({ element: elementAdded.trim(), timestamp })
+        }
+      }
+
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => a.timestamp - b.timestamp)
+        const seen = new Set()
+        for (const { element } of candidates) {
+          const key = element.toLowerCase()
+          if (seen.has(key)) continue
+          seen.add(key)
+          elements.push(element)
+        }
+
+        // Keep the prompt concise.
+        if (elements.length > 12) {
+          return elements.slice(-12)
+        }
+
+        if (elements.length > 0) {
+          return elements
+        }
+      }
+    }
+  } catch (error) {
+    // Fall back to terrain summaries below.
+  }
+
+  const progress = worldState?.terrainProgress
+
+  if (progress && typeof progress === 'object') {
+    for (const [terrainEffect, rawCount] of Object.entries(progress)) {
+      const count = Number(rawCount || 0)
+      if (!Number.isFinite(count) || count <= 0) continue
+      const element = getTerrainElement(terrainEffect, count - 1)
+      elements.push(`${terrainEffect}: ${element}`)
+    }
+  }
+
+  return elements
+}
+
+function inferFallbackElementToAdd({ topicName, summary, terrainEffect, terrainLevel }) {
+  const text = `${topicName || ''} ${summary || ''}`.toLowerCase()
+
+  if (terrainEffect === 'water') {
+    const isMarine = /\b(ocean|sea|marine|reef|coral|octopus|cephalopod|tide|tidal|kelp|shore|coast)\b/i.test(text)
+    if (isMarine) {
+      if (terrainLevel <= 0) return 'a small rocky tide pool with gentle ripples'
+      if (terrainLevel === 1) return 'a calm shallow shoreline with clear water'
+      if (terrainLevel === 2) return 'a brighter coastline with small waves'
+      return 'a lively coastal waterline with gentle surf'
+    }
+  }
+
+  if (terrainEffect === 'life') {
+    const isCephalopod = /\b(octopus|cephalopod)\b/i.test(text)
+    if (isCephalopod) {
+      return 'a small octopus in a shallow pool, subtly changing colors to blend with rocks'
+    }
+  }
+
+  return null
+}
+
 /**
  * GET /api/world/living
  * Get current living world state for a user
@@ -1447,16 +1561,17 @@ router.get('/living', async (req, res) => {
 
     logger.info('WORLD', 'Getting living world state', { clientId: sanitizedId })
 
-    const result = getEvolutionWorldState(sanitizedId)
-
-    if (result.error) {
-      logger.error('WORLD', 'Failed to get living world state', { error: result.error })
-      return res.status(500).json({ error: result.error })
+    const worldState = await hydrateLivingWorldState(sanitizedId)
+    if (!worldState) {
+      return res.status(404).json({
+        worldState: null,
+        worldImageUrl: null,
+      })
     }
 
     return res.json({
-      worldState: result.worldState,
-      worldImageUrl: result.worldState?.worldImageUrl || null
+      worldState,
+      worldImageUrl: worldState?.worldImageUrl || null
     })
   } catch (error) {
     logger.error('WORLD', 'Unexpected error getting living world state', { error: error.message })
@@ -1501,6 +1616,23 @@ router.post('/living/initialize', async (req, res) => {
       })
     }
 
+    // If the world already exists, return it (idempotent init).
+    // This avoids accidentally resetting a user's world when they click the CTA again.
+    const existingState = await hydrateLivingWorldState(sanitizedId)
+    if (existingState?.worldImageUrl) {
+      logger.info('API', '[World] Living world already initialized (skipping re-init)', {
+        clientId: sanitizedId,
+        tier: existingState.tier,
+      })
+      logger.timeEnd('API', 'world-living-initialize-request')
+
+      return res.json({
+        worldState: existingState,
+        worldImageUrl: existingState.worldImageUrl,
+        success: true,
+      })
+    }
+
     // Check if Gemini is available
     if (!isGeminiAvailable()) {
       logger.warn('API', '[World] Gemini API not available for living world init')
@@ -1513,11 +1645,14 @@ router.post('/living/initialize', async (req, res) => {
     logger.info('API', '[World] Initializing living world', { clientId: sanitizedId })
 
     // Create initial world state
-    const worldState = createInitialWorldState(sanitizedId)
+    const worldState = existingState || createInitialWorldState(sanitizedId)
 
-    // Generate base world prompt and image
+    // Generate base world prompt and panoramic image
     const basePrompt = buildBaseWorldPrompt()
-    const imageResult = await generateWorldPieceImage(basePrompt)
+    const imageResult = await generateLivingWorldImage(basePrompt, {
+      aspectRatio: '16:9',
+      resolution: '2k',
+    })
 
     if (imageResult.error) {
       logger.error('API', '[World] Base world image generation failed', {
@@ -1542,6 +1677,8 @@ router.post('/living/initialize', async (req, res) => {
 
     // Update world state with image URL
     worldState.worldImageUrl = imageResult.imageUrl
+    setEvolutionWorldState(sanitizedId, worldState)
+    await saveLivingWorldState(sanitizedId, worldState)
 
     logger.info('API', '[World] Living world initialized', {
       clientId: sanitizedId,
@@ -1618,16 +1755,80 @@ router.post('/living/evolve', async (req, res) => {
       })
     }
 
-    // Check if world exists for this client
-    const existingState = getEvolutionWorldState(sanitizedId)
-    if (!existingState.worldState) {
-      logger.warn('API', '[World] World not found for evolve', { clientId: sanitizedId })
-      logger.timeEnd('API', 'world-living-evolve-request')
-      return res.status(404).json({
-        error: 'World not found. Please initialize first.',
-        field: 'clientId'
+    // Ensure world state is hydrated (local store -> memory) if available, or
+    // initialize a base world so evolution always has a persistent canvas.
+    let hydratedState = await hydrateLivingWorldState(sanitizedId)
+
+    if (!hydratedState) {
+      // Require Gemini when initializing from scratch (we need the base image).
+      if (!isGeminiAvailable()) {
+        logger.warn('API', '[World] Gemini API not available for living world evolve (init required)', {
+          clientId: sanitizedId,
+        })
+        logger.timeEnd('API', 'world-living-evolve-request')
+        return res.status(503).json({
+          error: 'World generation service temporarily unavailable',
+        })
+      }
+
+      const baseState = createInitialWorldState(sanitizedId)
+      const basePrompt = buildBaseWorldPrompt()
+      const baseImage = await generateLivingWorldImage(basePrompt, {
+        aspectRatio: '16:9',
+        resolution: '2k',
       })
+
+      if (baseImage.error) {
+        logger.error('API', '[World] Base world image generation failed (during evolve init)', {
+          error: baseImage.error,
+          clientId: sanitizedId,
+        })
+        logger.timeEnd('API', 'world-living-evolve-request')
+
+        if (baseImage.error === 'RATE_LIMITED') {
+          return res.status(429)
+            .set('Retry-After', '60')
+            .json({
+              error: 'Rate limit exceeded. Please try again later.',
+              retryAfter: 60,
+            })
+        }
+
+        return res.status(500).json({
+          error: 'Failed to generate world image',
+        })
+      }
+
+      baseState.worldImageUrl = baseImage.imageUrl
+      setEvolutionWorldState(sanitizedId, baseState)
+      await saveLivingWorldState(sanitizedId, baseState)
+      hydratedState = baseState
     }
+
+    const preEvolveState = hydratedState ? structuredClone(hydratedState) : null
+
+    // Ensure we have a base image to evolve from when possible
+    if (hydratedState && !hydratedState.worldImageUrl) {
+      const basePrompt = buildBaseWorldPrompt()
+      const baseImage = await generateLivingWorldImage(basePrompt, {
+        aspectRatio: '16:9',
+        resolution: '2k',
+      })
+
+      if (baseImage.error) {
+        logger.warn('API', '[World] Failed to generate base image before evolve', {
+          error: baseImage.error,
+          clientId: sanitizedId,
+        })
+      } else {
+        hydratedState.worldImageUrl = baseImage.imageUrl
+        setEvolutionWorldState(sanitizedId, hydratedState)
+        await saveLivingWorldState(sanitizedId, hydratedState)
+      }
+    }
+
+    const existingElements = getLivingWorldElements(hydratedState)
+    const referenceImageUrl = hydratedState?.worldImageUrl || null
 
     logger.info('API', '[World] Evolving living world', {
       clientId: sanitizedId,
@@ -1641,6 +1842,155 @@ router.post('/living/evolve', async (req, res) => {
     // Get updated state
     const updatedState = getEvolutionWorldState(sanitizedId)
 
+    if (!updatedState.worldState) {
+      logger.timeEnd('API', 'world-living-evolve-request')
+      return res.status(500).json({ error: 'Failed to load updated world state' })
+    }
+
+    // If nothing changed (duplicate topic), return early
+    if (evolutionResult?.changesApplied?.skipped) {
+      logger.timeEnd('API', 'world-living-evolve-request')
+      return res.json({
+        worldState: updatedState.worldState,
+        worldImageUrl: updatedState.worldState?.worldImageUrl || null,
+        changesApplied: evolutionResult.changesApplied,
+        tier: updatedState.worldState?.tier || null,
+        tierUpgrade: null,
+        success: true,
+      })
+    }
+
+    // Generate an evolved panorama image, preserving the previous world
+    if (!isGeminiAvailable()) {
+      logger.warn('API', '[World] Gemini API not available for living world evolve')
+
+      // Keep world state consistent with the image by rolling back the in-memory update.
+      if (preEvolveState) {
+        setEvolutionWorldState(sanitizedId, preEvolveState)
+        await saveLivingWorldState(sanitizedId, preEvolveState)
+      } else {
+        resetEvolutionWorldState(sanitizedId)
+      }
+
+      logger.timeEnd('API', 'world-living-evolve-request')
+      return res.status(503).json({
+        error: 'World generation service temporarily unavailable',
+      })
+    }
+
+    const terrainLevel = Number(evolutionResult?.changesApplied?.previousTerrainCount || 0)
+    const terrainEffect = evolutionResult?.changesApplied?.terrainEffect
+    const compositionLayer = evolutionResult?.changesApplied?.layer
+    const zone = evolutionResult?.changesApplied?.zone
+
+    // Default progression element for this terrain type/level (used if planning fails).
+    const defaultElementToAdd = getTerrainElement(terrainEffect, terrainLevel)
+
+    // Use Gemini (fast text) to pick a topic-specific element to add, so topics like
+    // "Octopus color change" don't become generic "stream" additions or sky overlays.
+    let plannedElementToAdd = null
+    let placementHint = null
+
+    try {
+      const plan = await generateLivingWorldEvolutionPlan({
+        topicName,
+        summary,
+        zone,
+        terrainEffect,
+        compositionLayer,
+        terrainLevel,
+        existingElements,
+        tier: updatedState.worldState?.tier || null,
+        styleDescriptor: updatedState.worldState?.styleDescriptor || null,
+      })
+
+      if (!plan?.error) {
+        plannedElementToAdd = plan?.elementToAdd || null
+        placementHint = plan?.placementHint || null
+      }
+    } catch (error) {
+      logger.warn('API', '[World] Failed to generate Living World evolution plan (continuing with fallback)', {
+        error: error.message,
+        clientId: sanitizedId,
+      })
+    }
+
+    const fallbackElementToAdd = inferFallbackElementToAdd({
+      topicName,
+      summary,
+      terrainEffect,
+      terrainLevel,
+    })
+
+    const elementToAdd = plannedElementToAdd || fallbackElementToAdd || defaultElementToAdd
+
+    // Persist the chosen element so future evolutions can explicitly preserve it.
+    const layerKey = typeof compositionLayer === 'string' ? compositionLayer : null
+    const layerState = layerKey ? updatedState.worldState?.compositionMap?.[layerKey] : null
+    if (layerState && Array.isArray(layerState.topics) && layerState.topics.length > 0) {
+      const lastTopic = layerState.topics[layerState.topics.length - 1]
+      if (lastTopic && typeof lastTopic === 'object') {
+        lastTopic.elementAdded = elementToAdd
+        if (placementHint) {
+          lastTopic.placementHint = placementHint
+        }
+      }
+    }
+
+    const evolutionPrompt = buildEvolutionPrompt({
+      topicName,
+      summary,
+      zone,
+      terrainEffect,
+      compositionLayer,
+      existingElements,
+      styleDescriptor: updatedState.worldState?.styleDescriptor,
+      terrainLevel,
+      elementToAdd,
+      placementHint,
+    })
+
+    const evolvedImage = await generateLivingWorldImage(evolutionPrompt, {
+      referenceImageUrl,
+      aspectRatio: '16:9',
+      resolution: evolutionResult?.tierUpgrade ? '4k' : '2k',
+    })
+
+    if (evolvedImage.error) {
+      logger.error('API', '[World] Living world image evolution failed', {
+        error: evolvedImage.error,
+        clientId: sanitizedId,
+      })
+
+      // Keep world state consistent with the image by rolling back the in-memory update
+      if (preEvolveState) {
+        setEvolutionWorldState(sanitizedId, preEvolveState)
+        await saveLivingWorldState(sanitizedId, preEvolveState)
+      } else {
+        resetEvolutionWorldState(sanitizedId)
+      }
+
+      logger.timeEnd('API', 'world-living-evolve-request')
+
+      if (evolvedImage.error === 'RATE_LIMITED') {
+        return res.status(429)
+          .set('Retry-After', '60')
+          .json({
+            error: 'Rate limit exceeded. Please try again later.',
+            retryAfter: 60
+          })
+      }
+
+      return res.status(500).json({
+        error: 'Failed to generate evolved world image'
+      })
+    }
+
+    updatedState.worldState.worldImageUrl = evolvedImage.imageUrl
+    updatedState.worldState.updatedAt = new Date()
+    setEvolutionWorldState(sanitizedId, updatedState.worldState)
+    await saveLivingWorldState(sanitizedId, updatedState.worldState)
+
     logger.info('API', '[World] Living world evolved', {
       clientId: sanitizedId,
       topicName,
@@ -1651,7 +2001,7 @@ router.post('/living/evolve', async (req, res) => {
 
     return res.json({
       worldState: updatedState.worldState,
-      worldImageUrl: evolutionResult.worldImageUrl,
+      worldImageUrl: updatedState.worldState.worldImageUrl,
       changesApplied: evolutionResult.changesApplied,
       tier: evolutionResult.tier,
       tierUpgrade: evolutionResult.tierUpgrade,

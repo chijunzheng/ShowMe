@@ -72,6 +72,7 @@ const TIER_THRESHOLDS = {
 const ZONE_KEYWORDS = {
   nature: [
     'ocean', 'sea', 'water', 'river', 'lake', 'pond', 'coral', 'reef', 'marine',
+    'octopus', 'cephalopod', 'chromatophore',
     'forest', 'tree', 'plant', 'flower', 'grass', 'jungle', 'rainforest', 'woods',
     'mountain', 'volcano', 'earthquake', 'rock', 'mineral', 'cave', 'canyon',
     'weather', 'storm', 'rain', 'snow', 'wind', 'cloud', 'thunder', 'lightning',
@@ -110,12 +111,12 @@ const ZONE_KEYWORDS = {
  * Used to determine which terrain type a topic affects
  */
 const TERRAIN_KEYWORDS = {
-  water: ['ocean', 'sea', 'water', 'river', 'lake', 'pond', 'coral', 'reef', 'marine', 'stream', 'waterfall', 'aquatic'],
+  water: ['ocean', 'sea', 'water', 'river', 'lake', 'pond', 'coral', 'reef', 'marine', 'stream', 'waterfall', 'aquatic', 'octopus', 'cephalopod', 'tide', 'tidal'],
   mountains: ['mountain', 'volcano', 'peak', 'ridge', 'cliff', 'rock', 'everest', 'alps', 'himalaya', 'cave', 'canyon'],
   forest: ['forest', 'tree', 'wood', 'jungle', 'rainforest', 'grove', 'oak', 'pine', 'leaf', 'branch', 'botanical'],
   desert: ['desert', 'sahara', 'dune', 'sand', 'arid', 'dry', 'oasis', 'cactus', 'scorching'],
   weather: ['weather', 'storm', 'rain', 'snow', 'wind', 'cloud', 'thunder', 'lightning', 'hurricane', 'tornado', 'sky', 'atmosphere'],
-  life: ['life', 'animal', 'creature', 'species', 'biology', 'ecosystem', 'habitat', 'wildlife', 'photosynthesis', 'evolution', 'butterfly', 'dinosaur'],
+  life: ['life', 'animal', 'creature', 'species', 'biology', 'ecosystem', 'habitat', 'wildlife', 'photosynthesis', 'evolution', 'butterfly', 'dinosaur', 'octopus', 'cephalopod', 'chromatophore'],
   structure: ['building', 'structure', 'architecture', 'temple', 'pyramid', 'palace', 'castle', 'fortress', 'monument', 'city', 'town', 'empire', 'roman', 'egypt', 'ancient'],
   abstract: ['quantum', 'physics', 'mathematics', 'philosophy', 'abstract', 'cosmic', 'universe', 'black hole', 'dimension', 'energy', 'consciousness', 'theory']
 }
@@ -152,6 +153,8 @@ export function createInitialWorldState(clientId) {
     clientId,
     worldImageUrl: null,
     styleDescriptor: WORLD_STYLE.base,
+    topicsLearned: [],
+    terrainProgress: {},
     compositionMap: {
       sky: { state: COMPOSITION_STATES.sky.initial, topics: [] },
       background: { state: COMPOSITION_STATES.background.initial, topics: [] },
@@ -379,9 +382,47 @@ export async function evolveWorld(clientId, topicName, summary) {
     const worldState = getOrCreateWorldState(clientId)
     const previousTier = worldState.tier
 
+    const normalizedTopicName = typeof topicName === 'string' ? topicName.trim() : ''
+    const safeTopicName = normalizedTopicName || 'Unknown topic'
+    const safeSummary = typeof summary === 'string' ? summary.trim() : ''
+
+    // Normalize optional fields for older saved states
+    if (!Array.isArray(worldState.topicsLearned)) {
+      worldState.topicsLearned = []
+    }
+    if (!worldState.terrainProgress || typeof worldState.terrainProgress !== 'object') {
+      worldState.terrainProgress = {}
+    }
+
+    // Skip duplicates (case-insensitive) to avoid re-adding the same element repeatedly
+    if (normalizedTopicName) {
+      const alreadyLearned = worldState.topicsLearned.some(
+        (t) => typeof t === 'string' && t.toLowerCase() === normalizedTopicName.toLowerCase()
+      )
+      if (alreadyLearned) {
+        logger.info('WORLD', 'Topic already applied to living world (skipping)', {
+          clientId,
+          topicName: normalizedTopicName,
+        })
+        return {
+          worldImageUrl: worldState.worldImageUrl,
+          changesApplied: {
+            skipped: true,
+            reason: 'TOPIC_ALREADY_APPLIED',
+          },
+          tier: worldState.tier,
+          tierUpgrade: null,
+        }
+      }
+    }
+
     // Classify the topic's effect
-    const classification = classifyTopicEffect(topicName, summary)
+    const classification = classifyTopicEffect(safeTopicName, safeSummary)
     const { zone, terrainEffect, compositionLayer, keywords } = classification
+
+    const previousTerrainCount = Number(worldState.terrainProgress[terrainEffect] || 0)
+    const newTerrainCount = previousTerrainCount + 1
+    worldState.terrainProgress[terrainEffect] = newTerrainCount
 
     // Get the affected layer
     const layer = worldState.compositionMap[compositionLayer]
@@ -389,10 +430,17 @@ export async function evolveWorld(clientId, topicName, summary) {
 
     // Add topic to the layer
     layer.topics.push({
-      name: topicName,
+      name: safeTopicName,
+      summary: safeSummary,
       keywords,
+      zone,
+      terrainEffect,
       addedAt: new Date()
     })
+
+    if (normalizedTopicName) {
+      worldState.topicsLearned.push(normalizedTopicName)
+    }
 
     // Update layer state based on new topic count
     const newState = getUpdatedLayerState(compositionLayer, layer.topics.length)
@@ -440,7 +488,12 @@ export async function evolveWorld(clientId, topicName, summary) {
         terrainEffect,
         layer: compositionLayer,
         previousState,
-        newState
+        newState,
+        tierChanged: newTier !== previousTier,
+        previousTier,
+        newTier,
+        previousTerrainCount,
+        newTerrainCount
       },
       tier: newTier,
       tierUpgrade
@@ -480,6 +533,19 @@ export function resetEvolutionWorldState(clientId) {
   evolutionWorldStates.delete(clientId)
 }
 
+/**
+ * Set/replace evolution world state for a client.
+ * Used by routes to hydrate persisted state into the in-memory cache.
+ *
+ * @param {string} clientId
+ * @param {Object} worldState
+ */
+export function setEvolutionWorldState(clientId, worldState) {
+  if (!clientId) return
+  if (!worldState || typeof worldState !== 'object') return
+  evolutionWorldStates.set(clientId, worldState)
+}
+
 export default {
   createInitialWorldState,
   classifyTopicEffect,
@@ -487,6 +553,7 @@ export default {
   evolveWorld,
   getEvolutionWorldState,
   resetEvolutionWorldState,
+  setEvolutionWorldState,
   WORLD_STYLE,
   COMPOSITION_STATES
 }

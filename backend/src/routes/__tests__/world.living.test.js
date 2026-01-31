@@ -9,13 +9,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import express from 'express'
+import worldRouter from '../world.js'
 
 // Mock dependencies BEFORE importing the module under test
 vi.mock('../../services/worldEvolution.js', () => ({
   createInitialWorldState: vi.fn(),
   evolveWorld: vi.fn(),
   getEvolutionWorldState: vi.fn(),
+  setEvolutionWorldState: vi.fn(),
   resetEvolutionWorldState: vi.fn(),
   WORLD_STYLE: { base: 'mock style' },
   COMPOSITION_STATES: {}
@@ -24,12 +25,22 @@ vi.mock('../../services/worldEvolution.js', () => ({
 vi.mock('../../services/worldPromptBuilder.js', () => ({
   buildBaseWorldPrompt: vi.fn(),
   buildEvolutionPrompt: vi.fn(),
+  getTerrainElement: vi.fn(),
   WORLD_STYLE: { base: 'mock style' }
 }))
 
 vi.mock('../../services/gemini.js', () => ({
   isGeminiAvailable: vi.fn(() => true),
-  generateWorldPieceImage: vi.fn()
+  classifyTopicZone: vi.fn(),
+  generateWorldPiecePrompt: vi.fn(),
+  generateWorldPieceImage: vi.fn(),
+  generateLivingWorldEvolutionPlan: vi.fn(),
+  generateLivingWorldImage: vi.fn(),
+}))
+
+vi.mock('../../services/livingWorldStore.js', () => ({
+  loadLivingWorldState: vi.fn(),
+  saveLivingWorldState: vi.fn(),
 }))
 
 vi.mock('../../utils/sanitize.js', () => ({
@@ -52,40 +63,68 @@ import {
   createInitialWorldState,
   evolveWorld,
   getEvolutionWorldState,
+  setEvolutionWorldState,
   resetEvolutionWorldState
 } from '../../services/worldEvolution.js'
-import { buildBaseWorldPrompt } from '../../services/worldPromptBuilder.js'
-import { isGeminiAvailable, generateWorldPieceImage } from '../../services/gemini.js'
+import { buildBaseWorldPrompt, buildEvolutionPrompt } from '../../services/worldPromptBuilder.js'
+import { isGeminiAvailable, generateLivingWorldImage } from '../../services/gemini.js'
+import { loadLivingWorldState, saveLivingWorldState } from '../../services/livingWorldStore.js'
 import { sanitizeId } from '../../utils/sanitize.js'
 
-// Import the router (will be added after tests)
-import worldRouter from '../world.js'
+function createMockRes() {
+  const res = {
+    statusCode: 200,
+    headers: {},
+    body: undefined,
+    status(code) {
+      this.statusCode = code
+      return this
+    },
+    set(header, value) {
+      this.headers[header] = value
+      return this
+    },
+    json(payload) {
+      this.body = payload
+      this.__done?.resolve()
+      return this
+    },
+  }
 
-// Create test app
-function createTestApp() {
-  const app = express()
-  app.use(express.json())
-  app.use('/api/world', worldRouter)
-  return app
+  res.__done = {}
+  res.__done.promise = new Promise((resolve, reject) => {
+    res.__done.resolve = resolve
+    res.__done.reject = reject
+  })
+
+  return res
 }
 
-// Helper to make test requests
-async function testRequest(app, method, path, body = null) {
-  const { default: request } = await import('supertest')
-
-  if (method === 'GET') {
-    return request(app).get(path)
-  } else if (method === 'POST') {
-    return request(app).post(path).send(body)
+async function testRequest(method, path, { query = {}, body = null } = {}) {
+  const req = {
+    method,
+    url: path,
+    query,
+    body,
   }
+
+  const res = createMockRes()
+
+  worldRouter.handle(req, res, (error) => {
+    if (error) {
+      res.__done.reject(error)
+    } else {
+      res.__done.resolve()
+    }
+  })
+
+  await res.__done.promise
+  return { status: res.statusCode, body: res.body, headers: res.headers }
 }
 
 describe('Living World API Endpoints', () => {
-  let app
-
   beforeEach(() => {
     vi.clearAllMocks()
-    app = createTestApp()
   })
 
   afterEach(() => {
@@ -113,16 +152,19 @@ describe('Living World API Endpoints', () => {
 
     it('creates new world state for valid clientId', async () => {
       // Arrange
+      getEvolutionWorldState.mockReturnValueOnce({ worldState: null, error: null })
+      loadLivingWorldState.mockResolvedValueOnce(null)
       createInitialWorldState.mockReturnValue(mockInitialState)
       buildBaseWorldPrompt.mockReturnValue('Generate a barren world...')
-      generateWorldPieceImage.mockResolvedValue({
+      generateLivingWorldImage.mockResolvedValue({
         imageUrl: 'data:image/png;base64,mockImageData',
         error: null
       })
+      saveLivingWorldState.mockResolvedValueOnce(true)
 
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/initialize', {
-        clientId: 'test-client-123'
+      const response = await testRequest('POST', '/living/initialize', {
+        body: { clientId: 'test-client-123' }
       })
 
       // Assert
@@ -133,29 +175,61 @@ describe('Living World API Endpoints', () => {
       expect(response.body.worldImageUrl).toBeDefined()
     })
 
-    it('generates barren world image using buildBaseWorldPrompt', async () => {
+    it('is idempotent when world already exists', async () => {
       // Arrange
-      createInitialWorldState.mockReturnValue(mockInitialState)
-      buildBaseWorldPrompt.mockReturnValue('Generate a barren world prompt')
-      generateWorldPieceImage.mockResolvedValue({
-        imageUrl: 'data:image/png;base64,barrenWorld',
-        error: null
+      getEvolutionWorldState.mockReturnValueOnce({
+        worldState: {
+          ...mockInitialState,
+          worldImageUrl: 'data:image/png;base64,existingWorld',
+        },
+        error: null,
       })
 
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/initialize', {
-        clientId: 'test-client-123'
+      const response = await testRequest('POST', '/living/initialize', {
+        body: { clientId: 'test-client-123' }
+      })
+
+      // Assert
+      expect(response.status).toBe(200)
+      expect(response.body.success).toBe(true)
+      expect(response.body.worldImageUrl).toBe('data:image/png;base64,existingWorld')
+      expect(createInitialWorldState).not.toHaveBeenCalled()
+      expect(buildBaseWorldPrompt).not.toHaveBeenCalled()
+      expect(generateLivingWorldImage).not.toHaveBeenCalled()
+    })
+
+    it('generates barren world image using buildBaseWorldPrompt', async () => {
+      // Arrange
+      getEvolutionWorldState.mockReturnValueOnce({ worldState: null, error: null })
+      loadLivingWorldState.mockResolvedValueOnce(null)
+      createInitialWorldState.mockReturnValue(mockInitialState)
+      buildBaseWorldPrompt.mockReturnValue('Generate a barren world prompt')
+      generateLivingWorldImage.mockResolvedValue({
+        imageUrl: 'data:image/png;base64,barrenWorld',
+        error: null
+      })
+      saveLivingWorldState.mockResolvedValueOnce(true)
+
+      // Act
+      const response = await testRequest('POST', '/living/initialize', {
+        body: { clientId: 'test-client-123' }
       })
 
       // Assert
       expect(buildBaseWorldPrompt).toHaveBeenCalled()
-      expect(generateWorldPieceImage).toHaveBeenCalledWith('Generate a barren world prompt')
+      expect(generateLivingWorldImage).toHaveBeenCalledWith(
+        'Generate a barren world prompt',
+        expect.objectContaining({ aspectRatio: '16:9', resolution: '2k' })
+      )
       expect(response.body.worldImageUrl).toBe('data:image/png;base64,barrenWorld')
+      expect(setEvolutionWorldState).toHaveBeenCalled()
+      expect(saveLivingWorldState).toHaveBeenCalled()
     })
 
     it('returns 400 if clientId is missing', async () => {
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/initialize', {})
+      const response = await testRequest('POST', '/living/initialize', { body: {} })
 
       // Assert
       expect(response.status).toBe(400)
@@ -164,9 +238,7 @@ describe('Living World API Endpoints', () => {
 
     it('returns 400 if clientId is invalid type', async () => {
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/initialize', {
-        clientId: 12345
-      })
+      const response = await testRequest('POST', '/living/initialize', { body: { clientId: 12345 } })
 
       // Assert
       expect(response.status).toBe(400)
@@ -178,8 +250,8 @@ describe('Living World API Endpoints', () => {
       sanitizeId.mockReturnValueOnce({ sanitized: null, error: 'Invalid ID format' })
 
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/initialize', {
-        clientId: '<script>alert("xss")</script>'
+      const response = await testRequest('POST', '/living/initialize', {
+        body: { clientId: '<script>alert("xss")</script>' }
       })
 
       // Assert
@@ -189,12 +261,13 @@ describe('Living World API Endpoints', () => {
 
     it('returns 503 when Gemini is unavailable', async () => {
       // Arrange
-      createInitialWorldState.mockReturnValue(mockInitialState)
+      getEvolutionWorldState.mockReturnValueOnce({ worldState: null, error: null })
+      loadLivingWorldState.mockResolvedValueOnce(null)
       isGeminiAvailable.mockReturnValue(false)
 
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/initialize', {
-        clientId: 'test-client-123'
+      const response = await testRequest('POST', '/living/initialize', {
+        body: { clientId: 'test-client-123' }
       })
 
       // Assert
@@ -204,16 +277,18 @@ describe('Living World API Endpoints', () => {
 
     it('returns 500 when image generation fails', async () => {
       // Arrange
+      getEvolutionWorldState.mockReturnValueOnce({ worldState: null, error: null })
+      loadLivingWorldState.mockResolvedValueOnce(null)
       createInitialWorldState.mockReturnValue(mockInitialState)
       buildBaseWorldPrompt.mockReturnValue('Generate a barren world...')
-      generateWorldPieceImage.mockResolvedValue({
+      generateLivingWorldImage.mockResolvedValue({
         imageUrl: null,
         error: 'GENERATION_FAILED'
       })
 
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/initialize', {
-        clientId: 'test-client-123'
+      const response = await testRequest('POST', '/living/initialize', {
+        body: { clientId: 'test-client-123' }
       })
 
       // Assert
@@ -224,7 +299,6 @@ describe('Living World API Endpoints', () => {
 
   describe('POST /api/world/living/evolve', () => {
     const mockEvolutionResult = {
-      worldImageUrl: 'data:image/png;base64,evolvedWorld',
       changesApplied: {
         zone: 'nature',
         terrainEffect: 'water',
@@ -234,6 +308,20 @@ describe('Living World API Endpoints', () => {
       },
       tier: 'barren',
       tierUpgrade: null
+    }
+
+    const mockBaseWorldState = {
+      clientId: 'test-client-123',
+      worldImageUrl: 'data:image/png;base64,baseWorld',
+      tier: 'barren',
+      totalTopics: 0,
+      terrainProgress: {},
+      compositionMap: {
+        sky: { state: 'overcast', topics: [] },
+        background: { state: 'barren_hills', topics: [] },
+        midground: { state: 'empty_plains', topics: [] },
+        foreground: { state: 'cracked_earth', topics: [] }
+      }
     }
 
     const mockWorldState = {
@@ -250,18 +338,30 @@ describe('Living World API Endpoints', () => {
     }
 
     beforeEach(() => {
-      getEvolutionWorldState.mockReturnValue({ worldState: mockWorldState, error: null })
+      vi.clearAllMocks()
     })
 
     it('updates world with topic using evolveWorld service', async () => {
       // Arrange
       evolveWorld.mockResolvedValue(mockEvolutionResult)
+      getEvolutionWorldState
+        .mockReturnValueOnce({ worldState: mockWorldState, error: null }) // hydrate
+        .mockReturnValueOnce({ worldState: mockWorldState, error: null }) // after evolve
+
+      buildEvolutionPrompt.mockReturnValue('Evolve prompt')
+      generateLivingWorldImage.mockResolvedValue({
+        imageUrl: 'data:image/png;base64,evolvedWorld',
+        error: null,
+      })
+      saveLivingWorldState.mockResolvedValueOnce(true)
 
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/evolve', {
-        clientId: 'test-client-123',
-        topicName: 'coral reefs',
-        summary: 'Underwater ecosystems'
+      const response = await testRequest('POST', '/living/evolve', {
+        body: {
+          clientId: 'test-client-123',
+          topicName: 'coral reefs',
+          summary: 'Underwater ecosystems',
+        }
       })
 
       // Assert
@@ -277,11 +377,18 @@ describe('Living World API Endpoints', () => {
     it('returns changesApplied object with zone, terrainEffect, and layer', async () => {
       // Arrange
       evolveWorld.mockResolvedValue(mockEvolutionResult)
+      getEvolutionWorldState
+        .mockReturnValueOnce({ worldState: mockWorldState, error: null }) // hydrate
+        .mockReturnValueOnce({ worldState: mockWorldState, error: null }) // after evolve
+      buildEvolutionPrompt.mockReturnValue('Evolve prompt')
+      generateLivingWorldImage.mockResolvedValue({ imageUrl: 'data:image/png;base64,evolvedWorld', error: null })
 
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/evolve', {
-        clientId: 'test-client-123',
-        topicName: 'ocean life'
+      const response = await testRequest('POST', '/living/evolve', {
+        body: {
+          clientId: 'test-client-123',
+          topicName: 'ocean life',
+        }
       })
 
       // Assert
@@ -299,11 +406,18 @@ describe('Living World API Endpoints', () => {
         tier: 'sprouting',
         tierUpgrade: { from: 'barren', to: 'sprouting' }
       })
+      getEvolutionWorldState
+        .mockReturnValueOnce({ worldState: mockWorldState, error: null }) // hydrate
+        .mockReturnValueOnce({ worldState: { ...mockWorldState, tier: 'sprouting' }, error: null }) // after evolve
+      buildEvolutionPrompt.mockReturnValue('Evolve prompt')
+      generateLivingWorldImage.mockResolvedValue({ imageUrl: 'data:image/png;base64,evolvedWorld', error: null })
 
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/evolve', {
-        clientId: 'test-client-123',
-        topicName: 'fifth topic'
+      const response = await testRequest('POST', '/living/evolve', {
+        body: {
+          clientId: 'test-client-123',
+          topicName: 'fifth topic',
+        }
       })
 
       // Assert
@@ -312,25 +426,39 @@ describe('Living World API Endpoints', () => {
       expect(response.body.worldState).toBeDefined()
     })
 
-    it('returns 404 if world does not exist for clientId', async () => {
+    it('auto-initializes base world if missing', async () => {
       // Arrange
-      getEvolutionWorldState.mockReturnValue({ worldState: null, error: null })
+      getEvolutionWorldState
+        .mockReturnValueOnce({ worldState: null, error: null }) // hydrate cache miss
+        .mockReturnValueOnce({ worldState: mockWorldState, error: null }) // after evolve
+      loadLivingWorldState.mockResolvedValueOnce(null)
+      createInitialWorldState.mockReturnValue(mockBaseWorldState)
+      buildBaseWorldPrompt.mockReturnValue('Base prompt')
+      buildEvolutionPrompt.mockReturnValue('Evolve prompt')
+      generateLivingWorldImage
+        .mockResolvedValueOnce({ imageUrl: 'data:image/png;base64,baseWorld', error: null })
+        .mockResolvedValueOnce({ imageUrl: 'data:image/png;base64,evolvedWorld', error: null })
+      evolveWorld.mockResolvedValue(mockEvolutionResult)
+      saveLivingWorldState.mockResolvedValue(true)
 
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/evolve', {
-        clientId: 'non-existent-client',
-        topicName: 'some topic'
+      const response = await testRequest('POST', '/living/evolve', {
+        body: {
+          clientId: 'non-existent-client',
+          topicName: 'some topic',
+        }
       })
 
       // Assert
-      expect(response.status).toBe(404)
-      expect(response.body.error).toContain('not found')
+      expect(response.status).toBe(200)
+      expect(response.body.success).toBe(true)
+      expect(response.body.worldImageUrl).toBe('data:image/png;base64,evolvedWorld')
     })
 
     it('returns 400 if clientId is missing', async () => {
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/evolve', {
-        topicName: 'ocean'
+      const response = await testRequest('POST', '/living/evolve', {
+        body: { topicName: 'ocean' }
       })
 
       // Assert
@@ -340,8 +468,8 @@ describe('Living World API Endpoints', () => {
 
     it('returns 400 if topicName is missing', async () => {
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/evolve', {
-        clientId: 'test-client-123'
+      const response = await testRequest('POST', '/living/evolve', {
+        body: { clientId: 'test-client-123' }
       })
 
       // Assert
@@ -352,11 +480,18 @@ describe('Living World API Endpoints', () => {
     it('handles optional summary parameter', async () => {
       // Arrange
       evolveWorld.mockResolvedValue(mockEvolutionResult)
+      getEvolutionWorldState
+        .mockReturnValueOnce({ worldState: mockWorldState, error: null }) // hydrate
+        .mockReturnValueOnce({ worldState: mockWorldState, error: null }) // after evolve
+      buildEvolutionPrompt.mockReturnValue('Evolve prompt')
+      generateLivingWorldImage.mockResolvedValue({ imageUrl: 'data:image/png;base64,evolvedWorld', error: null })
 
       // Act - without summary
-      const response = await testRequest(app, 'POST', '/api/world/living/evolve', {
-        clientId: 'test-client-123',
-        topicName: 'volcanoes'
+      const response = await testRequest('POST', '/living/evolve', {
+        body: {
+          clientId: 'test-client-123',
+          topicName: 'volcanoes',
+        }
       })
 
       // Assert
@@ -371,11 +506,14 @@ describe('Living World API Endpoints', () => {
     it('returns 500 when evolveWorld throws an error', async () => {
       // Arrange
       evolveWorld.mockRejectedValue(new Error('Evolution failed'))
+      getEvolutionWorldState.mockReturnValueOnce({ worldState: mockWorldState, error: null })
 
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/evolve', {
-        clientId: 'test-client-123',
-        topicName: 'thunderstorms'
+      const response = await testRequest('POST', '/living/evolve', {
+        body: {
+          clientId: 'test-client-123',
+          topicName: 'thunderstorms',
+        }
       })
 
       // Assert
@@ -399,10 +537,10 @@ describe('Living World API Endpoints', () => {
           foreground: { state: 'grassy_field', topics: [] }
         }
       }
-      getEvolutionWorldState.mockReturnValue({ worldState: mockState, error: null })
+      getEvolutionWorldState.mockReturnValueOnce({ worldState: mockState, error: null })
 
       // Act
-      const response = await testRequest(app, 'GET', '/api/world/living?clientId=existing-client')
+      const response = await testRequest('GET', '/living', { query: { clientId: 'existing-client' } })
 
       // Assert
       expect(response.status).toBe(200)
@@ -412,22 +550,23 @@ describe('Living World API Endpoints', () => {
       expect(response.body.worldImageUrl).toBe('data:image/png;base64,worldImage')
     })
 
-    it('returns null for new user without error', async () => {
+    it('returns 404 for new user without error', async () => {
       // Arrange
-      getEvolutionWorldState.mockReturnValue({ worldState: null, error: null })
+      getEvolutionWorldState.mockReturnValueOnce({ worldState: null, error: null })
+      loadLivingWorldState.mockResolvedValueOnce(null)
 
       // Act
-      const response = await testRequest(app, 'GET', '/api/world/living?clientId=new-user')
+      const response = await testRequest('GET', '/living', { query: { clientId: 'new-user' } })
 
       // Assert
-      expect(response.status).toBe(200)
+      expect(response.status).toBe(404)
       expect(response.body.worldState).toBeNull()
       expect(response.body.worldImageUrl).toBeNull()
     })
 
     it('returns 400 if clientId query param is missing', async () => {
       // Act
-      const response = await testRequest(app, 'GET', '/api/world/living')
+      const response = await testRequest('GET', '/living')
 
       // Assert
       expect(response.status).toBe(400)
@@ -439,45 +578,35 @@ describe('Living World API Endpoints', () => {
       sanitizeId.mockReturnValueOnce({ sanitized: null, error: 'Invalid ID' })
 
       // Act
-      const response = await testRequest(app, 'GET', '/api/world/living?clientId=<invalid>')
+      const response = await testRequest('GET', '/living', { query: { clientId: '<invalid>' } })
 
       // Assert
       expect(response.status).toBe(400)
       expect(response.body.error).toBe('Invalid ID')
     })
 
-    it('returns 500 when getEvolutionWorldState returns error', async () => {
-      // Arrange
-      getEvolutionWorldState.mockReturnValue({ worldState: null, error: 'Database error' })
-
-      // Act
-      const response = await testRequest(app, 'GET', '/api/world/living?clientId=test-client')
-
-      // Assert
-      expect(response.status).toBe(500)
-      expect(response.body.error).toBe('Database error')
-    })
   })
 
   describe('Edge cases', () => {
     it('handles very long clientIds gracefully', async () => {
       // Arrange
       const longId = 'a'.repeat(500)
+      getEvolutionWorldState.mockReturnValueOnce({ worldState: null, error: null })
+      loadLivingWorldState.mockResolvedValueOnce(null)
       createInitialWorldState.mockReturnValue({
         clientId: longId,
         tier: 'barren',
         totalTopics: 0
       })
       buildBaseWorldPrompt.mockReturnValue('prompt')
-      generateWorldPieceImage.mockResolvedValue({
+      generateLivingWorldImage.mockResolvedValue({
         imageUrl: 'data:image/png;base64,img',
         error: null
       })
+      saveLivingWorldState.mockResolvedValueOnce(true)
 
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/initialize', {
-        clientId: longId
-      })
+      const response = await testRequest('POST', '/living/initialize', { body: { clientId: longId } })
 
       // Assert - should still process (sanitize handles length limits)
       expect(response.status).toBe(200)
@@ -485,20 +614,36 @@ describe('Living World API Endpoints', () => {
 
     it('handles unicode in topic names', async () => {
       // Arrange
-      getEvolutionWorldState.mockReturnValue({
-        worldState: { clientId: 'test', tier: 'barren' },
-        error: null
-      })
+      const existingWorldState = {
+        clientId: 'test-client',
+        worldImageUrl: 'data:image/png;base64,currentWorld',
+        tier: 'barren',
+        totalTopics: 1,
+        terrainProgress: {},
+        compositionMap: {
+          sky: { state: 'overcast', topics: [] },
+          background: { state: 'barren_hills', topics: [] },
+          midground: { state: 'empty_plains', topics: [] },
+          foreground: { state: 'cracked_earth', topics: [] },
+        },
+      }
+      getEvolutionWorldState
+        .mockReturnValueOnce({ worldState: existingWorldState, error: null })
+        .mockReturnValueOnce({ worldState: existingWorldState, error: null })
       evolveWorld.mockResolvedValue({
         changesApplied: { zone: 'nature', terrainEffect: 'water', layer: 'foreground' },
         tier: 'barren'
       })
+      buildEvolutionPrompt.mockReturnValue('Evolve prompt')
+      generateLivingWorldImage.mockResolvedValue({ imageUrl: 'data:image/png;base64,evolvedWorld', error: null })
 
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/evolve', {
-        clientId: 'test-client',
-        topicName: 'Quantum physics',
-        summary: 'Interesting science'
+      const response = await testRequest('POST', '/living/evolve', {
+        body: {
+          clientId: 'test-client',
+          topicName: 'Quantum physics',
+          summary: 'Interesting science',
+        }
       })
 
       // Assert
@@ -507,17 +652,17 @@ describe('Living World API Endpoints', () => {
 
     it('handles rate limiting error from Gemini', async () => {
       // Arrange
+      getEvolutionWorldState.mockReturnValueOnce({ worldState: null, error: null })
+      loadLivingWorldState.mockResolvedValueOnce(null)
       createInitialWorldState.mockReturnValue({ clientId: 'test', tier: 'barren' })
       buildBaseWorldPrompt.mockReturnValue('prompt')
-      generateWorldPieceImage.mockResolvedValue({
+      generateLivingWorldImage.mockResolvedValue({
         imageUrl: null,
         error: 'RATE_LIMITED'
       })
 
       // Act
-      const response = await testRequest(app, 'POST', '/api/world/living/initialize', {
-        clientId: 'test-client'
-      })
+      const response = await testRequest('POST', '/living/initialize', { body: { clientId: 'test-client' } })
 
       // Assert
       expect(response.status).toBe(429)

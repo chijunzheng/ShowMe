@@ -4,10 +4,33 @@
  *
  * WB010: After quiz pass, generates world pieces and adds them to user's world
  */
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import { UI_STATE } from '../constants/appConfig.js'
 import logger from '../utils/logger.js'
 import { getClientId } from '../utils/clientId'
+
+const MAX_LIVING_WORLD_SUMMARY_LENGTH = 900
+
+function buildLivingWorldSummaryFromSlides(slides = []) {
+  if (!Array.isArray(slides) || slides.length === 0) return ''
+
+  const text = slides
+    .filter(s => s?.type !== 'header' && s?.type !== 'suggestions')
+    .map((slide) => {
+      const subtitle = typeof slide.subtitle === 'string' ? slide.subtitle.trim() : ''
+      const script = typeof slide.script === 'string' ? slide.script.trim() : ''
+      if (subtitle && script) return `${subtitle}: ${script}`
+      return subtitle || script
+    })
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (!text) return ''
+  if (text.length <= MAX_LIVING_WORLD_SUMMARY_LENGTH) return text
+  return `${text.slice(0, MAX_LIVING_WORLD_SUMMARY_LENGTH).trim()}…`
+}
 
 /**
  * @param {Object} params - Hook parameters
@@ -57,6 +80,8 @@ export default function useQuizHandlers({
   tierUpgradeInfo,
   evolveWorld, // Living World: Function to evolve world after quiz pass
 }) {
+  const quizSummaryRef = useRef('')
+
   /**
    * WB018: Start quiz flow - fetch questions from API
    */
@@ -84,6 +109,8 @@ export default function useQuizHandlers({
       if (slidesPayload.length === 0) {
         throw new Error('No usable slide text available for quiz')
       }
+
+      quizSummaryRef.current = buildLivingWorldSummaryFromSlides(contentSlides)
 
       const languageSample = slidesPayload.find(slide => slide.subtitle || slide.script)
       const languageText = languageSample?.subtitle || languageSample?.script || ''
@@ -138,23 +165,26 @@ export default function useQuizHandlers({
     if (passed && quizTopicId && quizTopicName) {
       try {
         const clientId = getClientId()
+        const summaryFromSlides = quizSummaryRef.current
+          || buildLivingWorldSummaryFromSlides(visibleSlidesRef.current || [])
 
         logger.info('QUIZ', 'Evolving Living World for passed quiz', {
           topicName: quizTopicName,
-          percentage: results.percentage
+          percentage: results.percentage,
+          hasSummary: !!summaryFromSlides,
         })
 
         // Living World: Evolve the world with the learned topic
         if (evolveWorld) {
           const evolutionResult = await evolveWorld(
             quizTopicName,
-            '' // Could pass slide summary in future
+            summaryFromSlides
           )
 
           if (evolutionResult.success) {
             logger.info('QUIZ', 'Living World evolved successfully', {
               topicName: quizTopicName,
-              tier: evolutionResult.tier,
+              tier: evolutionResult.changesApplied?.newTier,
               changesApplied: evolutionResult.changesApplied
             })
 
@@ -216,7 +246,7 @@ export default function useQuizHandlers({
     }
 
     setUiState(UI_STATE.QUIZ_RESULTS)
-  }, [quizTopicId, quizTopicName, setQuizResults, setUiState, setWorldBadge, showTierUpgrade, evolveWorld])
+  }, [quizTopicId, quizTopicName, visibleSlidesRef, setQuizResults, setUiState, setWorldBadge, showTierUpgrade, evolveWorld])
 
   /**
    * WB018: Handle quiz skip

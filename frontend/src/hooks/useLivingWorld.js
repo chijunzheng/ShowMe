@@ -245,7 +245,8 @@ export default function useLivingWorld() {
   }, [fetchWorldState])
 
   // Derived state
-  const worldImageUrl = worldState?.imageUrl || null
+  // Backend uses `worldImageUrl` (WB023). Keep `imageUrl` as a legacy fallback.
+  const worldImageUrl = worldState?.worldImageUrl || worldState?.imageUrl || null
   const tier = worldState?.tier || null
   const hotspots = parseHotspots(worldState?.compositionMap)
 

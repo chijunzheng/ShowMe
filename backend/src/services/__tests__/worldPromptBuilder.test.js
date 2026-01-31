@@ -356,6 +356,7 @@ describe('worldPromptBuilder', () => {
         expect(types).toContain('weather')
         expect(types).toContain('life')
         expect(types).toContain('structure')
+        expect(types).toContain('abstract')
       })
 
       it('returns all keys from TERRAIN_EFFECTS', () => {
@@ -393,11 +394,10 @@ describe('worldPromptBuilder', () => {
         expect(effects).toEqual({})
       })
 
-      it('returns empty object for arcane zone (no effects defined)', () => {
+      it('returns arcane zone effects for arcane zone', () => {
         const effects = getTerrainEffectsForZone('arcane')
 
-        // Currently no terrain effects are defined for arcane zone
-        expect(Object.keys(effects).length).toBe(0)
+        expect(effects.abstract).toBeDefined()
       })
     })
   })

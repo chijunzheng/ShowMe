@@ -62,6 +62,11 @@ export const TERRAIN_EFFECTS = {
     zone: 'civilization',
     elements: ['path', 'bridge', 'cottage', 'village', 'castle'],
     description: 'Human-made structures from simple paths to grand architecture'
+  },
+  abstract: {
+    zone: 'arcane',
+    elements: ['floating crystals', 'glowing runes', 'mystic portal', 'constellation threads', 'aurora veil'],
+    description: 'Arcane phenomena that manifest as subtle magical forces and celestial patterns'
   }
 }
 
@@ -98,8 +103,8 @@ export function buildBaseWorldPrompt() {
 COMPOSITION (16:9 widescreen):
 - SKY: Soft gradient from dawn colors at the horizon to deeper blue above, wispy clouds catching early light
 - BACKGROUND: Distant mountains silhouetted against the sky, misty and ethereal
-- MIDGROUND: Rolling plains and gentle terrain, barren but not lifeless, hints of potential
-- FOREGROUND: Earth and rock formations, subtle texture, closest to viewer
+- MIDGROUND: Rolling plains and gentle terrain, barren but not a desert wasteland, sparse hardy grasses and a few low shrubs, hints of potential
+- FOREGROUND: Textured earth and rock formations with a shallow dry streambed and a few small reflective puddles catching dawn light
 
 MOOD & ATMOSPHERE:
 - Barren but beautiful - a world waiting to bloom
@@ -115,9 +120,9 @@ STYLE:
 RESTRICTIONS:
 - No text or UI elements
 - No buildings or human structures
-- No lush vegetation or forests
+- No lush vegetation or dense forests (keep greenery sparse and subtle)
 - No characters or creatures
-- Keep the landscape empty and waiting
+- Keep the landscape simple and uncluttered, like a pristine canvas
 
 This is the beginning - a pristine canvas where knowledge will bring life.`
 }
@@ -128,7 +133,10 @@ This is the beginning - a pristine canvas where knowledge will bring life.`
  * @param {Object} options - Evolution options
  * @param {string} options.topicName - The topic just learned
  * @param {'nature' | 'civilization' | 'arcane'} options.zone - The zone for this evolution
- * @param {'water' | 'mountains' | 'forest' | 'desert' | 'weather' | 'life' | 'structure'} options.terrainEffect - Type of terrain to add
+ * @param {'water' | 'mountains' | 'forest' | 'desert' | 'weather' | 'life' | 'structure' | 'abstract'} options.terrainEffect - Type of terrain to add
+ * @param {'sky' | 'background' | 'midground' | 'foreground'} [options.compositionLayer] - Where the new element should appear
+ * @param {string} [options.elementToAdd] - Specific element to add (overrides generic progression)
+ * @param {string} [options.placementHint] - Short placement hint within the frame
  * @param {string[]} [options.existingElements=[]] - What already exists in the world
  * @param {string} [options.styleDescriptor] - The world's style DNA
  * @returns {string} Complete prompt for evolution image generation
@@ -136,10 +144,15 @@ This is the beginning - a pristine canvas where knowledge will bring life.`
 export function buildEvolutionPrompt(options) {
   const {
     topicName,
+    summary = '',
     zone = 'nature',
     terrainEffect,
+    compositionLayer = null,
+    placementHint = null,
     existingElements = [],
-    styleDescriptor = WORLD_STYLE.base
+    styleDescriptor = WORLD_STYLE.base,
+    terrainLevel = 0,
+    elementToAdd = null
   } = options
 
   // Get terrain effect details, fallback to generic if not found
@@ -153,8 +166,37 @@ export function buildEvolutionPrompt(options) {
   const zoneStyle = ZONE_MODIFIERS[zone] || ZONE_MODIFIERS.nature
 
   // Select an appropriate element from the terrain progression
-  // For now, use the first element (simplest form)
-  const elementToAdd = terrain.elements[0]
+  const resolvedElementToAdd = (typeof elementToAdd === 'string' && elementToAdd.trim())
+    ? elementToAdd.trim()
+    : getTerrainElement(terrainEffect, terrainLevel)
+
+  const layerLabel = compositionLayer
+    ? String(compositionLayer).toUpperCase()
+    : null
+
+  const placementGuidance = compositionLayer
+    ? `
+TARGET LAYER: ${layerLabel}
+- SKY: upper third of the image (clouds, light, celestial, atmosphere)
+- BACKGROUND: near the horizon (distant mountains, mesas, far features)
+- MIDGROUND: center band (forests, structures, main landforms)
+- FOREGROUND: lower third (water edges, paths, close terrain details)`
+    : ''
+
+  const placementHintSection = (typeof placementHint === 'string' && placementHint.trim())
+    ? `\nPLACEMENT HINT: ${placementHint.trim()}`
+    : ''
+
+  // Prevent the model from "rewarding" topics by painting huge auroras/cloud ribbons in the sky
+  // unless this evolution is explicitly about sky phenomena.
+  const allowMajorSkyChanges = terrainEffect === 'weather' || terrainEffect === 'abstract' || compositionLayer === 'sky'
+  const skyRestrictions = allowMajorSkyChanges
+    ? ''
+    : `
+IMPORTANT RESTRICTION:
+- Do NOT introduce new auroras, swirling magical sky ribbons, or dramatic new cloud formations.
+- Keep the sky largely unchanged; focus the evolution in the ${layerLabel || 'ground layers'}.
+- The new element must NOT appear in the sky or float above the landscape.`
 
   // Build preservation list
   const preservationSection = existingElements.length > 0
@@ -165,14 +207,18 @@ Do not remove or alter these features. They are part of the world's history.`
 
   // Build the evolution prompt
   return `WORLD EVOLUTION: Learning about "${topicName}"
+${summary ? `\nTOPIC SUMMARY: ${summary}` : ''}
 
 The current world state includes: ${styleDescriptor}
 
 ${preservationSection}
+${placementGuidance}
+${placementHintSection}
 
 ADD TO THE WORLD:
 Based on learning about "${topicName}", add ${terrain.description.toLowerCase()}.
-Specifically, introduce a ${elementToAdd} that emerges naturally from the existing landscape.
+Specifically, introduce a ${resolvedElementToAdd} that emerges naturally from the existing landscape.
+${skyRestrictions}
 
 ZONE CHARACTERISTICS (${zone}):
 - Colors: ${zoneStyle.colors}
@@ -187,7 +233,7 @@ STYLE REQUIREMENTS:
 - The addition should feel organic, as if it grew from the world itself
 
 COMPOSITION GUIDANCE:
-- The new ${elementToAdd} should integrate with the existing landscape
+- The new ${resolvedElementToAdd} should integrate with the existing landscape
 - Maintain the 16:9 widescreen format
 - Keep the same camera angle and horizon position
 - Add visual interest without overwhelming existing elements

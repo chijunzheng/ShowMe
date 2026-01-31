@@ -19,17 +19,47 @@ import logger from '../utils/logger.js'
 
 // Initialize Firestore
 let db = null
+let firestoreUnavailable = false
+let warnedLocalFallback = false
+const localProgress = new Map()
+
+function shouldUseLocalProgress() {
+  if (process.env.SHOWME_LOCAL_PROGRESS === '1') return true
+  if (process.env.NODE_ENV === 'production') return false
+  if (!process.env.GOOGLE_CLOUD_PROJECT && !process.env.GCLOUD_PROJECT) return true
+  return firestoreUnavailable
+}
+
+function isFirestoreUnavailableError(error) {
+  if (!error) return false
+  if (typeof error.code === 'number' && [5, 7, 14, 16].includes(error.code)) return true
+  const message = String(error.message || '')
+  return /NOT_FOUND|PERMISSION_DENIED|UNAUTHENTICATED|UNAVAILABLE|credentials|default credentials|Unable to detect a Project Id|Project Id|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT/i.test(message)
+}
+
+function markFirestoreUnavailable(error) {
+  if (process.env.NODE_ENV === 'production') return
+  if (!isFirestoreUnavailableError(error)) return
+  if (!firestoreUnavailable) {
+    firestoreUnavailable = true
+  }
+  if (!warnedLocalFallback) {
+    warnedLocalFallback = true
+    logger.warn('PROGRESS', 'Falling back to local progress store', { error: error?.message })
+  }
+}
 
 function getFirestore() {
   if (db) return db
 
   try {
     db = new Firestore({
-      projectId: process.env.GOOGLE_CLOUD_PROJECT,
+      projectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT,
     })
     logger.info('PROGRESS', 'Firestore connected')
     return db
   } catch (error) {
+    markFirestoreUnavailable(error)
     logger.error('PROGRESS', 'Failed to connect to Firestore', { error: error.message })
     return null
   }
@@ -155,6 +185,98 @@ function createDefaultProgress(clientId) {
   }
 }
 
+function getLocalProgress(clientId) {
+  if (localProgress.has(clientId)) {
+    return localProgress.get(clientId)
+  }
+  const progress = createDefaultProgress(clientId)
+  localProgress.set(clientId, progress)
+  return progress
+}
+
+function setLocalProgress(clientId, progress) {
+  localProgress.set(clientId, progress)
+}
+
+function normalizeProgress(data, clientId) {
+  const base = createDefaultProgress(clientId)
+  if (!data || typeof data !== 'object') {
+    return base
+  }
+
+  const merged = { ...base, ...data, clientId }
+
+  return {
+    ...merged,
+    lastActiveDate: merged.lastActiveDate?.toDate?.() || merged.lastActiveDate,
+    createdAt: merged.createdAt?.toDate?.() || merged.createdAt,
+    updatedAt: merged.updatedAt?.toDate?.() || merged.updatedAt,
+    badges: Array.isArray(merged.badges) ? merged.badges : [],
+    badgeUnlockDates: Object.fromEntries(
+      Object.entries(merged.badgeUnlockDates || {}).map(([k, v]) => [k, v?.toDate?.() || v])
+    )
+  }
+}
+
+function applyActivityUpdate(progress, action, now) {
+  const updated = {
+    ...progress,
+    badges: Array.isArray(progress.badges) ? [...progress.badges] : [],
+    badgeUnlockDates: { ...(progress.badgeUnlockDates || {}) },
+  }
+
+  // Update streak
+  if (updated.lastActiveDate) {
+    if (isNextDay(updated.lastActiveDate, now)) {
+      // Next day - increment streak
+      updated.streakCount += 1
+      if (updated.streakCount > updated.longestStreak) {
+        updated.longestStreak = updated.streakCount
+      }
+    } else if (!isSameDay(updated.lastActiveDate, now)) {
+      // Gap day - reset streak to 1
+      updated.streakCount = 1
+    }
+    // Same day - no change to streak
+  } else {
+    // First activity ever
+    updated.streakCount = 1
+    updated.longestStreak = 1
+  }
+
+  // Update based on action
+  switch (action) {
+    case 'question_asked':
+      updated.totalQuestions += 1
+      updated.points += POINTS.QUESTION_ASKED
+      break
+    case 'socratic_answered':
+      updated.totalSocraticAnswers += 1
+      updated.points += POINTS.SOCRATIC_ANSWERED
+      break
+    case 'deep_level_used':
+      updated.deepLevelUsed = true
+      updated.points += POINTS.DEEP_LEVEL_USED
+      break
+    default:
+      logger.warn('PROGRESS', 'Unknown action type', { action })
+  }
+
+  updated.lastActiveDate = now
+  updated.updatedAt = now
+
+  // Check for new badge unlocks
+  const newBadges = checkBadgeUnlocks(updated)
+
+  // Add new badges with unlock dates
+  for (const badgeId of newBadges) {
+    updated.badges.push(badgeId)
+    updated.badgeUnlockDates[badgeId] = now
+  }
+
+  return { progress: updated, newBadges }
+}
+
 /**
  * Check which badges should be unlocked based on current progress
  * @param {Object} progress - Current user progress
@@ -199,8 +321,16 @@ function checkBadgeUnlocks(progress) {
  * @returns {Promise<{progress: Object|null, error: string|null}>}
  */
 export async function getUserProgress(clientId) {
+  if (shouldUseLocalProgress()) {
+    return { progress: getLocalProgress(clientId), error: null }
+  }
+
   const firestore = getFirestore()
   if (!firestore) {
+    if (process.env.NODE_ENV !== 'production') {
+      firestoreUnavailable = true
+      return { progress: getLocalProgress(clientId), error: null }
+    }
     return { progress: null, error: 'FIRESTORE_NOT_AVAILABLE' }
   }
 
@@ -213,20 +343,15 @@ export async function getUserProgress(clientId) {
       return { progress: createDefaultProgress(clientId), error: null }
     }
 
-    const data = doc.data()
     return {
-      progress: {
-        ...data,
-        lastActiveDate: data.lastActiveDate?.toDate?.() || data.lastActiveDate,
-        createdAt: data.createdAt?.toDate?.() || data.createdAt,
-        updatedAt: data.updatedAt?.toDate?.() || data.updatedAt,
-        badgeUnlockDates: Object.fromEntries(
-          Object.entries(data.badgeUnlockDates || {}).map(([k, v]) => [k, v?.toDate?.() || v])
-        )
-      },
+      progress: normalizeProgress(doc.data(), clientId),
       error: null
     }
   } catch (error) {
+    markFirestoreUnavailable(error)
+    if (shouldUseLocalProgress()) {
+      return { progress: getLocalProgress(clientId), error: null }
+    }
     logger.error('PROGRESS', 'Failed to get user progress', { clientId, error: error.message })
     return { progress: null, error: error.message }
   }
@@ -239,8 +364,22 @@ export async function getUserProgress(clientId) {
  * @returns {Promise<{progress: Object|null, newBadges: string[], error: string|null}>}
  */
 export async function recordActivity(clientId, action) {
+  if (shouldUseLocalProgress()) {
+    const now = new Date()
+    const { progress, newBadges } = applyActivityUpdate(getLocalProgress(clientId), action, now)
+    setLocalProgress(clientId, progress)
+    return { progress, newBadges, error: null }
+  }
+
   const firestore = getFirestore()
   if (!firestore) {
+    if (process.env.NODE_ENV !== 'production') {
+      firestoreUnavailable = true
+      const now = new Date()
+      const { progress, newBadges } = applyActivityUpdate(getLocalProgress(clientId), action, now)
+      setLocalProgress(clientId, progress)
+      return { progress, newBadges, error: null }
+    }
     return { progress: null, newBadges: [], error: 'FIRESTORE_NOT_AVAILABLE' }
   }
 
@@ -252,78 +391,32 @@ export async function recordActivity(clientId, action) {
     if (!doc.exists) {
       progress = createDefaultProgress(clientId)
     } else {
-      const data = doc.data()
-      progress = {
-        ...data,
-        lastActiveDate: data.lastActiveDate?.toDate?.() || data.lastActiveDate,
-        badgeUnlockDates: data.badgeUnlockDates || {}
-      }
+      progress = normalizeProgress(doc.data(), clientId)
     }
 
     const now = new Date()
-
-    // Update streak
-    if (progress.lastActiveDate) {
-      if (isNextDay(progress.lastActiveDate, now)) {
-        // Next day - increment streak
-        progress.streakCount += 1
-        if (progress.streakCount > progress.longestStreak) {
-          progress.longestStreak = progress.streakCount
-        }
-      } else if (!isSameDay(progress.lastActiveDate, now)) {
-        // Gap day - reset streak to 1
-        progress.streakCount = 1
-      }
-      // Same day - no change to streak
-    } else {
-      // First activity ever
-      progress.streakCount = 1
-      progress.longestStreak = 1
-    }
-
-    // Update based on action
-    switch (action) {
-      case 'question_asked':
-        progress.totalQuestions += 1
-        progress.points += POINTS.QUESTION_ASKED
-        break
-      case 'socratic_answered':
-        progress.totalSocraticAnswers += 1
-        progress.points += POINTS.SOCRATIC_ANSWERED
-        break
-      case 'deep_level_used':
-        progress.deepLevelUsed = true
-        progress.points += POINTS.DEEP_LEVEL_USED
-        break
-      default:
-        logger.warn('PROGRESS', 'Unknown action type', { action })
-    }
-
-    progress.lastActiveDate = now
-    progress.updatedAt = now
-
-    // Check for new badge unlocks
-    const newBadges = checkBadgeUnlocks(progress)
-
-    // Add new badges with unlock dates
-    for (const badgeId of newBadges) {
-      progress.badges.push(badgeId)
-      progress.badgeUnlockDates[badgeId] = now
-    }
+    const { progress: updatedProgress, newBadges } = applyActivityUpdate(progress, action, now)
 
     // Save to Firestore
-    await docRef.set(progress)
+    await docRef.set(updatedProgress)
 
     logger.info('PROGRESS', 'Activity recorded', {
       clientId,
       action,
-      streakCount: progress.streakCount,
-      points: progress.points,
+      streakCount: updatedProgress.streakCount,
+      points: updatedProgress.points,
       newBadges
     })
 
-    return { progress, newBadges, error: null }
+    return { progress: updatedProgress, newBadges, error: null }
   } catch (error) {
+    markFirestoreUnavailable(error)
+    if (shouldUseLocalProgress()) {
+      const now = new Date()
+      const { progress, newBadges } = applyActivityUpdate(getLocalProgress(clientId), action, now)
+      setLocalProgress(clientId, progress)
+      return { progress, newBadges, error: null }
+    }
     logger.error('PROGRESS', 'Failed to record activity', { clientId, action, error: error.message })
     return { progress: null, newBadges: [], error: error.message }
   }
