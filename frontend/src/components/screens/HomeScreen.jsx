@@ -6,9 +6,11 @@
  * - Level selection cards (Simple, Standard, Deep)
  * - Text fallback for typing questions
  * - StrengthSection for spaced repetition review
+ * - Surprise Me button for random topics
  */
+import { useState } from 'react'
 import LevelCard from '../LevelCard.jsx'
-import { StrengthSection } from '../Home'
+import { StrengthSection, RandomTopicModal } from '../Home'
 import { playMicOnSound } from '../../utils/soundEffects.js'
 import { LEVEL_CONFIG, EXPLANATION_LEVEL, UI_STATE } from '../../constants/appConfig.js'
 
@@ -54,6 +56,9 @@ export default function HomeScreen({
   onStartReview,
   isReviewLoading = false,
 }) {
+  // State for random topic modal
+  const [showRandomModal, setShowRandomModal] = useState(false)
+
   function handleLevelSelect(level) {
     playMicOnSound()
     setSelectedLevel(level)
@@ -64,6 +69,17 @@ export default function HomeScreen({
     setIsMicEnabled(true)
     setAllowAutoListen(true)
     setUiState(UI_STATE.LISTENING)
+  }
+
+  // Handle random topic selection from modal
+  function handleRandomTopicSelect(topic, level) {
+    setShowRandomModal(false)
+    setSelectedLevel(level)
+    if (level === EXPLANATION_LEVEL.DEEP) {
+      recordDeepLevelUsed()
+    }
+    // Submit the topic directly to generation
+    handleQuestion(topic)
   }
 
   function handleTextSubmit(e) {
@@ -116,6 +132,31 @@ export default function HomeScreen({
             />
           </div>
         ))}
+
+      </div>
+
+      {/* Surprise Me button - compact pill, secondary action */}
+      <div
+        className="animate-fade-in flex justify-center"
+        style={{ animationDelay: '240ms' }}
+      >
+        <button
+          onClick={() => setShowRandomModal(true)}
+          className={`
+            px-5 py-2 rounded-full transition-all duration-200
+            flex items-center gap-2
+            bg-purple-50 dark:bg-purple-900/30
+            border border-dashed border-purple-200 dark:border-purple-700
+            hover:border-purple-400 dark:hover:border-purple-500
+            hover:bg-purple-100 dark:hover:bg-purple-900/50
+            active:scale-[0.97]
+            text-purple-600 dark:text-purple-300
+            text-sm
+          `}
+        >
+          <span className="text-base">🎲</span>
+          <span className="font-medium">Surprise Me!</span>
+        </button>
       </div>
 
       {/* Text fallback */}
@@ -183,6 +224,13 @@ export default function HomeScreen({
           </button>
         </div>
       )}
+
+      {/* Random Topic Modal */}
+      <RandomTopicModal
+        isOpen={showRandomModal}
+        onClose={() => setShowRandomModal(false)}
+        onSelectLevel={handleRandomTopicSelect}
+      />
     </div>
   )
 }

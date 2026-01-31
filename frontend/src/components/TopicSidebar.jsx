@@ -293,23 +293,25 @@ function TopicSidebar({
         role="navigation"
         aria-label="Topic navigation"
       >
-        {/* New Topic Button - TOP */}
+        {/* New Topic Button - TOP (subtle outline style) */}
         <div className="p-3 border-b border-cream-200">
           <button
             onClick={handleNewTopicClick}
             className="
-              w-full flex items-center justify-center gap-2
-              px-4 py-2.5 min-h-[44px]
-              bg-primary text-white font-medium
-              rounded-lg
-              hover:bg-primary/90
+              w-full flex items-center justify-center gap-1.5
+              px-3 py-2 min-h-[40px]
+              bg-transparent text-gray-500
+              border border-gray-300 dark:border-gray-600
+              rounded-lg text-sm
+              hover:bg-gray-100 hover:text-gray-700 hover:border-gray-400
+              dark:hover:bg-gray-800 dark:hover:text-gray-300
               focus:outline-none focus:ring-2 focus:ring-primary/50 focus:ring-offset-2
               transition-colors
             "
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              className="w-5 h-5"
+              className="w-4 h-4"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"

@@ -4,3 +4,4 @@
  */
 
 export { default as StrengthSection } from './StrengthSection'
+export { default as RandomTopicModal } from './RandomTopicModal'

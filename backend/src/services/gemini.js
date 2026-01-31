@@ -1582,6 +1582,69 @@ Example: ["How do black holes work?", "Why do we dream?", "How does WiFi work?"]
 }
 
 /**
+ * Generate a random educational topic for the "Surprise Me" feature
+ * Returns a curiosity-sparking question with category and emoji
+ *
+ * @returns {Promise<{topic: string, category: string, emoji: string, error: string|null}>}
+ */
+export async function generateRandomTopic() {
+  if (!isGeminiAvailable()) {
+    return { topic: null, category: null, emoji: null, error: 'API_KEY_MISSING' }
+  }
+
+  try {
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+
+    const prompt = `Generate ONE random educational topic that would make an interesting visual slideshow.
+
+Requirements:
+- Topic should spark curiosity and be visually explainable
+- Phrase it as a question (e.g., "Why do cats purr?" or "How do volcanoes form?")
+- Keep it concise (under 10 words)
+- Avoid controversial, political, or sensitive topics
+- Mix of categories: science, nature, technology, history, animals, space, human body, etc.
+
+Return ONLY valid JSON (no markdown):
+{
+  "topic": "the question",
+  "category": "short category name",
+  "emoji": "one relevant emoji"
+}
+
+Example response:
+{"topic": "Why do fireflies glow?", "category": "Biology", "emoji": "🪲"}`
+
+    const response = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: prompt,
+    })
+
+    const text = response.text || ''
+    const jsonStr = extractJSON(text)
+    const result = JSON.parse(jsonStr)
+
+    if (!result.topic || typeof result.topic !== 'string') {
+      return { topic: null, category: null, emoji: null, error: 'INVALID_RESPONSE' }
+    }
+
+    return {
+      topic: result.topic.trim(),
+      category: result.category?.trim() || 'General',
+      emoji: result.emoji || '✨',
+      error: null,
+    }
+  } catch (error) {
+    console.error('[Gemini] Random topic error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { topic: null, category: null, emoji: null, error: 'RATE_LIMITED' }
+    }
+
+    return { topic: null, category: null, emoji: null, error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
  * Generate a Socratic question based on slideshow content
  * SOCRATIC-001: Probing questions to deepen understanding
  *
