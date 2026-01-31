@@ -13,6 +13,7 @@
 
 import { GoogleGenAI } from '@google/genai'
 import { GoogleAuth } from 'google-auth-library'
+import { extractJSON } from '../utils/json.js'
 
 // Configuration constants
 const TEXT_MODEL = 'gemini-3-flash-preview'
@@ -50,110 +51,6 @@ export function detectLanguage(text) {
 
   if (hasChineseChars) return 'zh'
   return 'en'
-}
-
-/**
- * Extract JSON from text that may be wrapped in markdown code blocks
- * Handles various formats returned by different Gemini models
- * @param {string} text - Raw text response from Gemini
- * @returns {string} Extracted JSON string ready for parsing
- */
-function extractJSON(text) {
-  if (!text) return '{}'
-
-  // Debug: log first 50 chars and their char codes
-  const preview = text.substring(0, 50)
-  const charCodes = [...preview].map(c => c.charCodeAt(0))
-  console.log('[extractJSON] First 50 chars:', JSON.stringify(preview))
-  console.log('[extractJSON] Char codes:', charCodes.slice(0, 20))
-
-  // Method 1: Match ```json ... ``` anywhere (no $ anchor - allows trailing content)
-  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/)
-  if (codeBlockMatch && codeBlockMatch[1]) {
-    const extracted = codeBlockMatch[1].trim()
-    console.log('[extractJSON] Matched code block, extracted length:', extracted.length)
-    return extracted
-  }
-
-  // Method 1b: Handle truncated response - starts with ```json but no closing ```
-  if (text.startsWith('```')) {
-    // Skip opening fence and optional 'json' label
-    let startIdx = 3
-    if (text.slice(startIdx, startIdx + 4).toLowerCase() === 'json') {
-      startIdx += 4
-    }
-    // Skip whitespace
-    while (startIdx < text.length && /\s/.test(text[startIdx])) {
-      startIdx++
-    }
-    const remaining = text.slice(startIdx).trim()
-    console.log('[extractJSON] Truncated code block, extracting from position:', startIdx)
-
-    // Try to find JSON content
-    const firstBraceInRemaining = remaining.indexOf('{')
-    if (firstBraceInRemaining !== -1) {
-      const lastBraceInRemaining = remaining.lastIndexOf('}')
-      if (lastBraceInRemaining > firstBraceInRemaining) {
-        console.log('[extractJSON] Truncated: brace extraction from remaining')
-        return remaining.slice(firstBraceInRemaining, lastBraceInRemaining + 1)
-      } else {
-        // No closing brace found - extract partial JSON for repairJSON to complete
-        console.log('[extractJSON] Truncated: no closing brace, extracting partial JSON')
-        return remaining.slice(firstBraceInRemaining)
-      }
-    }
-  }
-
-  // Method 2: Find balanced braces for JSON object
-  const firstBrace = text.indexOf('{')
-  if (firstBrace !== -1) {
-    let depth = 0
-    let inString = false
-    let escapeNext = false
-
-    for (let i = firstBrace; i < text.length; i++) {
-      const char = text[i]
-
-      if (escapeNext) {
-        escapeNext = false
-        continue
-      }
-
-      if (char === '\\' && inString) {
-        escapeNext = true
-        continue
-      }
-
-      if (char === '"' && !escapeNext) {
-        inString = !inString
-        continue
-      }
-
-      if (!inString) {
-        if (char === '{') depth++
-        else if (char === '}') {
-          depth--
-          if (depth === 0) {
-            console.log('[extractJSON] Balanced brace extraction from', firstBrace, 'to', i)
-            return text.slice(firstBrace, i + 1)
-          }
-        }
-      }
-    }
-
-    // No balanced closing brace - extract partial JSON for repairJSON to complete
-    const lastBrace = text.lastIndexOf('}')
-    if (lastBrace > firstBrace) {
-      console.log('[extractJSON] Fallback brace extraction from', firstBrace, 'to', lastBrace)
-      return text.slice(firstBrace, lastBrace + 1)
-    } else {
-      console.log('[extractJSON] No closing brace, extracting partial JSON from', firstBrace)
-      return text.slice(firstBrace)
-    }
-  }
-
-  console.log('[extractJSON] No extraction matched, returning raw text')
-  return text.trim()
 }
 
 /**
@@ -2176,8 +2073,28 @@ Generate 3-4 questions that are visual, fun, and encouraging.
 
 REQUIRED QUESTION TYPES (pick from these):
 - yes_no: Thought-provoking true/false claims (see guidelines below)
+- odd_one_out: "Which one doesn't belong?" - 4 items, one is different (GREAT for visual thinking!)
+- sort_groups: Sort items into 2 categories (e.g., "Hot vs Cold", "Living vs Non-living")
 - picture_match: "Which picture shows [concept]?" (references slide images)
 - fill_blank: Single-word answers only
+
+ODD ONE OUT GUIDELINES (engaging categorization game!):
+- Show 4 items where 3 belong to a category and 1 is clearly different
+- Can use text only, or text with images (imageUrl is optional)
+- Make the odd item obviously different but still related to the topic
+- GOOD examples:
+  * Animals: Dog, Cat, Fish, Chair (Chair is not an animal!)
+  * Planets: Earth, Mars, Moon, Venus (Moon is not a planet!)
+  * Fruits: Apple, Banana, Carrot, Orange (Carrot is a vegetable!)
+
+SORT GROUPS GUIDELINES (fun categorization activity!):
+- Give 4-6 items to sort into exactly 2 groups
+- Groups should have clear, distinct categories
+- Use simple icons/emojis for groups
+- GOOD examples:
+  * "Hot vs Cold": Sun, Ice cream, Fire, Snowman
+  * "Living vs Non-living": Dog, Rock, Tree, Car
+  * "Day vs Night": Sun, Moon, Stars, Sunrise
 
 YES/NO QUESTION GUIDELINES (CRITICAL - make these engaging!):
 - Present interesting CLAIMS about the topic, not obvious facts
@@ -2198,7 +2115,7 @@ YES/NO QUESTION GUIDELINES (CRITICAL - make these engaging!):
 STYLE GUIDELINES:
 - Use everyday language a child can understand
 - Keep question text under 15 words
-- Use encouraging, playful language ("Can you find...", "Which picture shows...")
+- Use encouraging, playful language ("Can you find...", "Which one doesn't belong?")
 - Focus on visual recognition and deeper understanding
 - No technical terminology`,
 
@@ -2299,6 +2216,50 @@ fill_blank (simple):
   "wordOptions": ["green", "blue", "red", "yellow"],
   "explanation": "Plants are green because of chlorophyll!"
 }
+
+odd_one_out (Find what doesn't belong - HIGHLY ENGAGING!):
+{
+  "id": "q4",
+  "type": "odd_one_out",
+  "question": "Which one doesn't belong?",
+  "slideReference": 0,
+  "items": [
+    { "text": "Sunlight", "isOdd": false },
+    { "text": "Water", "isOdd": false },
+    { "text": "Carbon dioxide", "isOdd": false },
+    { "text": "Pizza", "isOdd": true }
+  ],
+  "explanation": "Pizza is not something plants need! Plants need sunlight, water, and carbon dioxide to make food."
+}
+
+sort_groups (Category sorting - FUN and INTERACTIVE!):
+{
+  "id": "q5",
+  "type": "sort_groups",
+  "question": "Sort these into the right groups!",
+  "slideReference": 1,
+  "items": ["Sunlight", "Oxygen", "Water", "Sugar"],
+  "groups": [
+    { "name": "Plants Need", "icon": "🌱" },
+    { "name": "Plants Make", "icon": "✨" }
+  ],
+  "correctSorting": {
+    "Plants Need": ["Sunlight", "Water"],
+    "Plants Make": ["Oxygen", "Sugar"]
+  },
+  "explanation": "Plants take in sunlight and water, then use photosynthesis to make oxygen and sugar!"
+}
+
+ODD_ONE_OUT REQUIREMENTS:
+- MUST have exactly 4 items
+- Exactly ONE item must have "isOdd": true
+- The odd item should be obviously different from the others
+- Text field is required, imageUrl is optional
+
+SORT_GROUPS REQUIREMENTS:
+- MUST have exactly 2 groups with name and icon
+- 4-6 items to sort between the groups
+- correctSorting must map each group name to its correct items
 
 FILL_BLANK REQUIREMENTS:
 - MUST include wordOptions array with 4 words: the correct answer + 3 plausible distractors
@@ -2501,8 +2462,8 @@ Generate the quiz questions now:`
     }
 
     // Validate and normalize each question
-    // Extended types: simple level adds yes_no, picture_match; deep level adds find_error, apply_concept
-    const validTypes = ['mcq', 'fill_blank', 'voice', 'yes_no', 'picture_match', 'find_error', 'apply_concept']
+    // Extended types: simple level adds yes_no, picture_match, odd_one_out, sort_groups, spot_it; standard adds sequence; deep level adds find_error, apply_concept
+    const validTypes = ['mcq', 'fill_blank', 'voice', 'yes_no', 'picture_match', 'find_error', 'apply_concept', 'odd_one_out', 'sort_groups', 'spot_it', 'sequence']
     const validatedQuestions = parsed.questions
       .filter(q => q && typeof q === 'object')
       .map((q, index) => {
@@ -2576,6 +2537,61 @@ Generate the quiz questions now:`
             ? q.expectedTopics
             : []
           question.sampleAnswer = q.sampleAnswer || ''
+        } else if (question.type === 'odd_one_out') {
+          // Simple level: find what doesn't belong (4 items, 1 is odd)
+          question.items = Array.isArray(q.items)
+            ? q.items.slice(0, 4).map(item => ({
+                text: item.text || '',
+                imageUrl: item.imageUrl || null,
+                isOdd: !!item.isOdd
+              }))
+            : []
+          // Ensure exactly one item is marked as odd
+          const oddItems = question.items.filter(item => item.isOdd)
+          if (oddItems.length !== 1 && question.items.length > 0) {
+            // Fix: mark the last item as odd if none marked
+            question.items.forEach((item, i) => {
+              item.isOdd = i === question.items.length - 1
+            })
+          }
+          // Set correctAnswer to the odd item's text
+          const oddItem = question.items.find(item => item.isOdd)
+          if (oddItem) {
+            question.correctAnswer = oddItem.text
+          }
+        } else if (question.type === 'sort_groups') {
+          // Simple level: sort items into 2 categories
+          question.items = Array.isArray(q.items) ? q.items.slice(0, 6) : []
+          question.groups = Array.isArray(q.groups)
+            ? q.groups.slice(0, 2).map(g => ({
+                name: g.name || '',
+                icon: g.icon || ''
+              }))
+            : []
+          question.correctSorting = q.correctSorting && typeof q.correctSorting === 'object'
+            ? q.correctSorting
+            : {}
+          // Set correctAnswer to a summary for display
+          question.correctAnswer = question.groups.map(g =>
+            `${g.name}: ${(question.correctSorting[g.name] || []).join(', ')}`
+          ).join(' | ')
+        } else if (question.type === 'spot_it') {
+          // Simple level: find/tap a specific area in an image
+          question.correctArea = q.correctArea && typeof q.correctArea === 'object'
+            ? {
+                x: q.correctArea.x || 0.5,
+                y: q.correctArea.y || 0.5,
+                radius: q.correctArea.radius || 0.15
+              }
+            : { x: 0.5, y: 0.5, radius: 0.15 }
+          if (q.hint) question.hint = q.hint
+        } else if (question.type === 'sequence') {
+          // Standard level: put items in correct order
+          question.items = Array.isArray(q.items) ? q.items.slice(0, 6) : []
+          question.correctSequence = Array.isArray(q.correctSequence)
+            ? q.correctSequence
+            : question.items.map((_, i) => i) // Default: current order is correct
+          question.correctAnswer = question.correctSequence.map(i => question.items[i] || '').join(' → ')
         }
 
         return question

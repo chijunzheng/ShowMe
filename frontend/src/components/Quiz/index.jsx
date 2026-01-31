@@ -17,6 +17,8 @@ import FillBlankQuestion from './FillBlankQuestion'
 import VoiceQuestion from './VoiceQuestion'
 import YesNoQuestion from './YesNoQuestion'
 import PictureMatchQuestion from './PictureMatchQuestion'
+import OddOneOutQuestion from './OddOneOutQuestion'
+import SortGroupsQuestion from './SortGroupsQuestion'
 import FindErrorQuestion from './FindErrorQuestion'
 import SpotItQuestion from './SpotItQuestion'
 import SequenceQuestion from './SequenceQuestion'
@@ -33,7 +35,7 @@ import { fuzzyMatch } from '../../utils/fuzzyMatch'
 
 /**
  * Question types supported by the quiz
- * @typedef {'mcq' | 'fill_blank' | 'true_false' | 'voice' | 'yes_no' | 'picture_match' | 'find_error' | 'spot_it' | 'sequence' | 'apply_concept'} QuestionType
+ * @typedef {'mcq' | 'fill_blank' | 'true_false' | 'voice' | 'yes_no' | 'picture_match' | 'odd_one_out' | 'sort_groups' | 'find_error' | 'spot_it' | 'sequence' | 'apply_concept'} QuestionType
  */
 
 /**
@@ -302,6 +304,89 @@ export default function Quiz({
     setState(QUIZ_STATE.SHOWING_FEEDBACK)
   }, [currentQuestion, gamification])
 
+  // Handle Odd One Out answer
+  // odd_one_out type expects the index of the item user selected
+  const handleOddOneOutAnswer = useCallback((selectedIndex) => {
+    if (!currentQuestion || currentQuestion.type !== 'odd_one_out') return
+
+    // Find the correct answer (the odd item)
+    const correctIndex = currentQuestion.items?.findIndex(item => item.isOdd) ?? -1
+    const isCorrect = selectedIndex === correctIndex
+
+    // Record answer with gamification
+    const gamificationResult = gamification.recordAnswer(isCorrect, false)
+
+    const feedback = {
+      isCorrect,
+      isPartial: false,
+      similarity: isCorrect ? 1 : 0,
+      questionId: currentQuestion.id,
+      userAnswer: selectedIndex,
+      correctAnswer: correctIndex,
+      explanation: currentQuestion.explanation,
+      xpGained: gamificationResult.xpGained,
+      speedBonus: gamificationResult.speedBonus
+    }
+
+    setCurrentFeedback(feedback)
+    setState(QUIZ_STATE.SHOWING_FEEDBACK)
+  }, [currentQuestion, gamification])
+
+  // Handle Sort Groups answer
+  // sort_groups type expects an object mapping group names to arrays of items
+  const handleSortGroupsAnswer = useCallback((userSorting) => {
+    if (!currentQuestion || currentQuestion.type !== 'sort_groups') return
+
+    const correctSorting = currentQuestion.correctSorting || {}
+    let isCorrect = true
+    let correctCount = 0
+    let totalItems = 0
+
+    // Check if each item is in the correct group
+    Object.keys(correctSorting).forEach(groupName => {
+      const correctItems = correctSorting[groupName] || []
+      const userItems = userSorting[groupName] || []
+
+      correctItems.forEach(item => {
+        totalItems++
+        if (userItems.includes(item)) {
+          correctCount++
+        } else {
+          isCorrect = false
+        }
+      })
+
+      // Also check if user put any wrong items in this group
+      userItems.forEach(item => {
+        if (!correctItems.includes(item)) {
+          isCorrect = false
+        }
+      })
+    })
+
+    // Partial credit if at least half are correct
+    const isPartial = !isCorrect && correctCount >= totalItems / 2
+    const similarity = totalItems > 0 ? correctCount / totalItems : 0
+
+    // Record answer with gamification
+    const gamificationResult = gamification.recordAnswer(isCorrect, isPartial)
+
+    const feedback = {
+      isCorrect,
+      isPartial,
+      similarity,
+      questionId: currentQuestion.id,
+      userAnswer: userSorting,
+      correctAnswer: correctSorting,
+      explanation: currentQuestion.explanation,
+      xpGained: gamificationResult.xpGained,
+      speedBonus: gamificationResult.speedBonus
+    }
+
+    setCurrentFeedback(feedback)
+    setState(QUIZ_STATE.SHOWING_FEEDBACK)
+  }, [currentQuestion, gamification])
+
   // Handle Find Error answer
   // find_error type expects text input describing the error
   const handleFindErrorAnswer = useCallback((userAnswer) => {
@@ -526,6 +611,7 @@ export default function Quiz({
         score: totalScore,
         percentage: Math.round((totalScore / totalQuestions) * 100),
         answers: finalAnswers,
+        questions,
         // Gamification data
         level,
         ...gamificationResults
@@ -796,6 +882,75 @@ export default function Quiz({
           </div>
         )}
 
+        {/* Odd One Out Question */}
+        {currentQuestion?.type === 'odd_one_out' && state === QUIZ_STATE.ANSWERING && (
+          <OddOneOutQuestion
+            key={currentQuestion.id}
+            question={currentQuestion.question}
+            items={currentQuestion.items}
+            onAnswer={handleOddOneOutAnswer}
+            showFeedback={false}
+            explanation={currentQuestion.explanation}
+          />
+        )}
+
+        {/* Odd One Out with feedback */}
+        {currentQuestion?.type === 'odd_one_out' && state === QUIZ_STATE.SHOWING_FEEDBACK && currentFeedback && (
+          <div className="space-y-6">
+            <OddOneOutQuestion
+              key={`${currentQuestion.id}-feedback`}
+              question={currentQuestion.question}
+              items={currentQuestion.items}
+              onAnswer={() => {}}
+              showFeedback={true}
+              userAnswer={currentFeedback.userAnswer}
+              explanation={currentQuestion.explanation}
+            />
+            <QuizFeedback
+              isCorrect={currentFeedback.isCorrect}
+              explanation={currentQuestion.explanation}
+              onContinue={handleContinue}
+            />
+          </div>
+        )}
+
+        {/* Sort Groups Question */}
+        {currentQuestion?.type === 'sort_groups' && state === QUIZ_STATE.ANSWERING && (
+          <SortGroupsQuestion
+            key={currentQuestion.id}
+            question={currentQuestion.question}
+            items={currentQuestion.items}
+            groups={currentQuestion.groups}
+            correctSorting={currentQuestion.correctSorting}
+            onAnswer={handleSortGroupsAnswer}
+            showFeedback={false}
+            explanation={currentQuestion.explanation}
+          />
+        )}
+
+        {/* Sort Groups with feedback */}
+        {currentQuestion?.type === 'sort_groups' && state === QUIZ_STATE.SHOWING_FEEDBACK && currentFeedback && (
+          <div className="space-y-6">
+            <SortGroupsQuestion
+              key={`${currentQuestion.id}-feedback`}
+              question={currentQuestion.question}
+              items={currentQuestion.items}
+              groups={currentQuestion.groups}
+              correctSorting={currentQuestion.correctSorting}
+              onAnswer={() => {}}
+              showFeedback={true}
+              userAnswer={currentFeedback.userAnswer}
+              explanation={currentQuestion.explanation}
+            />
+            <QuizFeedback
+              isCorrect={currentFeedback.isCorrect}
+              isPartial={currentFeedback.isPartial}
+              explanation={currentQuestion.explanation}
+              onContinue={handleContinue}
+            />
+          </div>
+        )}
+
         {/* Find Error Question */}
         {currentQuestion?.type === 'find_error' && state === QUIZ_STATE.ANSWERING && (
           <FindErrorQuestion
@@ -952,6 +1107,9 @@ export default function Quiz({
   )
 }
 
+// Import ReviewQuiz for re-export
+import ReviewQuiz from './ReviewQuiz'
+
 // Export sub-components for individual use
 export {
   QuizProgress,
@@ -960,6 +1118,8 @@ export {
   VoiceQuestion,
   YesNoQuestion,
   PictureMatchQuestion,
+  OddOneOutQuestion,
+  SortGroupsQuestion,
   FindErrorQuestion,
   SpotItQuestion,
   SequenceQuestion,
@@ -972,5 +1132,6 @@ export {
   ComboIndicator,
   StreakCelebration,
   QuizTimer,
-  useQuizGamification
+  useQuizGamification,
+  ReviewQuiz,
 }

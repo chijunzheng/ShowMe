@@ -1,24 +1,40 @@
 /**
  * useWorldPiece Hook
  * WB010: Manages world piece unlocking after quiz completion
+ * WB019: Integrates evolution and pocket scene checks into piece unlock flow
  *
  * This hook handles:
  * - Generating piece images via API
  * - Adding pieces to the user's world state
  * - Managing the pending piece for celebration animation
+ * - Checking for evolutions when pieces are added
+ * - Checking if new pieces trigger pocket scene regeneration
+ * - Managing celebration queue for sequential celebrations
  * - Tracking unlock progress
  *
  * T001: Pass quiz for volcano topic
  * T004: Verify piece added to world state
  * T006: Verify piece is in correct zone (nature for volcano)
+ * T007: Verify evolution check runs after piece unlock
+ * T008: Verify pocket scene check runs after piece unlock
  */
 
 import { useState, useCallback, useRef } from 'react'
+import { getClientId } from '../utils/clientId'
 
 /**
  * API base URL from environment
  */
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
+
+/**
+ * Celebration types for the queue system
+ */
+const CELEBRATION_TYPES = {
+  PIECE_UNLOCK: 'piece-unlock',
+  EVOLUTION: 'evolution',
+  POCKET_SCENE: 'pocket-scene',
+}
 
 /**
  * Topic to zone mapping logic
@@ -78,24 +94,7 @@ function determineZone(topicName, category) {
  * @returns {string} Unique identifier
  */
 function generatePieceId() {
-  return `piece_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-}
-
-/**
- * Get client ID from local storage
- *
- * @returns {string} Client ID
- */
-function getClientId() {
-  const storageKey = 'showme_client_id'
-  let clientId = localStorage.getItem(storageKey)
-
-  if (!clientId) {
-    clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    localStorage.setItem(storageKey, clientId)
-  }
-
-  return clientId
+  return `piece_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
 }
 
 /**
@@ -155,7 +154,7 @@ function selectPieceIcon(topicName, zone) {
 }
 
 /**
- * useWorldPiece - Hook for managing world piece unlocking
+ * useWorldPiece - Hook for managing world piece unlocking with celebration queue
  *
  * @returns {Object} Hook state and methods
  */
@@ -171,6 +170,16 @@ export default function useWorldPiece() {
 
   // Track recently unlocked pieces for this session
   const [sessionPieces, setSessionPieces] = useState([])
+
+  // Celebration queue for sequential celebrations
+  // Each item: { type: 'piece-unlock' | 'evolution' | 'pocket-scene', data: Object }
+  const [celebrationQueue, setCelebrationQueue] = useState([])
+
+  // Currently showing celebration (from queue)
+  const [currentCelebration, setCurrentCelebration] = useState(null)
+
+  // Pending pocket scene reveal (if any)
+  const [pendingPocketScene, setPendingPocketScene] = useState(null)
 
   // Ref to prevent duplicate unlock attempts
   const unlockInProgressRef = useRef(false)
@@ -210,9 +219,10 @@ export default function useWorldPiece() {
 
   /**
    * Add a piece to the user's world state via API
+   * Returns enhanced response with evolution and pocket info
    *
    * @param {Object} piece - Piece data to add
-   * @returns {Promise<boolean>} Success status
+   * @returns {Promise<Object|null>} API response with piece, evolutions, pockets, or null on failure
    */
   const addPieceToWorld = useCallback(async (piece) => {
     try {
@@ -229,16 +239,118 @@ export default function useWorldPiece() {
         throw new Error('Failed to add piece to world')
       }
 
-      return true
+      const data = await response.json()
+      return data
     } catch (error) {
       console.error('Error adding piece to world:', error.message)
-      return false
+      return null
     }
   }, [])
 
   /**
-   * Unlock a new piece after quiz completion
+   * Check for piece evolutions after adding a new piece
+   * Evolutions occur when related pieces form patterns
+   *
+   * @param {Object} piece - The newly added piece
+   * @returns {Promise<Object>} Evolution check result
+   */
+  const checkEvolutions = useCallback(async (piece) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/world/piece/check-evolutions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientId: getClientId(),
+          pieceId: piece.id,
+        }),
+      })
+
+      if (!response.ok) {
+        console.warn('Evolution check failed, skipping')
+        return { evolutions: [] }
+      }
+
+      const data = await response.json()
+      return {
+        evolutions: data.evolutions || [],
+      }
+    } catch (error) {
+      console.warn('Error checking evolutions:', error.message)
+      return { evolutions: [] }
+    }
+  }, [])
+
+  /**
+   * Check if the new piece triggers pocket scene regeneration
+   * Happens when piece count crosses thresholds (3, 5, 7)
+   *
+   * @param {Object} piece - The newly added piece
+   * @returns {Promise<Object>} Pocket scene check result
+   */
+  const checkPocketScene = useCallback(async (piece) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/world/pocket/check-scene`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientId: getClientId(),
+          pieceId: piece.id,
+        }),
+      })
+
+      if (!response.ok) {
+        console.warn('Pocket scene check failed, skipping')
+        return { shouldRegenerate: false, newScene: null }
+      }
+
+      const data = await response.json()
+      return {
+        shouldRegenerate: data.shouldRegenerate || false,
+        newScene: data.scene || null,
+        pocket: data.pocket || null,
+      }
+    } catch (error) {
+      console.warn('Error checking pocket scene:', error.message)
+      return { shouldRegenerate: false, newScene: null }
+    }
+  }, [])
+
+  /**
+   * Process the celebration queue
+   * Shows the next celebration in sequence
+   */
+  const processNextCelebration = useCallback(() => {
+    setCelebrationQueue(prevQueue => {
+      if (prevQueue.length === 0) {
+        setCurrentCelebration(null)
+        return prevQueue
+      }
+
+      const [next, ...rest] = prevQueue
+      setCurrentCelebration(next)
+      return rest
+    })
+  }, [])
+
+  /**
+   * Complete the current celebration and show next
+   */
+  const completeCelebration = useCallback(() => {
+    processNextCelebration()
+  }, [processNextCelebration])
+
+  /**
+   * Unlock a new piece after quiz completion with full celebration flow
    * Main entry point for piece unlocking flow
+   *
+   * Flow:
+   * 1. Save piece to world
+   * 2. Check for evolutions -> if any, queue evolution celebrations
+   * 3. Check if piece joins a pocket that needs scene regeneration
+   * 4. Queue piece unlock celebration
+   * 5. Queue evolution celebrations (if any)
+   * 6. Queue pocket scene reveal (if applicable)
+   * 7. Start celebration sequence
    *
    * @param {Object} quizResult - Quiz completion result
    * @param {number} quizResult.percentage - Score percentage (0-100)
@@ -298,20 +410,71 @@ export default function useWorldPiece() {
         quizScore: quizResult.percentage,
       }
 
-      // Add to world state via API (T004)
-      const added = await addPieceToWorld(piece)
+      // Step 1: Add to world state via API (T004)
+      const addResult = await addPieceToWorld(piece)
 
-      if (!added) {
+      if (!addResult) {
         throw new Error('Failed to save piece to world')
       }
 
+      // Update piece with any server-side additions
+      const savedPiece = addResult.piece || piece
+
+      // Step 2: Check for evolutions (T007)
+      const evolutionResult = await checkEvolutions(savedPiece)
+
+      // Step 3: Check for pocket scene regeneration (T008)
+      const pocketResult = await checkPocketScene(savedPiece)
+
+      // Step 4: Build celebration queue in order
+      const celebrations = []
+
+      // First: Piece unlock celebration
+      celebrations.push({
+        type: CELEBRATION_TYPES.PIECE_UNLOCK,
+        data: savedPiece,
+      })
+
+      // Second: Evolution celebrations (if any)
+      if (evolutionResult.evolutions && evolutionResult.evolutions.length > 0) {
+        evolutionResult.evolutions.forEach(evolution => {
+          celebrations.push({
+            type: CELEBRATION_TYPES.EVOLUTION,
+            data: evolution,
+          })
+        })
+      }
+
+      // Third: Pocket scene reveal (if new scene generated)
+      if (pocketResult.newScene) {
+        celebrations.push({
+          type: CELEBRATION_TYPES.POCKET_SCENE,
+          data: {
+            scene: pocketResult.newScene,
+            pocket: pocketResult.pocket,
+          },
+        })
+      }
+
       // Track in session
-      setSessionPieces(prev => [...prev, piece])
+      setSessionPieces(prev => [...prev, savedPiece])
 
-      // Set as pending to trigger celebration (T002, T003)
-      setPendingPiece(piece)
+      // Set the queue and start celebrations
+      setCelebrationQueue(celebrations.slice(1)) // All but first
+      setCurrentCelebration(celebrations[0]) // Start with first
 
-      return piece
+      // Also set pendingPiece for backwards compatibility
+      setPendingPiece(savedPiece)
+
+      // Store pending pocket scene for access
+      if (pocketResult.newScene) {
+        setPendingPocketScene({
+          scene: pocketResult.newScene,
+          pocket: pocketResult.pocket,
+        })
+      }
+
+      return savedPiece
     } catch (error) {
       console.error('Error unlocking piece:', error.message)
       setUnlockError(error.message)
@@ -320,7 +483,7 @@ export default function useWorldPiece() {
       setIsUnlocking(false)
       unlockInProgressRef.current = false
     }
-  }, [generatePieceImage, addPieceToWorld])
+  }, [generatePieceImage, addPieceToWorld, checkEvolutions, checkPocketScene])
 
   /**
    * Clear the pending piece after celebration is shown
@@ -328,6 +491,13 @@ export default function useWorldPiece() {
    */
   const clearPendingPiece = useCallback(() => {
     setPendingPiece(null)
+  }, [])
+
+  /**
+   * Clear the pending pocket scene
+   */
+  const clearPendingPocketScene = useCallback(() => {
+    setPendingPocketScene(null)
   }, [])
 
   /**
@@ -346,20 +516,48 @@ export default function useWorldPiece() {
     return [...sessionPieces]
   }, [sessionPieces])
 
+  /**
+   * Skip to next celebration in queue
+   * Useful if user wants to skip current celebration
+   */
+  const skipCelebration = useCallback(() => {
+    processNextCelebration()
+  }, [processNextCelebration])
+
+  /**
+   * Clear all celebrations and reset state
+   */
+  const clearAllCelebrations = useCallback(() => {
+    setCelebrationQueue([])
+    setCurrentCelebration(null)
+    setPendingPiece(null)
+    setPendingPocketScene(null)
+  }, [])
+
   return {
     // State
     pendingPiece,
     isUnlocking,
     unlockError,
     sessionPieces,
+    celebrationQueue,
+    currentCelebration,
+    pendingPocketScene,
 
     // Actions
     unlockPiece,
     clearPendingPiece,
+    clearPendingPocketScene,
     clearUnlockError,
     getSessionPieces,
+    completeCelebration,
+    skipCelebration,
+    clearAllCelebrations,
+
+    // Constants (for external use)
+    CELEBRATION_TYPES,
   }
 }
 
 // Also export utility functions for testing
-export { determineZone, selectPieceIcon, generatePieceId }
+export { determineZone, selectPieceIcon, generatePieceId, CELEBRATION_TYPES }

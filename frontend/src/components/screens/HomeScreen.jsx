@@ -1,8 +1,14 @@
 /**
  * HomeScreen component - Level selection and initial voice trigger
  * Displayed when uiState is HOME and activeTab is 'learn'
+ *
+ * Features:
+ * - Level selection cards (Simple, Standard, Deep)
+ * - Text fallback for typing questions
+ * - StrengthSection for spaced repetition review
  */
 import LevelCard from '../LevelCard.jsx'
+import { StrengthSection } from '../Home'
 import { playMicOnSound } from '../../utils/soundEffects.js'
 import { LEVEL_CONFIG, EXPLANATION_LEVEL, UI_STATE } from '../../constants/appConfig.js'
 
@@ -20,6 +26,9 @@ import { LEVEL_CONFIG, EXPLANATION_LEVEL, UI_STATE } from '../../constants/appCo
  * @param {Function} props.setUiState - Setter for UI state
  * @param {Function} props.handleQuestion - Handler for submitting questions
  * @param {Function} props.recordDeepLevelUsed - Gamification tracker for deep level
+ * @param {Array} [props.piecesNeedingReview] - World pieces that need review
+ * @param {Function} [props.onStartReview] - Callback when user starts a review session
+ * @param {boolean} [props.isReviewLoading] - Loading state for review
  */
 export default function HomeScreen({
   homeHeadline,
@@ -34,6 +43,9 @@ export default function HomeScreen({
   setUiState,
   handleQuestion,
   recordDeepLevelUsed,
+  piecesNeedingReview = [],
+  onStartReview,
+  isReviewLoading = false,
 }) {
   function handleLevelSelect(level) {
     playMicOnSound()
@@ -58,6 +70,15 @@ export default function HomeScreen({
 
   return (
     <div className="flex flex-col items-center gap-8 px-4 md:px-0 animate-fade-in">
+      {/* StrengthSection - shows when there are topics to review */}
+      {piecesNeedingReview.length > 0 && onStartReview && (
+        <StrengthSection
+          piecesNeedingReview={piecesNeedingReview}
+          onStartReview={onStartReview}
+          disabled={isReviewLoading}
+        />
+      )}
+
       {/* Headline */}
       <div className="text-center">
         <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">

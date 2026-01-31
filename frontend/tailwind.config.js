@@ -86,6 +86,8 @@ export default {
         // UI008: Tier upgrade celebration animations
         'tier-particle': 'tierParticle 1.8s ease-out forwards',
         'fade-in-up': 'fadeInUp 0.5s ease-out forwards',
+        // WB020: Evolution celebration animation
+        'evolution-particle': 'evolutionParticle 1.5s ease-out forwards',
       },
       keyframes: {
         waveform: {
@@ -190,6 +192,25 @@ export default {
           '100%': {
             transform: 'translateY(0)',
             opacity: '1',
+          },
+        },
+        // WB020: Evolution particle animation - sparkles radiate outward and fade
+        evolutionParticle: {
+          '0%': {
+            transform: 'translate(-50%, -50%) scale(0) rotate(0deg)',
+            opacity: '0',
+          },
+          '30%': {
+            transform: 'translate(-50%, -50%) scale(1.5) rotate(90deg)',
+            opacity: '1',
+          },
+          '60%': {
+            transform: 'translate(-50%, -50%) scale(1.2) rotate(180deg)',
+            opacity: '1',
+          },
+          '100%': {
+            transform: 'translate(-50%, -50%) scale(0) rotate(360deg)',
+            opacity: '0',
           },
         },
       },

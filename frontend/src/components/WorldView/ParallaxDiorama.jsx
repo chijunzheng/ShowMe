@@ -320,8 +320,8 @@ function ParallaxDiorama({
         layerWidth={layerWidth}
         onPieceClick={onPieceClick}
         onPocketClick={onPocketClick}
-        hidden={!arcaneUnlocked}
-        topicsNeeded={topicsNeeded}
+        hidden={false}
+        topicsNeeded={0}
       />
 
       {/* Midground layer - Civilization pieces (structures) */}

@@ -1,18 +1,22 @@
 /**
  * PocketPortal Component
  * WB013: Renders a swirling portal that appears when 3+ related pieces cluster in a sub-category
+ * WB019: Displays generated connection scene as portal cover image
  *
  * When multiple pieces share a common category (ocean, space, dinosaurs, etc.),
  * they can be grouped into a "pocket world" accessible through this portal.
  *
  * Visual Features:
+ * - Connection scene image as portal cover (if available)
+ * - Loading shimmer while scene generates
+ * - "New!" badge when scene was recently updated
+ * - Fallback to category icon if no scene
  * - Swirling portal animation with multiple layers
- * - Category icon and label
  * - Piece count badge
  * - Glow effect matching the parent zone color
  */
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 
 /**
  * Category-specific theming for portals
@@ -108,37 +112,117 @@ const ZONE_GLOWS = {
 }
 
 /**
+ * Evolution level styling configurations
+ */
+const EVOLUTION_STYLES = {
+  initial: {
+    borderWidth: 'border-2',
+    glowIntensity: 1,
+  },
+  enhanced: {
+    borderWidth: 'border-3',
+    glowIntensity: 1.5,
+  },
+  legendary: {
+    borderWidth: 'border-4',
+    glowIntensity: 2,
+  },
+}
+
+/**
+ * Check if scene was recently updated (within last 5 minutes)
+ *
+ * @param {Date|string|null} generatedAt - When scene was generated
+ * @returns {boolean} True if scene is "new"
+ */
+function isRecentlyUpdated(generatedAt) {
+  if (!generatedAt) return false
+
+  const generatedDate = new Date(generatedAt)
+  const now = new Date()
+  const fiveMinutesMs = 5 * 60 * 1000
+
+  return (now - generatedDate) < fiveMinutesMs
+}
+
+/**
+ * Generate piece thumbnail collage positions for fallback display
+ *
+ * @param {number} count - Number of pieces
+ * @returns {Array} Array of position objects {x, y, scale}
+ */
+function getCollagePositions(count) {
+  // Position up to 4 thumbnails in corners/center
+  const positions = [
+    { x: 20, y: 20, scale: 0.4 },
+    { x: 60, y: 25, scale: 0.35 },
+    { x: 25, y: 55, scale: 0.38 },
+    { x: 55, y: 58, scale: 0.35 },
+  ]
+
+  return positions.slice(0, Math.min(count, 4))
+}
+
+/**
  * PocketPortal - A swirling portal entry point to a pocket world
  *
  * @param {Object} props - Component props
+ * @param {string} props.pocketId - Unique ID for this pocket
  * @param {string} props.category - Category of this pocket (e.g., "ocean", "space")
  * @param {Array} props.pieces - Array of pieces contained in this pocket
  * @param {string} props.zone - Parent zone (nature, civilization, arcane)
+ * @param {Object} [props.connectionScene] - Generated scene data
+ * @param {string} [props.connectionScene.imageUrl] - URL of generated scene image
+ * @param {Date|string} [props.connectionScene.generatedAt] - When scene was generated
+ * @param {string} [props.connectionScene.evolutionLevel] - 'initial' | 'enhanced' | 'legendary'
+ * @param {boolean} [props.isGeneratingScene] - Whether scene is currently being generated
  * @param {Object} [props.position] - Position within layer {x, y}
  * @param {Function} props.onClick - Callback when portal is clicked
  */
 function PocketPortal({
+  pocketId,
   category,
   pieces = [],
   zone = 'nature',
+  connectionScene,
+  isGeneratingScene = false,
   position = { x: 0, y: 0 },
   onClick,
 }) {
   const [isHovered, setIsHovered] = useState(false)
+  const [imageError, setImageError] = useState(false)
+
   const theme = getCategoryTheme(category)
   const zoneGlow = ZONE_GLOWS[zone] || ZONE_GLOWS.nature
+
+  // Determine if we have a valid scene to display
+  const hasValidScene = connectionScene?.imageUrl && !imageError
+
+  // Check if scene is recently updated for "New!" badge
+  const isNew = useMemo(() => {
+    return isRecentlyUpdated(connectionScene?.generatedAt)
+  }, [connectionScene?.generatedAt])
+
+  // Get evolution styling
+  const evolutionLevel = connectionScene?.evolutionLevel || 'initial'
+  const evolutionStyle = EVOLUTION_STYLES[evolutionLevel] || EVOLUTION_STYLES.initial
+
+  // Calculate glow intensity based on evolution
+  const glowMultiplier = evolutionStyle.glowIntensity
 
   /**
    * Handle portal click - enters the pocket world
    */
   const handleClick = useCallback(() => {
     onClick?.({
+      pocketId,
       category,
       pieces,
       zone,
       theme,
+      connectionScene,
     })
-  }, [category, pieces, zone, theme, onClick])
+  }, [pocketId, category, pieces, zone, theme, connectionScene, onClick])
 
   /**
    * Handle keyboard activation for accessibility
@@ -149,6 +233,19 @@ function PocketPortal({
       handleClick()
     }
   }, [handleClick])
+
+  /**
+   * Handle image load error - fall back to icon
+   */
+  const handleImageError = useCallback(() => {
+    setImageError(true)
+  }, [])
+
+  // Collage positions for fallback thumbnails
+  const collagePositions = useMemo(
+    () => getCollagePositions(pieces.length),
+    [pieces.length]
+  )
 
   return (
     <div
@@ -167,8 +264,8 @@ function PocketPortal({
       `}
       style={{
         boxShadow: isHovered
-          ? `0 0 30px ${theme.glowColor}, 0 0 60px ${zoneGlow}`
-          : `0 0 15px ${theme.glowColor}`,
+          ? `0 0 ${30 * glowMultiplier}px ${theme.glowColor}, 0 0 ${60 * glowMultiplier}px ${zoneGlow}`
+          : `0 0 ${15 * glowMultiplier}px ${theme.glowColor}`,
       }}
       aria-label={`Enter ${theme.label} with ${pieces.length} pieces`}
     >
@@ -176,7 +273,7 @@ function PocketPortal({
       <div
         className={`
           absolute inset-0 rounded-full
-          border-4 ${theme.ringColor}
+          ${evolutionStyle.borderWidth} ${theme.ringColor}
           portal-swirl
           opacity-60
         `}
@@ -204,13 +301,78 @@ function PocketPortal({
           absolute inset-3 rounded-full
           bg-gradient-to-br ${theme.bgGradient}
           flex flex-col items-center justify-center
-          shadow-inner
+          shadow-inner overflow-hidden
         `}
       >
-        {/* Category icon */}
-        <span className="text-2xl sm:text-3xl select-none portal-float">
-          {theme.icon}
-        </span>
+        {/* Loading shimmer state */}
+        {isGeneratingScene && (
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent portal-shimmer" />
+        )}
+
+        {/* Connection scene image (if available) */}
+        {hasValidScene && !isGeneratingScene && (
+          <img
+            src={connectionScene.imageUrl}
+            alt={`${theme.label} scene`}
+            onError={handleImageError}
+            className="absolute inset-0 w-full h-full object-cover rounded-full"
+          />
+        )}
+
+        {/* Fallback: Piece thumbnail collage (if no scene but has pieces with images) */}
+        {!hasValidScene && !isGeneratingScene && pieces.length > 0 && (
+          <div className="absolute inset-0 rounded-full overflow-hidden">
+            {/* Show mini thumbnails of pieces */}
+            {collagePositions.map((pos, index) => {
+              const piece = pieces[index]
+              if (!piece) return null
+
+              return (
+                <div
+                  key={piece.id || index}
+                  className="absolute rounded-full overflow-hidden shadow-sm"
+                  style={{
+                    left: `${pos.x}%`,
+                    top: `${pos.y}%`,
+                    width: `${pos.scale * 100}%`,
+                    height: `${pos.scale * 100}%`,
+                    transform: 'translate(-50%, -50%)',
+                  }}
+                >
+                  {piece.imageUrl ? (
+                    <img
+                      src={piece.imageUrl}
+                      alt={piece.name || 'piece'}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-white/30 text-xs">
+                      {piece.icon || theme.icon}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+
+            {/* Overlay gradient to blend thumbnails */}
+            <div
+              className={`absolute inset-0 bg-gradient-to-br ${theme.bgGradient} opacity-40`}
+            />
+          </div>
+        )}
+
+        {/* Category icon (shown if no scene and no thumbnails, or as overlay) */}
+        {(!hasValidScene || isGeneratingScene) && (
+          <span
+            className={`
+              text-2xl sm:text-3xl select-none portal-float
+              ${hasValidScene ? 'opacity-0' : 'opacity-100'}
+              transition-opacity duration-300
+            `}
+          >
+            {theme.icon}
+          </span>
+        )}
       </div>
 
       {/* Piece count badge */}
@@ -228,6 +390,35 @@ function PocketPortal({
       >
         {pieces.length}
       </div>
+
+      {/* "New!" badge for recently updated scenes */}
+      {isNew && hasValidScene && (
+        <div
+          className={`
+            absolute -top-1 -left-1
+            px-1.5 py-0.5 rounded-full
+            bg-green-500 text-white text-xs font-bold
+            shadow-lg animate-pulse
+          `}
+        >
+          New!
+        </div>
+      )}
+
+      {/* Evolution level indicator for legendary pockets */}
+      {evolutionLevel === 'legendary' && hasValidScene && (
+        <div
+          className={`
+            absolute -bottom-1 left-1/2 -translate-x-1/2
+            px-1.5 py-0.5 rounded-full
+            bg-gradient-to-r from-purple-500 to-pink-500
+            text-white text-xs font-bold
+            shadow-lg
+          `}
+        >
+          ★
+        </div>
+      )}
 
       {/* Label on hover */}
       {isHovered && (

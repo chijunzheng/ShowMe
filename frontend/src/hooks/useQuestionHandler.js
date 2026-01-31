@@ -594,6 +594,9 @@ export default function useQuestionHandler({
           setCurrentIndex(firstNewTopLevelIndex)
         }
         logger.timeEnd('GENERATION', 'full-pipeline')
+        // Ensure mic is disabled when entering slideshow with new content
+        setIsMicEnabled(false)
+        setAllowAutoListen(false)
         // Prefetch TTS for first new slide before transitioning
         await queueSlidesReadyTransition(generateData.slides, 0)
 
@@ -640,6 +643,9 @@ export default function useQuestionHandler({
         setActiveTopicId(newTopic.id)
         setCurrentIndex(0)
         logger.timeEnd('GENERATION', 'full-pipeline')
+        // Ensure mic is disabled when entering slideshow with new content
+        setIsMicEnabled(false)
+        setAllowAutoListen(false)
         // Prefetch TTS for first content slide before transitioning
         await queueSlidesReadyTransition(generateData.slides, 0)
 

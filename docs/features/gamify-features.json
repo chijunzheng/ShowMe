@@ -1074,6 +1074,223 @@
           "status": "complete"
         }
       ]
+    },
+    {
+      "id": "LW001",
+      "name": "Piece Evolution System",
+      "description": "Pieces evolve through tiers (seedling→growing→flourishing→legendary) as users learn related topics. Each tier has unique animations and visual effects.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Unlock first piece, verify seedling tier assigned",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Learn 3 related topics, verify piece evolves to growing tier",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify growing tier displays breathing animation",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Learn 5 related topics, verify piece evolves to flourishing tier",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Verify flourishing tier displays sway animation and particles",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Learn 10 related topics, verify piece evolves to legendary tier",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify legendary tier has golden glow and sparkle effects",
+          "status": "pending"
+        },
+        {
+          "id": "T008",
+          "description": "Verify evolution celebration plays on tier upgrade",
+          "status": "pending"
+        },
+        {
+          "id": "T009",
+          "description": "Verify XP bonus awarded on evolution (+10/+25/+50)",
+          "status": "pending"
+        },
+        {
+          "id": "T010",
+          "description": "Verify cross-zone topic relationships detected (e.g., Pompeii↔Volcanoes)",
+          "status": "pending"
+        },
+        {
+          "id": "T011",
+          "description": "Verify evolution state persists across sessions",
+          "status": "pending"
+        },
+        {
+          "id": "T012",
+          "description": "Verify tier badge displays correctly on each piece",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "LW006",
+      "name": "Pocket Connection Scenes",
+      "description": "When 3+ related pieces form a pocket portal, Gemini generates a unique scene showing the pieces interacting. Scenes evolve at 5 and 7+ pieces.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Unlock 3 ocean pieces, verify pocket portal forms",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Verify connection scene generated via Gemini API",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Verify scene displays as pocket portal cover image",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Add 4th piece to pocket, verify scene updates",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Reach 5 pieces, verify scene evolves to 'enhanced' level",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Reach 7 pieces, verify scene evolves to 'legendary' level",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Verify loading shimmer displays during scene generation",
+          "status": "pending"
+        },
+        {
+          "id": "T008",
+          "description": "Verify 'New!' badge appears on recently updated scenes",
+          "status": "pending"
+        },
+        {
+          "id": "T009",
+          "description": "Verify scene cached and not regenerated unnecessarily",
+          "status": "pending"
+        },
+        {
+          "id": "T010",
+          "description": "Verify fallback to piece collage if scene generation fails",
+          "status": "pending"
+        },
+        {
+          "id": "T011",
+          "description": "Verify ConnectionSceneReveal celebration plays on new scene",
+          "status": "pending"
+        },
+        {
+          "id": "T012",
+          "description": "Verify scene persists across sessions",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "RV001",
+      "name": "Quick Review Mode",
+      "description": "Users can quickly review topics via tapping world pieces or Strengthen button. Pieces visually fade when needing review. Short 3-question quizzes refresh knowledge.",
+      "priority": 1,
+      "status": "pending",
+      "test_cases": [
+        {
+          "id": "T001",
+          "description": "Tap world piece shows PieceInfoCard with Quiz button",
+          "status": "pending"
+        },
+        {
+          "id": "T002",
+          "description": "Info card shows days since last review",
+          "status": "pending"
+        },
+        {
+          "id": "T003",
+          "description": "Info card shows evolution tier progress",
+          "status": "pending"
+        },
+        {
+          "id": "T004",
+          "description": "Strengthen section appears when topics > 7 days old",
+          "status": "pending"
+        },
+        {
+          "id": "T005",
+          "description": "Strengthen section shows count and piece icons",
+          "status": "pending"
+        },
+        {
+          "id": "T006",
+          "description": "Review quiz has 3 questions only (MCQ/fill-blank)",
+          "status": "pending"
+        },
+        {
+          "id": "T007",
+          "description": "Passing review (2/3+) awards 10 XP",
+          "status": "pending"
+        },
+        {
+          "id": "T008",
+          "description": "Perfect review (3/3) awards 15 XP",
+          "status": "pending"
+        },
+        {
+          "id": "T009",
+          "description": "Piece visual refreshes after passing review",
+          "status": "pending"
+        },
+        {
+          "id": "T010",
+          "description": "Pieces fade (opacity 0.85) after 7+ days without review",
+          "status": "pending"
+        },
+        {
+          "id": "T011",
+          "description": "Sleepy indicator (zzz) appears after 14+ days",
+          "status": "pending"
+        },
+        {
+          "id": "T012",
+          "description": "lastReviewedAt timestamp persists across sessions",
+          "status": "pending"
+        },
+        {
+          "id": "T013",
+          "description": "Can chain multiple reviews from Strengthen button",
+          "status": "pending"
+        },
+        {
+          "id": "T014",
+          "description": "Review slides button opens topic slideshow",
+          "status": "pending"
+        }
+      ]
     }
   ]
 }

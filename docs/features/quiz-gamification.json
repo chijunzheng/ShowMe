@@ -212,7 +212,7 @@
 
   "questionTypes": {
     "simple": {
-      "types": ["picture_match", "yes_no", "spot_it"],
+      "types": ["odd_one_out", "sort_groups", "yes_no", "picture_match", "fill_blank", "spot_it"],
       "count": "3-4",
       "passThreshold": 0.50,
       "characteristics": {
@@ -220,6 +220,43 @@
         "hints": 3,
         "attemptsPerQuestion": 2,
         "language": "playful, encouraging"
+      },
+      "newTypes": {
+        "odd_one_out": {
+          "description": "Find which item doesn't belong among 4 options",
+          "structure": {
+            "items": "Array of 4 items with text, optional imageUrl, and isOdd boolean",
+            "explanation": "Why the odd item doesn't belong"
+          },
+          "example": {
+            "items": [
+              { "text": "Dog", "isOdd": false },
+              { "text": "Cat", "isOdd": false },
+              { "text": "Fish", "isOdd": false },
+              { "text": "Chair", "isOdd": true }
+            ],
+            "explanation": "Chair is not an animal!"
+          }
+        },
+        "sort_groups": {
+          "description": "Sort 4-6 items into 2 category buckets",
+          "structure": {
+            "items": "Array of string items to sort",
+            "groups": "Array of 2 groups with name and icon",
+            "correctSorting": "Object mapping group names to correct items"
+          },
+          "example": {
+            "items": ["Sun", "Ice cream", "Snowman", "Fire"],
+            "groups": [
+              { "name": "Hot", "icon": "fire" },
+              { "name": "Cold", "icon": "snowflake" }
+            ],
+            "correctSorting": {
+              "Hot": ["Sun", "Fire"],
+              "Cold": ["Ice cream", "Snowman"]
+            }
+          }
+        }
       }
     },
     "standard": {

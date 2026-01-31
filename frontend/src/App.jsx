@@ -23,6 +23,12 @@ import useWorldStats from './hooks/useWorldStats'
 import useQuizHandlers from './hooks/useQuizHandlers.js'
 import useSocraticHandlers from './hooks/useSocraticHandlers.js'
 import useSlideshowControl from './hooks/useSlideshowControl.js'
+// WB020: Evolution and pocket scene gamification
+import useEvolution from './hooks/useEvolution'
+import usePocketScene from './hooks/usePocketScene'
+import useReviewSession from './hooks/useReviewSession'
+import { EvolutionCelebration } from './components/Celebrations'
+import ConnectionSceneReveal from './components/WorldView/ConnectionSceneReveal'
 
 // Import constants from centralized config
 import {
@@ -201,6 +207,79 @@ function App() {
   // Regeneration state
   const [isRegenerating, setIsRegenerating] = useState(false)
   const regeneratingTopicIdRef = useRef(null)
+
+  // WB020: Evolution system - tracks piece evolutions to higher tiers
+  const {
+    currentEvolution,
+    evolutionQueue,
+    checkEvolutions,
+    processNextEvolution,
+  } = useEvolution()
+
+  // WB019: Pocket scenes - generates scene images when pieces form pockets
+  const {
+    generating: generatingScene,
+    generateScene,
+    shouldRegenerateScene,
+  } = usePocketScene()
+
+  // WB020: Pending scene reveal state for ConnectionSceneReveal celebration
+  const [pendingSceneReveal, setPendingSceneReveal] = useState(null)
+
+  /**
+   * WB019: Handle pocket scene generation completion
+   * Called when a pocket generates or updates its connection scene.
+   * This triggers the ConnectionSceneReveal celebration overlay.
+   *
+   * @param {Object} params - Scene reveal parameters
+   * @param {Object} params.scene - The generated scene data { imageUrl, evolutionLevel }
+   * @param {string} params.pocketName - Display name for the pocket
+   * @param {string} params.pocketIcon - Emoji icon for the pocket
+   * @param {number} params.pieceCount - Number of pieces in the pocket
+   */
+  const handlePocketSceneGenerated = useCallback((params) => {
+    if (!params?.scene?.imageUrl) return
+    setPendingSceneReveal({
+      scene: params.scene,
+      pocketName: params.pocketName,
+      pocketIcon: params.pocketIcon,
+      pieceCount: params.pieceCount,
+    })
+  }, [])
+
+  // WB020: World pieces state for review session (loaded from API)
+  const [worldPieces, setWorldPieces] = useState([])
+
+  // WB020: Review session - tracks pieces that need spaced repetition review
+  const {
+    piecesNeedingReview,
+    reviewCount,
+    isReviewing,
+    currentReviewPiece,
+    startReviewSession,
+    completeCurrentReview,
+    endReviewSession,
+  } = useReviewSession(worldPieces)
+
+  // WB020: Load world pieces for review session on mount and after piece unlocks
+  useEffect(() => {
+    const loadWorldPieces = async () => {
+      const clientId = getStoredClientId()
+      if (!clientId) return
+
+      try {
+        const response = await fetch(`/api/world?clientId=${encodeURIComponent(clientId)}`)
+        if (response.ok) {
+          const data = await response.json()
+          setWorldPieces(data.worldState?.pieces || [])
+        }
+      } catch (err) {
+        logger.warn('WORLD', 'Failed to load world pieces for review', { error: err.message })
+      }
+    }
+
+    loadWorldPieces()
+  }, [showPieceCelebration]) // Reload when piece celebration closes (means new piece was added)
 
   const generationProgressPercent = useMemo(() => {
     if (!generationProgress.stage) return 0
@@ -516,6 +595,9 @@ function App() {
   const raiseHandRequestRef = useRef(false)
   // Track if audio was paused due to hand raise (to enable resume when lowered)
   const audioWasPausedForHandRaiseRef = useRef(false)
+  // Save audio position when hand raise interrupts, so we can resume from the same spot
+  // Format: { slideId: string, currentTime: number } or null
+  const savedAudioPositionRef = useRef(null)
 
   // Track in-flight slide fetches from the server to avoid duplicate requests
   const slideServerFetchRef = useRef(new Map())
@@ -708,8 +790,9 @@ function App() {
       slideResponseAudioRef.current = null
     }
 
-    // Clear the hand-raise pause flag since we're fully interrupting
+    // Clear the hand-raise pause flag and saved position since we're fully interrupting
     audioWasPausedForHandRaiseRef.current = false
+    savedAudioPositionRef.current = null
 
     voiceAgentBusyRef.current = false
     resumeListeningAfterVoiceAgentRef.current = false
@@ -743,10 +826,16 @@ function App() {
     }
 
     // Pause slide narration but keep the audio object so we can resume
+    // Also save the position so we can restore it if the audio object gets destroyed
     if (slideAudioRef.current && !slideAudioRef.current.paused && !slideAudioRef.current.ended) {
+      savedAudioPositionRef.current = {
+        slideId: displayedSlide?.id,
+        currentTime: slideAudioRef.current.currentTime,
+      }
       slideAudioRef.current.pause()
       audioWasPausedForHandRaiseRef.current = true
       logger.info('AUDIO', 'Paused slide audio for hand raise', {
+        slideId: displayedSlide?.id,
         currentTime: slideAudioRef.current.currentTime,
       })
     }
@@ -761,7 +850,7 @@ function App() {
       clearTimeout(slideTransitionTimeoutRef.current)
       slideTransitionTimeoutRef.current = null
     }
-  }, [])
+  }, [displayedSlide?.id])
 
   /**
    * Resume slide audio after hand is lowered.
@@ -1182,7 +1271,12 @@ function App() {
       lastSlideIdRef.current = slideId
       setIsSlideNarrationPlaying(false)
       setIsSlideNarrationReady(false)
-      setIsSlideNarrationLoading(false)
+      // Set loading true initially for content slides that need TTS
+      // This prevents the fallback timeout in StreamingSubtitle from showing all text at once
+      const needsTts = currentSlide?.type !== 'header' &&
+                       currentSlide?.type !== 'suggestions' &&
+                       !getCachedSlideAudio(currentSlide?.id)
+      setIsSlideNarrationLoading(needsTts)
     }
 
     // CORE023, CORE024: Stop slide response audio and clear highlight when navigating
@@ -1196,13 +1290,15 @@ function App() {
         slideResponseAudioRef.current = null
       }
       setHighlightPosition(null)
-      // Clear hand-raise pause flag since we can't resume to a different slide
+      // Clear hand-raise pause flag and saved position since we can't resume to a different slide
       audioWasPausedForHandRaiseRef.current = false
+      savedAudioPositionRef.current = null
     }
 
     if (currentSlide?.type === 'header') {
       setIsSlideNarrationPlaying(false)
       setIsSlideNarrationReady(true)
+      setIsSlideNarrationLoading(false)
       prefetchSlideAudio(getNextSlideForPrefetch())
       return
     }
@@ -1211,6 +1307,7 @@ function App() {
     if (currentSlide?.type === 'suggestions') {
       setIsSlideNarrationPlaying(false)
       setIsSlideNarrationReady(true)
+      setIsSlideNarrationLoading(false)
       return
     }
 
@@ -1219,6 +1316,7 @@ function App() {
         slideAudioRef.current.pause()
       }
       setIsSlideNarrationPlaying(false)
+      setIsSlideNarrationLoading(false)
       return
     }
 
@@ -1324,8 +1422,17 @@ function App() {
         slideIndex: currentIndex,
       })
 
-      // Start from the beginning
-      audio.currentTime = 0
+      // Restore saved position if available (from hand raise interrupt), otherwise start from beginning
+      if (savedAudioPositionRef.current?.slideId === currentSlide.id) {
+        audio.currentTime = savedAudioPositionRef.current.currentTime
+        logger.info('AUDIO', 'Restored audio position from hand raise', {
+          slideId: currentSlide.id,
+          restoredTime: savedAudioPositionRef.current.currentTime,
+        })
+        savedAudioPositionRef.current = null
+      } else {
+        audio.currentTime = 0
+      }
 
       // SYNC FIX: Set playing state only when audio ACTUALLY starts playing
       // This ensures StreamingSubtitle animation is synchronized with audio
@@ -1607,6 +1714,7 @@ function App() {
     quizTopicId,
     quizTopicName,
     tierUpgradeInfo,
+    checkEvolutions,
   })
 
   /**
@@ -2716,6 +2824,8 @@ function App() {
             setUiState={setUiState}
             handleQuestion={handleQuestion}
             recordDeepLevelUsed={recordDeepLevelUsed}
+            piecesNeedingReview={piecesNeedingReview}
+            onStartReview={startReviewSession}
           />
         )}
 
@@ -2794,12 +2904,17 @@ function App() {
         {/* WB018: World View - shown when World tab is active */}
         {activeTab === 'world' && (
           <WorldView
-            clientId={wsClientId}
-            onStartLearning={() => setActiveTab('learn')}
+            clientId={userClientId}
+            onStartLearning={() => {
+              setActiveTopicId(null)
+              setUiState(UI_STATE.HOME)
+              setActiveTab('learn')
+            }}
             onPieceClick={(piece) => {
               // Could show piece details modal in future
               logger.debug('WORLD', 'Piece clicked', { pieceId: piece?.id })
             }}
+            onPocketSceneGenerated={handlePocketSceneGenerated}
           />
         )}
 
@@ -2898,6 +3013,31 @@ function App() {
           toTier={tierUpgradeInfo.to}
           onComplete={handleTierCelebrationClose}
           onViewWorld={handleTierViewWorld}
+        />
+      )}
+
+      {/* WB020: Evolution celebration overlay - shows when a piece evolves to a new tier */}
+      {currentEvolution && (
+        <EvolutionCelebration
+          piece={currentEvolution.piece}
+          oldTier={currentEvolution.oldTier}
+          newTier={currentEvolution.newTier}
+          onComplete={processNextEvolution}
+        />
+      )}
+
+      {/* WB019: Connection scene reveal - shows when a pocket generates a new scene */}
+      {pendingSceneReveal && (
+        <ConnectionSceneReveal
+          scene={pendingSceneReveal.scene}
+          pocketName={pendingSceneReveal.pocketName || 'Knowledge Pocket'}
+          pocketIcon={pendingSceneReveal.pocketIcon || '✨'}
+          pieceCount={pendingSceneReveal.pieceCount || 3}
+          onViewPocket={() => {
+            setPendingSceneReveal(null)
+            setActiveTab('world')
+          }}
+          onContinue={() => setPendingSceneReveal(null)}
         />
       )}
 

@@ -5,21 +5,9 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { getClientId } from '../utils/clientId'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
-
-// Generate or retrieve a persistent client ID
-function getClientId() {
-  const storageKey = 'showme_client_id'
-  let clientId = localStorage.getItem(storageKey)
-
-  if (!clientId) {
-    clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    localStorage.setItem(storageKey, clientId)
-  }
-
-  return clientId
-}
 
 export default function useUserProgress() {
   const [progress, setProgress] = useState(null)

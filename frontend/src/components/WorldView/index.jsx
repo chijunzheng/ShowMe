@@ -2,12 +2,13 @@
  * WorldView Component
  * WB011 + WB012: Main container for the World Builder diorama view
  * WB013: Pocket portal system for grouping related pieces
+ * WB021: PieceInfoCard integration for piece details and actions
  *
  * This component:
  * - Manages world state (pieces, tier, loading)
  * - Fetches world data from API
  * - Renders the parallax diorama or empty state
- * - Handles piece click interactions
+ * - Handles piece click interactions with PieceInfoCard overlay
  * - Detects and manages pocket portals for clustered pieces
  *
  * The world displays user's learned topics as collectible pieces
@@ -18,6 +19,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import ParallaxDiorama from './ParallaxDiorama'
 import PocketView from './PocketView'
 import ArcaneReveal from './ArcaneReveal'
+import PieceInfoCard from './PieceInfoCard'
 
 /**
  * API base URL from environment
@@ -231,22 +233,28 @@ function ErrorState({ message, onRetry }) {
  * @param {Object} props - Component props
  * @param {string} props.clientId - User's client ID for API calls
  * @param {Function} [props.onStartLearning] - Callback to start a learning session
- * @param {Function} [props.onPieceClick] - Callback when a piece is clicked
+ * @param {Function} [props.onPieceClick] - Callback when a piece is clicked (deprecated, use onReviewSlides)
+ * @param {Function} [props.onReviewSlides] - WB021: Callback when user wants to review slides for a piece
+ * @param {Function} [props.onStartQuiz] - WB021: Callback when user wants to start a quiz for a piece
  * @param {Function} [props.onArcaneUnlock] - WB017: Callback when arcane zone is unlocked
  * @param {Array} [props.initialPieces] - Optional initial pieces (for testing)
  * @param {string} [props.initialTier] - Optional initial tier (for testing)
  * @param {boolean} [props.initialArcaneUnlocked] - WB017: Optional initial arcane unlock state (for testing)
  * @param {boolean} [props.skipFetch] - Skip API fetch (for testing with initialPieces)
+ * @param {Function} [props.onPocketSceneGenerated] - WB019: Callback when a pocket scene is generated
  */
 function WorldView({
   clientId,
   onStartLearning,
   onPieceClick,
+  onReviewSlides,
+  onStartQuiz,
   onArcaneUnlock,
   initialPieces,
   initialTier,
   initialArcaneUnlocked = false,
   skipFetch = false,
+  onPocketSceneGenerated,
 }) {
   // World state
   const [pieces, setPieces] = useState(initialPieces || [])
@@ -261,6 +269,9 @@ function WorldView({
 
   // WB013: Pocket portal state
   const [activePocket, setActivePocket] = useState(null)
+
+  // WB021: Selected piece for info card overlay
+  const [selectedPiece, setSelectedPiece] = useState(null)
 
   // WB013: Detect pocket portals from current pieces
   const pockets = useMemo(() => detectPockets(pieces), [pieces])
@@ -321,11 +332,38 @@ function WorldView({
   }, [fetchWorldState])
 
   /**
-   * Handle piece click - opens piece details
+   * WB021: Handle piece click - opens PieceInfoCard overlay
+   * Falls back to legacy onPieceClick if provided
    */
   const handlePieceClick = useCallback((piece) => {
+    // Show the PieceInfoCard overlay
+    setSelectedPiece(piece)
+    // Also call legacy handler if provided
     onPieceClick?.(piece)
   }, [onPieceClick])
+
+  /**
+   * WB021: Handle closing the PieceInfoCard
+   */
+  const handleInfoCardClose = useCallback(() => {
+    setSelectedPiece(null)
+  }, [])
+
+  /**
+   * WB021: Handle Review Slides action from PieceInfoCard
+   */
+  const handleReviewSlides = useCallback((piece) => {
+    setSelectedPiece(null)
+    onReviewSlides?.(piece)
+  }, [onReviewSlides])
+
+  /**
+   * WB021: Handle Start Quiz action from PieceInfoCard
+   */
+  const handleStartQuiz = useCallback((piece) => {
+    setSelectedPiece(null)
+    onStartQuiz?.(piece)
+  }, [onStartQuiz])
 
   /**
    * Handle start learning button
@@ -406,17 +444,29 @@ function WorldView({
     return <EmptyWorldState onStartLearning={handleStartLearning} />
   }
 
-  // Render the parallax diorama with pocket portals
+  // Render the parallax diorama with pocket portals and PieceInfoCard overlay
   return (
-    <ParallaxDiorama
-      pieces={pieces}
-      tier={tier}
-      pockets={pockets}
-      onPieceClick={handlePieceClick}
-      onPocketClick={handlePocketClick}
-      arcaneUnlocked={arcaneUnlocked}
-      topicsNeeded={topicsNeeded}
-    />
+    <>
+      <ParallaxDiorama
+        pieces={pieces}
+        tier={tier}
+        pockets={pockets}
+        onPieceClick={handlePieceClick}
+        onPocketClick={handlePocketClick}
+        arcaneUnlocked={arcaneUnlocked}
+        topicsNeeded={topicsNeeded}
+      />
+
+      {/* WB021: PieceInfoCard overlay when a piece is selected */}
+      {selectedPiece && (
+        <PieceInfoCard
+          piece={selectedPiece}
+          onClose={handleInfoCardClose}
+          onReviewSlides={handleReviewSlides}
+          onStartQuiz={handleStartQuiz}
+        />
+      )}
+    </>
   )
 }
 

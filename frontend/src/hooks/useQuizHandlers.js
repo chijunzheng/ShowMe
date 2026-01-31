@@ -7,26 +7,12 @@
 import { useCallback, useRef } from 'react'
 import { UI_STATE } from '../constants/appConfig.js'
 import logger from '../utils/logger.js'
+import { getClientId } from '../utils/clientId'
 
 /**
  * API base URL from environment
  */
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
-
-/**
- * Get client ID from local storage (consistent with useWorldPiece hook)
- */
-function getClientId() {
-  const storageKey = 'showme_client_id'
-  let clientId = localStorage.getItem(storageKey)
-
-  if (!clientId) {
-    clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    localStorage.setItem(storageKey, clientId)
-  }
-
-  return clientId
-}
 
 /**
  * Determine zone from topic name using keyword matching
@@ -79,6 +65,7 @@ function determineZone(topicName) {
  * @param {string} params.quizTopicId - Current quiz topic ID
  * @param {string} params.quizTopicName - Current quiz topic name
  * @param {Object|null} params.tierUpgradeInfo - Tier upgrade info if pending
+ * @param {Function} [params.checkEvolutions] - WB020: Function to check for piece evolutions after unlock
  * @returns {Object} Quiz handler functions
  */
 export default function useQuizHandlers({
@@ -102,6 +89,7 @@ export default function useQuizHandlers({
   quizTopicId,
   quizTopicName,
   tierUpgradeInfo,
+  checkEvolutions,
 }) {
   /**
    * WB018: Start quiz flow - fetch questions from API
@@ -259,6 +247,18 @@ export default function useQuizHandlers({
               if (addData.arcaneJustUnlocked) {
                 setTierUpgradeInfo({ from: 'growing', to: 'arcane' })
               }
+
+              // WB020: Check for piece evolutions after unlock
+              if (checkEvolutions) {
+                const unlockedPieceForEvolution = {
+                  ...generatedPiece,
+                  name: quizTopicName,
+                  category: zone,
+                }
+                checkEvolutions(unlockedPieceForEvolution).catch(err => {
+                  logger.warn('QUIZ', 'Evolution check failed', { error: err.message })
+                })
+              }
             } else {
               logger.warn('QUIZ', 'Failed to add piece to world', {
                 status: addResponse.status
@@ -272,7 +272,7 @@ export default function useQuizHandlers({
           })
 
           // Create a fallback piece with an emoji icon
-          const fallbackPieceId = `piece_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+          const fallbackPieceId = `piece_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
           const fallbackX = Math.random() * 80 + 10
           const fallbackY = Math.random() * 60 + 20
 
@@ -290,8 +290,7 @@ export default function useQuizHandlers({
             topicName: quizTopicName,
             name: quizTopicName, // WorldPiece component expects 'name'
             zone,
-            icon, // Emoji icon for display
-            imageUrl: null, // No image, will use emoji fallback
+            icon, // Emoji icon for display - used instead of imageUrl
             prompt: `Fallback piece for ${quizTopicName}`,
             topicId: quizTopicId,
             x: fallbackX,
@@ -326,18 +325,37 @@ export default function useQuizHandlers({
             setShowPieceCelebration(true)
             setWorldBadge(prev => prev + 1)
             generatedPiece = fallbackPiece
+
+            // WB020: Check for piece evolutions after unlock (fallback piece)
+            if (checkEvolutions) {
+              checkEvolutions(fallbackPiece).catch(err => {
+                logger.warn('QUIZ', 'Evolution check failed (fallback)', { error: err.message })
+              })
+            }
           }
         }
 
         // Step 3: Award XP via evaluate endpoint (handles tier upgrades)
+        const questionsForEval = Array.isArray(results.questions) ? results.questions : []
+        const answersForEval = Array.isArray(results.answers)
+          ? results.answers.map((answer) => {
+              const question = questionsForEval.find(q => q?.id === answer?.questionId)
+              return {
+                questionId: answer?.questionId,
+                answer: answer?.userAnswer ?? answer?.answer,
+                type: answer?.type || question?.type,
+              }
+            })
+          : []
+
         const evalResponse = await fetch('/api/quiz/evaluate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             topicId: quizTopicId,
             topicName: quizTopicName,
-            answers: results.answers || [],
-            questions: results.questions || [],
+            answers: answersForEval,
+            questions: questionsForEval,
             clientId,
             explanationLevel: results.explanationLevel || 'standard',
           }),
@@ -360,7 +378,7 @@ export default function useQuizHandlers({
     }
 
     setUiState(UI_STATE.QUIZ_RESULTS)
-  }, [quizTopicId, quizTopicName, setQuizResults, setUiState, setUnlockedPiece, setShowPieceCelebration, setWorldBadge, setTierUpgradeInfo, setShowTierCelebration])
+  }, [quizTopicId, quizTopicName, setQuizResults, setUiState, setUnlockedPiece, setShowPieceCelebration, setWorldBadge, setTierUpgradeInfo, setShowTierCelebration, checkEvolutions])
 
   /**
    * WB018: Handle quiz skip

@@ -2,10 +2,13 @@
  * World State Service
  * WB006: Track world building state including pieces, XP, tier, and streak
  * WB014: XP and tier progression for World Builder gamification
+ * WB020: Piece Evolution tracking
+ * WB021: Pocket Connection Scenes
  *
  * Data Schema (worldState collection):
  * - clientId: string
  * - pieces: array of WorldPiece objects
+ * - pockets: array of Pocket objects (connected groups of related pieces)
  * - totalXP: number
  * - tier: 'barren' | 'sprouting' | 'growing' | 'thriving' | 'legendary'
  * - streak: number
@@ -25,6 +28,25 @@
  * - prompt: string
  * - position: { x: number, y: number }
  * - unlockedAt: Date
+ * - evolutionTier: 'seedling' | 'growing' | 'flourishing' | 'legendary' (WB020)
+ * - relatedTopics: string[] - Topics semantically related to this piece (WB020)
+ * - evolvedAt: { growing?: Date, flourishing?: Date, legendary?: Date } (WB020)
+ * - lastReviewedAt: Date - Updated after each review quiz (defaults to unlockedAt)
+ * - reviewCount: number - Total times reviewed (default 0)
+ * - lastReviewScore: number - Most recent review score (0-100)
+ *
+ * Pocket Schema (WB021):
+ * - id: string
+ * - zone: 'nature' | 'civilization' | 'arcane'
+ * - pieceIds: string[] - IDs of pieces in this pocket
+ * - connectionScene: {
+ *     imageUrl: string,
+ *     generatedAt: Date,
+ *     pieceCountAtGeneration: number,
+ *     evolutionLevel: 'initial' | 'enhanced' | 'legendary'
+ *   } | null
+ * - createdAt: Date
+ * - updatedAt: Date
  */
 
 import { Firestore } from '@google-cloud/firestore'
@@ -101,7 +123,9 @@ export const XP_REWARDS = {
   QUIZ_PASS: 25,           // Base XP for passing quiz
   QUIZ_PERFECT: 40,        // Perfect score bonus (replaces QUIZ_PASS)
   QUICK_MODE: 5,           // Quick answer (no quiz)
-  STREAK_BONUS: 5          // Per day of streak
+  STREAK_BONUS: 5,         // Per day of streak
+  REVIEW_PASS: 10,         // XP for passing a review quiz (66%+)
+  REVIEW_PERFECT: 15       // XP for perfect review score (100%)
 }
 
 /**
@@ -194,6 +218,7 @@ function createDefaultWorldState(clientId) {
   return {
     clientId,
     pieces: [],
+    pockets: [], // WB021: Groups of related pieces
     totalXP: 0,
     tier: 'barren',
     streak: 0,
@@ -227,9 +252,34 @@ function normalizeWorldState(data) {
     ...data,
     createdAt: data.createdAt?.toDate?.() || data.createdAt,
     updatedAt: data.updatedAt?.toDate?.() || data.updatedAt,
-    pieces: (data.pieces || []).map(piece => ({
-      ...piece,
-      unlockedAt: piece.unlockedAt?.toDate?.() || piece.unlockedAt
+    pieces: (data.pieces || []).map(piece => {
+      const unlockedAt = piece.unlockedAt?.toDate?.() || piece.unlockedAt
+      return {
+        ...piece,
+        unlockedAt,
+        // WB020: Normalize evolution fields
+        evolutionTier: piece.evolutionTier || 'seedling',
+        relatedTopics: piece.relatedTopics || [],
+        evolvedAt: piece.evolvedAt ? {
+          growing: piece.evolvedAt.growing?.toDate?.() || piece.evolvedAt.growing,
+          flourishing: piece.evolvedAt.flourishing?.toDate?.() || piece.evolvedAt.flourishing,
+          legendary: piece.evolvedAt.legendary?.toDate?.() || piece.evolvedAt.legendary
+        } : {},
+        // Review tracking fields - default lastReviewedAt to unlockedAt for migration
+        lastReviewedAt: piece.lastReviewedAt?.toDate?.() || piece.lastReviewedAt || unlockedAt,
+        reviewCount: piece.reviewCount ?? 0,
+        lastReviewScore: piece.lastReviewScore ?? null
+      }
+    }),
+    // WB021: Normalize pocket fields
+    pockets: (data.pockets || []).map(pocket => ({
+      ...pocket,
+      createdAt: pocket.createdAt?.toDate?.() || pocket.createdAt,
+      updatedAt: pocket.updatedAt?.toDate?.() || pocket.updatedAt,
+      connectionScene: pocket.connectionScene ? {
+        ...pocket.connectionScene,
+        generatedAt: pocket.connectionScene.generatedAt?.toDate?.() || pocket.connectionScene.generatedAt
+      } : null
     }))
   }
 }
@@ -360,9 +410,9 @@ export async function addWorldPiece(clientId, piece) {
       return { worldState: null, arcaneJustUnlocked: false, error: `Invalid zone. Must be one of: ${validZones.join(', ')}` }
     }
 
-    // Check if arcane zone is accessible
+    // Allow arcane pieces even before unlock; zone visibility is handled in the UI.
     if (piece.zone === 'arcane' && !worldState.arcaneUnlocked) {
-      return { worldState: null, arcaneJustUnlocked: false, error: 'Arcane zone is not unlocked yet' }
+      logger.info('WORLD', 'Arcane piece added before unlock', { clientId, pieceId: piece.id })
     }
 
     // Add the piece with unlock timestamp
@@ -828,6 +878,504 @@ export async function awardQuickModeXP(clientId) {
   }
 }
 
+/**
+ * Evolve a piece to a new tier and update its related topics
+ * WB020: Piece Evolution
+ *
+ * @param {string} clientId - The client identifier
+ * @param {string} pieceId - The ID of the piece to evolve
+ * @param {string} newTier - The new evolution tier: 'seedling' | 'growing' | 'flourishing' | 'legendary'
+ * @param {string[]} relatedTopics - Updated list of related topics
+ * @returns {Promise<{
+ *   piece: Object | null,
+ *   previousTier: string,
+ *   error: string | null
+ * }>}
+ */
+export async function evolvePiece(clientId, pieceId, newTier, relatedTopics) {
+  // Validate inputs
+  const validTiers = ['seedling', 'growing', 'flourishing', 'legendary']
+  if (!validTiers.includes(newTier)) {
+    return { piece: null, previousTier: null, error: 'INVALID_TIER' }
+  }
+
+  if (!Array.isArray(relatedTopics)) {
+    return { piece: null, previousTier: null, error: 'INVALID_RELATED_TOPICS' }
+  }
+
+  const loadResult = await loadWorldState(clientId)
+  if (loadResult.error) {
+    return { piece: null, previousTier: null, error: loadResult.error }
+  }
+
+  try {
+    const worldState = loadResult.worldState || createDefaultWorldState(clientId)
+
+    // Find the piece
+    const pieceIndex = worldState.pieces.findIndex(p => p.id === pieceId)
+    if (pieceIndex === -1) {
+      return { piece: null, previousTier: null, error: 'PIECE_NOT_FOUND' }
+    }
+
+    const piece = worldState.pieces[pieceIndex]
+    const previousTier = piece.evolutionTier || 'seedling'
+
+    // Update the piece
+    const now = new Date()
+    const evolvedAt = piece.evolvedAt || {}
+
+    // Record when each tier was reached
+    if (newTier !== previousTier) {
+      evolvedAt[newTier] = now
+    }
+
+    const updatedPiece = {
+      ...piece,
+      evolutionTier: newTier,
+      relatedTopics: [...new Set(relatedTopics)], // Deduplicate
+      evolvedAt
+    }
+
+    // Update the piece in the array
+    worldState.pieces[pieceIndex] = updatedPiece
+    worldState.updatedAt = now
+
+    // Persist
+    const persistResult = await persistWorldState(clientId, worldState)
+    if (persistResult.error) {
+      return { piece: null, previousTier: null, error: persistResult.error }
+    }
+
+    logger.info('WORLD', 'Piece evolved', {
+      clientId,
+      pieceId,
+      topicName: piece.topicName,
+      previousTier,
+      newTier,
+      relatedCount: relatedTopics.length
+    })
+
+    return {
+      piece: updatedPiece,
+      previousTier,
+      error: null
+    }
+  } catch (error) {
+    logger.error('WORLD', 'Failed to evolve piece', { clientId, pieceId, error: error.message })
+    return { piece: null, previousTier: null, error: error.message }
+  }
+}
+
+/**
+ * Update or create a pocket and its connection scene
+ * WB021: Pocket Connection Scenes
+ *
+ * @param {string} clientId - The client identifier
+ * @param {string} pocketId - The pocket ID (can be new or existing)
+ * @param {Object} pocketData - Pocket data to update/create
+ * @param {string} pocketData.zone - The zone: 'nature' | 'civilization' | 'arcane'
+ * @param {string[]} pocketData.pieceIds - IDs of pieces in this pocket
+ * @param {Object} [sceneData] - Optional scene data to save
+ * @param {string} sceneData.imageUrl - Generated scene image URL
+ * @param {number} sceneData.pieceCountAtGeneration - Number of pieces when scene was generated
+ * @param {string} sceneData.evolutionLevel - Scene evolution level
+ * @returns {Promise<{
+ *   pocket: Object | null,
+ *   isNew: boolean,
+ *   error: string | null
+ * }>}
+ */
+export async function updatePocketScene(clientId, pocketId, pocketData, sceneData = null) {
+  // Validate inputs
+  const validZones = ['nature', 'civilization', 'arcane']
+  if (!pocketData || !validZones.includes(pocketData.zone)) {
+    return { pocket: null, isNew: false, error: 'INVALID_ZONE' }
+  }
+
+  if (!Array.isArray(pocketData.pieceIds) || pocketData.pieceIds.length < 3) {
+    return { pocket: null, isNew: false, error: 'INSUFFICIENT_PIECES' }
+  }
+
+  const loadResult = await loadWorldState(clientId)
+  if (loadResult.error) {
+    return { pocket: null, isNew: false, error: loadResult.error }
+  }
+
+  try {
+    const worldState = loadResult.worldState || createDefaultWorldState(clientId)
+
+    // Ensure pockets array exists
+    if (!worldState.pockets) {
+      worldState.pockets = []
+    }
+
+    const now = new Date()
+
+    // Check if pocket exists
+    const existingIndex = worldState.pockets.findIndex(p => p.id === pocketId)
+    const isNew = existingIndex === -1
+
+    let pocket
+
+    if (isNew) {
+      // Create new pocket
+      pocket = {
+        id: pocketId,
+        zone: pocketData.zone,
+        pieceIds: pocketData.pieceIds,
+        connectionScene: sceneData ? {
+          imageUrl: sceneData.imageUrl,
+          generatedAt: now,
+          pieceCountAtGeneration: sceneData.pieceCountAtGeneration || pocketData.pieceIds.length,
+          evolutionLevel: sceneData.evolutionLevel || 'initial'
+        } : null,
+        createdAt: now,
+        updatedAt: now
+      }
+      worldState.pockets.push(pocket)
+    } else {
+      // Update existing pocket
+      pocket = worldState.pockets[existingIndex]
+      pocket.zone = pocketData.zone
+      pocket.pieceIds = pocketData.pieceIds
+      pocket.updatedAt = now
+
+      // Update scene if provided
+      if (sceneData) {
+        pocket.connectionScene = {
+          imageUrl: sceneData.imageUrl,
+          generatedAt: now,
+          pieceCountAtGeneration: sceneData.pieceCountAtGeneration || pocketData.pieceIds.length,
+          evolutionLevel: sceneData.evolutionLevel || 'initial'
+        }
+      }
+
+      worldState.pockets[existingIndex] = pocket
+    }
+
+    worldState.updatedAt = now
+
+    // Persist
+    const persistResult = await persistWorldState(clientId, worldState)
+    if (persistResult.error) {
+      return { pocket: null, isNew: false, error: persistResult.error }
+    }
+
+    logger.info('WORLD', isNew ? 'Pocket created' : 'Pocket updated', {
+      clientId,
+      pocketId,
+      zone: pocketData.zone,
+      pieceCount: pocketData.pieceIds.length,
+      hasScene: !!sceneData
+    })
+
+    return {
+      pocket,
+      isNew,
+      error: null
+    }
+  } catch (error) {
+    logger.error('WORLD', 'Failed to update pocket scene', { clientId, pocketId, error: error.message })
+    return { pocket: null, isNew: false, error: error.message }
+  }
+}
+
+/**
+ * Get a specific pocket by ID
+ *
+ * @param {string} clientId - The client identifier
+ * @param {string} pocketId - The pocket ID
+ * @returns {Promise<{ pocket: Object | null, error: string | null }>}
+ */
+export async function getPocket(clientId, pocketId) {
+  const loadResult = await loadWorldState(clientId)
+  if (loadResult.error) {
+    return { pocket: null, error: loadResult.error }
+  }
+
+  const worldState = loadResult.worldState
+  if (!worldState || !worldState.pockets) {
+    return { pocket: null, error: null }
+  }
+
+  const pocket = worldState.pockets.find(p => p.id === pocketId)
+  return { pocket: pocket || null, error: null }
+}
+
+/**
+ * Get all pockets for a user
+ *
+ * @param {string} clientId - The client identifier
+ * @returns {Promise<{ pockets: Object[], error: string | null }>}
+ */
+export async function getAllPockets(clientId) {
+  const loadResult = await loadWorldState(clientId)
+  if (loadResult.error) {
+    return { pockets: [], error: loadResult.error }
+  }
+
+  const worldState = loadResult.worldState
+  return {
+    pockets: worldState?.pockets || [],
+    error: null
+  }
+}
+
+/**
+ * Record a review completion for a piece and award XP
+ * Updates lastReviewedAt, increments reviewCount, and stores lastReviewScore
+ *
+ * @param {string} clientId - The client identifier
+ * @param {string} pieceId - The ID of the piece being reviewed
+ * @param {number} score - The review score (0-100)
+ * @returns {Promise<{
+ *   piece: Object | null,
+ *   xpAwarded: number,
+ *   refreshed: boolean,
+ *   totalXP: number,
+ *   tierUpgrade: { from: string, to: string } | null,
+ *   message: string,
+ *   error: string | null
+ * }>}
+ */
+export async function recordReview(clientId, pieceId, score) {
+  // Validate score
+  if (typeof score !== 'number' || score < 0 || score > 100) {
+    return {
+      piece: null,
+      xpAwarded: 0,
+      refreshed: false,
+      totalXP: 0,
+      tierUpgrade: null,
+      message: '',
+      error: 'Score must be a number between 0 and 100'
+    }
+  }
+
+  const loadResult = await loadWorldState(clientId)
+  if (loadResult.error) {
+    return {
+      piece: null,
+      xpAwarded: 0,
+      refreshed: false,
+      totalXP: 0,
+      tierUpgrade: null,
+      message: '',
+      error: loadResult.error
+    }
+  }
+
+  try {
+    let worldState = loadResult.worldState || createDefaultWorldState(clientId)
+    worldState = {
+      ...worldState,
+      tierHistory: worldState.tierHistory || [{ tier: 'barren', achievedAt: new Date() }]
+    }
+
+    // Find the piece
+    const pieceIndex = worldState.pieces.findIndex(p => p.id === pieceId)
+    if (pieceIndex === -1) {
+      return {
+        piece: null,
+        xpAwarded: 0,
+        refreshed: false,
+        totalXP: 0,
+        tierUpgrade: null,
+        message: '',
+        error: 'PIECE_NOT_FOUND'
+      }
+    }
+
+    const piece = worldState.pieces[pieceIndex]
+    const now = new Date()
+
+    // Calculate XP award based on score
+    // Pass threshold is 66%, perfect is 100%
+    let xpAwarded = 0
+    let refreshed = false
+    let message = ''
+
+    if (score >= 66) {
+      refreshed = true
+      if (score === 100) {
+        xpAwarded = XP_REWARDS.REVIEW_PERFECT
+        message = 'Perfect review! Knowledge refreshed!'
+      } else {
+        xpAwarded = XP_REWARDS.REVIEW_PASS
+        message = 'Great job! Knowledge refreshed!'
+      }
+    } else {
+      message = 'Keep practicing! Try again to refresh this topic.'
+    }
+
+    // Update the piece with review data
+    const updatedPiece = {
+      ...piece,
+      lastReviewedAt: now,
+      reviewCount: (piece.reviewCount ?? 0) + 1,
+      lastReviewScore: score
+    }
+    worldState.pieces[pieceIndex] = updatedPiece
+
+    // Award XP if earned
+    const previousTotalXP = worldState.totalXP || 0
+    const previousTier = worldState.tier || 'barren'
+    const newTotalXP = previousTotalXP + xpAwarded
+    const newTier = getTierForXP(newTotalXP)
+
+    // Check for tier upgrade
+    let tierUpgrade = null
+    if (newTier !== previousTier) {
+      const previousTierIndex = TIER_ORDER.indexOf(previousTier)
+      const newTierIndex = TIER_ORDER.indexOf(newTier)
+
+      if (newTierIndex > previousTierIndex) {
+        tierUpgrade = { from: previousTier, to: newTier }
+        worldState.tierHistory = worldState.tierHistory || []
+        worldState.tierHistory.push({
+          tier: newTier,
+          achievedAt: now
+        })
+      }
+    }
+
+    // Update world state
+    worldState.totalXP = newTotalXP
+    worldState.tier = newTier
+    if (xpAwarded > 0) {
+      worldState.lastXPAward = {
+        amount: xpAwarded,
+        source: score === 100 ? 'review_perfect' : 'review_pass',
+        timestamp: now
+      }
+    }
+    worldState.updatedAt = now
+
+    // Persist changes
+    const persistResult = await persistWorldState(clientId, worldState)
+    if (persistResult.error) {
+      return {
+        piece: null,
+        xpAwarded: 0,
+        refreshed: false,
+        totalXP: 0,
+        tierUpgrade: null,
+        message: '',
+        error: persistResult.error
+      }
+    }
+
+    logger.info('WORLD', 'Review recorded', {
+      clientId,
+      pieceId,
+      topicName: piece.topicName,
+      score,
+      xpAwarded,
+      refreshed,
+      reviewCount: updatedPiece.reviewCount,
+      tierUpgrade: tierUpgrade ? `${tierUpgrade.from} -> ${tierUpgrade.to}` : null
+    })
+
+    return {
+      piece: updatedPiece,
+      xpAwarded,
+      refreshed,
+      totalXP: newTotalXP,
+      tierUpgrade,
+      message,
+      error: null
+    }
+  } catch (error) {
+    logger.error('WORLD', 'Failed to record review', { clientId, pieceId, error: error.message })
+    return {
+      piece: null,
+      xpAwarded: 0,
+      refreshed: false,
+      totalXP: 0,
+      tierUpgrade: null,
+      message: '',
+      error: error.message
+    }
+  }
+}
+
+/**
+ * Get pieces that need review (haven't been reviewed within the threshold)
+ *
+ * @param {string} clientId - The client identifier
+ * @param {number} daysThreshold - Number of days after which a piece needs review (default 7)
+ * @returns {Promise<{
+ *   pieces: Array<Object>,
+ *   count: number,
+ *   error: string | null
+ * }>}
+ */
+export async function getPiecesNeedingReview(clientId, daysThreshold = 7) {
+  // Validate threshold
+  if (typeof daysThreshold !== 'number' || daysThreshold < 0) {
+    return { pieces: [], count: 0, error: 'daysThreshold must be a non-negative number' }
+  }
+
+  const loadResult = await loadWorldState(clientId)
+  if (loadResult.error) {
+    return { pieces: [], count: 0, error: loadResult.error }
+  }
+
+  try {
+    const worldState = loadResult.worldState
+    if (!worldState || !worldState.pieces || worldState.pieces.length === 0) {
+      return { pieces: [], count: 0, error: null }
+    }
+
+    const now = new Date()
+    const thresholdMs = daysThreshold * 24 * 60 * 60 * 1000
+
+    // Filter pieces that need review
+    const piecesNeedingReview = worldState.pieces
+      .map(piece => {
+        // Use lastReviewedAt if available, otherwise fall back to unlockedAt
+        const lastReviewDate = piece.lastReviewedAt || piece.unlockedAt
+        if (!lastReviewDate) {
+          // If neither date exists, include the piece as needing review
+          return { ...piece, daysSinceReview: Infinity }
+        }
+
+        const reviewDate = lastReviewDate instanceof Date ? lastReviewDate : new Date(lastReviewDate)
+        const timeSinceReview = now.getTime() - reviewDate.getTime()
+        const daysSinceReview = Math.floor(timeSinceReview / (24 * 60 * 60 * 1000))
+
+        return { ...piece, daysSinceReview }
+      })
+      .filter(piece => {
+        const lastReviewDate = piece.lastReviewedAt || piece.unlockedAt
+        if (!lastReviewDate) return true
+
+        const reviewDate = lastReviewDate instanceof Date ? lastReviewDate : new Date(lastReviewDate)
+        const timeSinceReview = now.getTime() - reviewDate.getTime()
+
+        return timeSinceReview > thresholdMs
+      })
+      // Sort by staleness (oldest first)
+      .sort((a, b) => b.daysSinceReview - a.daysSinceReview)
+
+    logger.info('WORLD', 'Retrieved pieces needing review', {
+      clientId,
+      daysThreshold,
+      totalPieces: worldState.pieces.length,
+      needingReview: piecesNeedingReview.length
+    })
+
+    return {
+      pieces: piecesNeedingReview,
+      count: piecesNeedingReview.length,
+      error: null
+    }
+  } catch (error) {
+    logger.error('WORLD', 'Failed to get pieces needing review', { clientId, error: error.message })
+    return { pieces: [], count: 0, error: error.message }
+  }
+}
+
 export default {
   getWorldState,
   initializeWorldState,
@@ -842,6 +1390,12 @@ export default {
   checkTierUpgrade,
   getTierDefinitions,
   checkArcaneUnlock,
+  evolvePiece,
+  updatePocketScene,
+  getPocket,
+  getAllPockets,
+  recordReview,
+  getPiecesNeedingReview,
   XP_REWARDS,
   TIER_THRESHOLDS
 }

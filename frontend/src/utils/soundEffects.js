@@ -325,6 +325,84 @@ export function playStreakSound() {
 }
 
 /**
+ * Play the "evolution" sound.
+ * WB020: Magical ascending sequence for piece evolution celebrations.
+ * Creates a sense of transformation and wonder appropriate for kids.
+ * Longer and more elaborate than tier-up to emphasize the special moment.
+ */
+export function playEvolutionSound() {
+  // Magical ascending arpeggio with shimmering harmonics
+  // E5 -> G#5 -> B5 -> E6 with sparkling overlay
+  playSequence([
+    // Base arpeggio - major chord ascending
+    {
+      frequency: 659.25, // E5 - warm start
+      duration: 0.15,
+      volume: 0.2,
+      waveform: 'sine',
+      attackTime: 0.008,
+      releaseTime: 0.1,
+    },
+    {
+      frequency: 830.61, // G#5 - rising
+      delay: 0.12,
+      duration: 0.15,
+      volume: 0.22,
+      waveform: 'sine',
+      attackTime: 0.008,
+      releaseTime: 0.1,
+    },
+    {
+      frequency: 987.77, // B5 - building
+      delay: 0.24,
+      duration: 0.15,
+      volume: 0.24,
+      waveform: 'sine',
+      attackTime: 0.008,
+      releaseTime: 0.1,
+    },
+    {
+      frequency: 1318.51, // E6 - triumphant peak
+      delay: 0.36,
+      duration: 0.5,
+      volume: 0.28,
+      waveform: 'sine',
+      attackTime: 0.01,
+      releaseTime: 0.35,
+    },
+    // Sparkling harmonics overlay
+    {
+      frequency: 1567.98, // G6 - sparkle 1
+      delay: 0.40,
+      duration: 0.3,
+      volume: 0.12,
+      waveform: 'triangle',
+      attackTime: 0.02,
+      releaseTime: 0.25,
+    },
+    {
+      frequency: 1975.53, // B6 - sparkle 2
+      delay: 0.45,
+      duration: 0.25,
+      volume: 0.1,
+      waveform: 'triangle',
+      attackTime: 0.02,
+      releaseTime: 0.2,
+    },
+    // Final shimmer
+    {
+      frequency: 2637.02, // E7 - high shimmer
+      delay: 0.50,
+      duration: 0.35,
+      volume: 0.08,
+      waveform: 'sine',
+      attackTime: 0.03,
+      releaseTime: 0.3,
+    },
+  ])
+}
+
+/**
  * Preload the audio context to reduce latency on first sound.
  * Call this on user interaction (e.g., first button click).
  */
@@ -343,5 +421,6 @@ export default {
   playAchievementSound,
   playTierUpSound,
   playStreakSound,
+  playEvolutionSound,
   preloadAudioContext,
 }

@@ -438,7 +438,7 @@ export default function QuizResults({
 
           {/* Streak Badge (standard and deep levels) */}
           {level !== 'simple' && maxStreak >= 2 && (
-            <div className="mb-4">
+            <div className="mb-4 flex justify-center">
               <StreakBadge maxStreak={maxStreak} celebrationStyle={celebrationStyle} />
             </div>
           )}

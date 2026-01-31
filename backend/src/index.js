@@ -102,11 +102,11 @@ app.use(cors({
 }))
 
 // Parse JSON bodies with size limit (security measure)
-// Slides payloads can be large (base64 images), so allow a larger limit on /api/slides.
+// Slides and world piece payloads can be large (base64 images), so allow a larger limit on those routes.
 const smallJson = express.json({ limit: '10kb' })
 const largeJson = express.json({ limit: '20mb' })
 app.use((req, res, next) => {
-  if (req.path.startsWith('/api/slides')) {
+  if (req.path.startsWith('/api/slides') || req.path.startsWith('/api/world/piece')) {
     return largeJson(req, res, next)
   }
   return smallJson(req, res, next)
