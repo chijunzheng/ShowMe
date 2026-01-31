@@ -2128,6 +2128,155 @@ Additional style requirements for world piece:
   return { imageUrl: null, error: lastError || 'NO_IMAGE_GENERATED' }
 }
 
+/**
+ * Generate Living World image with optional reference image conditioning
+ * WB-EVOLUTION: Creates evolving world panoramas that maintain visual consistency
+ *
+ * When a referenceImageUrl is provided, the generated image will evolve from
+ * the previous world state while incorporating new elements from the prompt.
+ *
+ * @param {string} prompt - Description of the world state and elements to generate
+ * @param {Object} options - Generation options
+ * @param {string|null} options.referenceImageUrl - Previous world image (base64 data URL) for evolution
+ * @param {'16:9'|'1:1'} options.aspectRatio - Aspect ratio for the output (default: '16:9' for panoramas)
+ * @param {'2k'|'4k'} options.resolution - Resolution quality (default: '2k', use '4k' for milestones)
+ * @returns {Promise<{ imageUrl: string|null, error: string|null }>}
+ */
+export async function generateLivingWorldImage(prompt, options = {}) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { imageUrl: null, error: 'API_NOT_AVAILABLE' }
+  }
+
+  if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+    return { imageUrl: null, error: 'INVALID_PROMPT' }
+  }
+
+  const {
+    referenceImageUrl = null,
+    aspectRatio = '16:9',
+    resolution = '2k'
+  } = options
+
+  // Resolution specifications
+  const resolutionSpec = resolution === '4k'
+    ? 'ultra high resolution 4K quality (3840x2160 for 16:9, 2160x2160 for 1:1)'
+    : 'high resolution 2K quality (1920x1080 for 16:9, 1080x1080 for 1:1)'
+
+  // Build the enhanced prompt with living world style requirements
+  const styleRequirements = `
+Living World Style Requirements:
+- Aspect ratio: ${aspectRatio} panoramic landscape view
+- Resolution: ${resolutionSpec}
+- Style: Enchanting illustrated world, soft painterly style with rich colors
+- Atmosphere: Magical educational world that evolves over time
+- Composition: Layered depth with sky, background (mountains/distant features), midground (forests/structures), foreground (water/terrain details)
+- Lighting: Dynamic natural lighting appropriate to the world's tier
+- No text, labels, or UI elements in the image
+- Seamless, cohesive world that can evolve with new elements`
+
+  let contents
+  let evolutionInstruction = ''
+
+  if (referenceImageUrl && referenceImageUrl.startsWith('data:')) {
+    // Parse the base64 data URL to extract mime type and data
+    const dataUrlMatch = referenceImageUrl.match(/^data:([^;]+);base64,(.+)$/)
+    if (dataUrlMatch) {
+      const mimeType = dataUrlMatch[1]
+      const base64Data = dataUrlMatch[2]
+
+      evolutionInstruction = `
+IMPORTANT: Evolve from the provided reference image.
+- Maintain the same overall world composition and style
+- Keep existing elements and their positions
+- Seamlessly integrate the new elements described in the prompt
+- Preserve visual consistency with the reference world`
+
+      // Multipart content with reference image
+      contents = [
+        {
+          role: 'user',
+          parts: [
+            { text: `${prompt}\n${evolutionInstruction}\n${styleRequirements}` },
+            {
+              inlineData: {
+                mimeType,
+                data: base64Data
+              }
+            }
+          ]
+        }
+      ]
+    } else {
+      // Invalid data URL format, proceed without reference
+      contents = [
+        {
+          role: 'user',
+          parts: [{ text: `${prompt}\n${styleRequirements}` }]
+        }
+      ]
+    }
+  } else {
+    // No reference image - initial world generation
+    contents = [
+      {
+        role: 'user',
+        parts: [{ text: `${prompt}\n${styleRequirements}` }]
+      }
+    ]
+  }
+
+  let lastError = null
+
+  // Try image generation with fallback models
+  for (const model of [IMAGE_MODEL, ...IMAGE_MODEL_FALLBACKS]) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents,
+        config: {
+          responseModalities: ['IMAGE'],
+        }
+      })
+
+      // Extract image data from response
+      const parts = response.candidates?.[0]?.content?.parts || []
+
+      for (const part of parts) {
+        if (part.inlineData) {
+          const mimeType = part.inlineData.mimeType || 'image/png'
+          const base64Data = (part.inlineData.data || '').replace(/\s/g, '')
+          const imageUrl = `data:${mimeType};base64,${base64Data}`
+
+          console.log('[Gemini] Living World image generated successfully', {
+            model,
+            hasReference: !!referenceImageUrl,
+            aspectRatio,
+            resolution
+          })
+          return { imageUrl, error: null }
+        }
+      }
+    } catch (error) {
+      lastError = error.message || 'UNKNOWN_ERROR'
+      console.warn('[Gemini] Living World image generation failed, trying next model:', {
+        model,
+        error: error.message,
+      })
+    }
+  }
+
+  // All models failed - check error type
+  if (lastError?.includes('quota') || lastError?.includes('rate')) {
+    return { imageUrl: null, error: 'RATE_LIMITED' }
+  }
+  if (lastError?.includes('safety') || lastError?.includes('blocked')) {
+    return { imageUrl: null, error: 'CONTENT_FILTERED' }
+  }
+
+  return { imageUrl: null, error: lastError || 'NO_IMAGE_GENERATED' }
+}
+
 // Level-specific quiz generation instructions
 const QUIZ_LEVEL_INSTRUCTIONS = {
   simple: `
@@ -2713,4 +2862,5 @@ export default {
   classifyTopicZone,
   generateWorldPiecePrompt,
   generateWorldPieceImage,
+  generateLivingWorldImage,
 }

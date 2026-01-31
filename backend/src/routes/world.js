@@ -9,6 +9,7 @@
  * WB020: Piece Evolution
  * WB021: Pocket Connection Scenes
  * WB022: Quick Review Mode - Review tracking for spaced repetition
+ * WB023: Living World - Continuous landscape evolution
  *
  * GET /api/world - Get user's world state
  * POST /api/world/piece - Add a new piece (after quiz pass)
@@ -24,6 +25,11 @@
  * GET /api/world/evolution-tiers - Get evolution tier definitions (WB020)
  * GET /api/world/scene-levels - Get scene evolution level definitions (WB021)
  * GET /api/world/pieces/needing-review - Get pieces that need review (WB022)
+ *
+ * Living World Endpoints (WB023):
+ * POST /api/world/living/initialize - Initialize barren world for new user
+ * POST /api/world/living/evolve - Evolve world with a learned topic
+ * GET /api/world/living - Get current living world state
  */
 
 import express from 'express'
@@ -59,6 +65,12 @@ import {
   shouldRegenerateScene,
   SCENE_EVOLUTION_LEVELS
 } from '../services/connectionScene.js'
+import {
+  createInitialWorldState,
+  evolveWorld,
+  getEvolutionWorldState
+} from '../services/worldEvolution.js'
+import { buildBaseWorldPrompt } from '../services/worldPromptBuilder.js'
 
 const router = express.Router()
 
@@ -1396,6 +1408,266 @@ router.get('/scene-levels', (req, res) => {
     levels: SCENE_EVOLUTION_LEVELS,
     levelInfo,
   })
+})
+
+// ============================================================================
+// Living World Endpoints (WB023)
+// ============================================================================
+
+/**
+ * GET /api/world/living
+ * Get current living world state for a user
+ *
+ * Query params:
+ * - clientId (required): string - The client identifier
+ *
+ * Response:
+ * - worldState: WorldState object or null for new users
+ * - worldImageUrl: string or null
+ */
+router.get('/living', async (req, res) => {
+  try {
+    const { clientId } = req.query
+
+    // Validate clientId
+    if (!clientId || typeof clientId !== 'string') {
+      return res.status(400).json({
+        error: 'Missing or invalid clientId',
+        field: 'clientId'
+      })
+    }
+
+    const { sanitized: sanitizedId, error: idError } = sanitizeId(clientId)
+    if (idError) {
+      return res.status(400).json({
+        error: idError,
+        field: 'clientId'
+      })
+    }
+
+    logger.info('WORLD', 'Getting living world state', { clientId: sanitizedId })
+
+    const result = getEvolutionWorldState(sanitizedId)
+
+    if (result.error) {
+      logger.error('WORLD', 'Failed to get living world state', { error: result.error })
+      return res.status(500).json({ error: result.error })
+    }
+
+    return res.json({
+      worldState: result.worldState,
+      worldImageUrl: result.worldState?.worldImageUrl || null
+    })
+  } catch (error) {
+    logger.error('WORLD', 'Unexpected error getting living world state', { error: error.message })
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
+ * POST /api/world/living/initialize
+ * Initialize a new barren world for a user
+ *
+ * Request body:
+ * - clientId (required): string - The client identifier
+ *
+ * Response:
+ * - worldState: Initial WorldState object
+ * - worldImageUrl: string - Generated barren world image
+ * - success: boolean
+ */
+router.post('/living/initialize', async (req, res) => {
+  logger.time('API', 'world-living-initialize-request')
+
+  try {
+    const { clientId } = req.body
+
+    // Validate clientId
+    if (!clientId || typeof clientId !== 'string') {
+      logger.warn('API', '[World] Missing clientId for living world init')
+      logger.timeEnd('API', 'world-living-initialize-request')
+      return res.status(400).json({
+        error: 'Missing or invalid clientId',
+        field: 'clientId'
+      })
+    }
+
+    const { sanitized: sanitizedId, error: idError } = sanitizeId(clientId)
+    if (idError) {
+      logger.timeEnd('API', 'world-living-initialize-request')
+      return res.status(400).json({
+        error: idError,
+        field: 'clientId'
+      })
+    }
+
+    // Check if Gemini is available
+    if (!isGeminiAvailable()) {
+      logger.warn('API', '[World] Gemini API not available for living world init')
+      logger.timeEnd('API', 'world-living-initialize-request')
+      return res.status(503).json({
+        error: 'World generation service temporarily unavailable'
+      })
+    }
+
+    logger.info('API', '[World] Initializing living world', { clientId: sanitizedId })
+
+    // Create initial world state
+    const worldState = createInitialWorldState(sanitizedId)
+
+    // Generate base world prompt and image
+    const basePrompt = buildBaseWorldPrompt()
+    const imageResult = await generateWorldPieceImage(basePrompt)
+
+    if (imageResult.error) {
+      logger.error('API', '[World] Base world image generation failed', {
+        error: imageResult.error,
+        clientId: sanitizedId
+      })
+      logger.timeEnd('API', 'world-living-initialize-request')
+
+      if (imageResult.error === 'RATE_LIMITED') {
+        return res.status(429)
+          .set('Retry-After', '60')
+          .json({
+            error: 'Rate limit exceeded. Please try again later.',
+            retryAfter: 60
+          })
+      }
+
+      return res.status(500).json({
+        error: 'Failed to generate world image'
+      })
+    }
+
+    // Update world state with image URL
+    worldState.worldImageUrl = imageResult.imageUrl
+
+    logger.info('API', '[World] Living world initialized', {
+      clientId: sanitizedId,
+      tier: worldState.tier
+    })
+    logger.timeEnd('API', 'world-living-initialize-request')
+
+    return res.json({
+      worldState,
+      worldImageUrl: imageResult.imageUrl,
+      success: true
+    })
+  } catch (error) {
+    logger.error('API', '[World] Living world init error', {
+      error: error.message,
+      stack: error.stack
+    })
+    logger.timeEnd('API', 'world-living-initialize-request')
+
+    return res.status(500).json({
+      error: 'Internal server error'
+    })
+  }
+})
+
+/**
+ * POST /api/world/living/evolve
+ * Evolve the living world with a new topic
+ *
+ * Request body:
+ * - clientId (required): string - The client identifier
+ * - topicName (required): string - The topic just learned
+ * - summary (optional): string - Topic summary for context
+ *
+ * Response:
+ * - worldState: Updated WorldState object
+ * - worldImageUrl: string - Current world image URL
+ * - changesApplied: { zone, terrainEffect, layer }
+ * - tier: string - Current tier
+ * - success: boolean
+ */
+router.post('/living/evolve', async (req, res) => {
+  logger.time('API', 'world-living-evolve-request')
+
+  try {
+    const { clientId, topicName, summary } = req.body
+
+    // Validate clientId
+    if (!clientId || typeof clientId !== 'string') {
+      logger.warn('API', '[World] Missing clientId for living world evolve')
+      logger.timeEnd('API', 'world-living-evolve-request')
+      return res.status(400).json({
+        error: 'Missing or invalid clientId',
+        field: 'clientId'
+      })
+    }
+
+    const { sanitized: sanitizedId, error: idError } = sanitizeId(clientId)
+    if (idError) {
+      logger.timeEnd('API', 'world-living-evolve-request')
+      return res.status(400).json({
+        error: idError,
+        field: 'clientId'
+      })
+    }
+
+    // Validate topicName
+    if (!topicName || typeof topicName !== 'string') {
+      logger.warn('API', '[World] Missing topicName for living world evolve')
+      logger.timeEnd('API', 'world-living-evolve-request')
+      return res.status(400).json({
+        error: 'Missing or invalid topicName',
+        field: 'topicName'
+      })
+    }
+
+    // Check if world exists for this client
+    const existingState = getEvolutionWorldState(sanitizedId)
+    if (!existingState.worldState) {
+      logger.warn('API', '[World] World not found for evolve', { clientId: sanitizedId })
+      logger.timeEnd('API', 'world-living-evolve-request')
+      return res.status(404).json({
+        error: 'World not found. Please initialize first.',
+        field: 'clientId'
+      })
+    }
+
+    logger.info('API', '[World] Evolving living world', {
+      clientId: sanitizedId,
+      topicName,
+      hasSummary: !!summary
+    })
+
+    // Evolve the world
+    const evolutionResult = await evolveWorld(sanitizedId, topicName, summary)
+
+    // Get updated state
+    const updatedState = getEvolutionWorldState(sanitizedId)
+
+    logger.info('API', '[World] Living world evolved', {
+      clientId: sanitizedId,
+      topicName,
+      tier: evolutionResult.tier,
+      changesApplied: evolutionResult.changesApplied
+    })
+    logger.timeEnd('API', 'world-living-evolve-request')
+
+    return res.json({
+      worldState: updatedState.worldState,
+      worldImageUrl: evolutionResult.worldImageUrl,
+      changesApplied: evolutionResult.changesApplied,
+      tier: evolutionResult.tier,
+      tierUpgrade: evolutionResult.tierUpgrade,
+      success: true
+    })
+  } catch (error) {
+    logger.error('API', '[World] Living world evolve error', {
+      error: error.message,
+      stack: error.stack
+    })
+    logger.timeEnd('API', 'world-living-evolve-request')
+
+    return res.status(500).json({
+      error: 'Internal server error'
+    })
+  }
 })
 
 export default router

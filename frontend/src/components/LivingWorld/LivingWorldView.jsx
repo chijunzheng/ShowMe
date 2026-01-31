@@ -1,0 +1,296 @@
+/**
+ * LivingWorldView Component
+ *
+ * Main container that integrates all Living World components into a cohesive
+ * world viewing experience. Manages the display of panoramic world views,
+ * evolution transitions, and world information.
+ *
+ * Features:
+ * - Empty state with "Create Your World" CTA for new users
+ * - Loading skeleton during initial fetch
+ * - PanoramaViewer for displaying the world image with hotspots
+ * - WorldTransition for smooth evolution animations
+ * - WorldInfoPanel overlay for tier and topics info
+ * - Error handling with retry option
+ */
+
+import { useCallback, useRef } from 'react'
+import PanoramaViewer from './PanoramaViewer'
+import WorldTransition from './WorldTransition'
+import WorldInfoPanel from './WorldInfoPanel'
+
+/**
+ * Loading skeleton component
+ */
+function LoadingSkeleton() {
+  return (
+    <div
+      data-testid="living-world-skeleton"
+      className="
+        w-full aspect-video
+        bg-slate-200 dark:bg-slate-700
+        rounded-lg
+        animate-pulse
+        flex flex-col items-center justify-center gap-4
+      "
+    >
+      {/* Placeholder shapes */}
+      <div className="w-3/4 h-4 bg-slate-300 dark:bg-slate-600 rounded" />
+      <div className="w-1/2 h-4 bg-slate-300 dark:bg-slate-600 rounded" />
+      <div className="w-2/3 h-4 bg-slate-300 dark:bg-slate-600 rounded" />
+    </div>
+  )
+}
+
+/**
+ * Empty state component for new users
+ */
+function EmptyState({ onCreateWorld, isCreating }) {
+  return (
+    <div
+      className="
+        w-full aspect-video
+        bg-gradient-to-b from-slate-300 to-slate-500
+        dark:from-slate-700 dark:to-slate-900
+        rounded-lg
+        flex flex-col items-center justify-center
+        p-6
+      "
+    >
+      {/* World icon */}
+      <div className="mb-4">
+        <span className="text-5xl" role="img" aria-hidden="true">
+          🌍
+        </span>
+      </div>
+
+      {/* Headline */}
+      <h2 className="text-xl md:text-2xl font-bold text-white mb-2 text-center drop-shadow-lg">
+        Create Your World
+      </h2>
+
+      {/* Description */}
+      <p className="text-white/80 text-sm md:text-base mb-6 text-center max-w-sm">
+        Start your learning journey and watch your world grow with each new topic you explore.
+      </p>
+
+      {/* CTA Button */}
+      <button
+        onClick={onCreateWorld}
+        disabled={isCreating}
+        tabIndex={0}
+        className="
+          px-6 py-3
+          rounded-xl
+          bg-white text-slate-700
+          font-semibold
+          hover:bg-white/90 hover:scale-105
+          active:scale-95
+          transition-all duration-200
+          shadow-lg hover:shadow-xl
+          focus:outline-none focus:ring-2 focus:ring-white/50 focus:ring-offset-2 focus:ring-offset-slate-500
+          disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100
+        "
+        aria-label="Create your world"
+      >
+        {isCreating ? 'Creating...' : 'Create Your World'}
+      </button>
+    </div>
+  )
+}
+
+/**
+ * Error state component
+ */
+function ErrorState({ message, onRetry }) {
+  return (
+    <div
+      className="
+        w-full aspect-video
+        bg-gradient-to-b from-slate-400 to-slate-600
+        dark:from-slate-600 dark:to-slate-800
+        rounded-lg
+        flex flex-col items-center justify-center
+        p-6
+      "
+    >
+      <div className="text-4xl mb-4">😔</div>
+      <h2 className="text-xl font-semibold text-white mb-2">
+        Failed to load world
+      </h2>
+      <p className="text-white/70 text-center mb-6 max-w-sm">
+        {message || 'Something went wrong. Please try again.'}
+      </p>
+      <button
+        onClick={onRetry}
+        className="
+          px-5 py-2.5
+          rounded-lg
+          bg-white/20 text-white
+          font-medium
+          hover:bg-white/30
+          transition-colors duration-200
+          focus:outline-none focus:ring-2 focus:ring-white/50
+        "
+        aria-label="Try again"
+      >
+        Try Again
+      </button>
+    </div>
+  )
+}
+
+/**
+ * LivingWorldView - Main container for the Living World feature
+ *
+ * @param {Object} props - Component props
+ * @param {Object} props.worldState - Current world state from parent
+ * @param {string} props.worldImageUrl - URL of the world image
+ * @param {boolean} props.isLoading - Whether world is loading
+ * @param {boolean} props.isEvolving - Whether world is evolving
+ * @param {string} props.tier - Current world tier
+ * @param {Array} props.hotspots - Array of hotspot objects
+ * @param {string} props.error - Error message if any
+ * @param {Function} props.onInitializeWorld - Callback to initialize world
+ * @param {Function} [props.onHotspotClick] - Callback when a hotspot is clicked
+ * @param {Function} [props.onWorldInitialized] - Callback after world is created
+ * @param {Function} [props.onViewHistory] - Callback to view history
+ * @param {Function} [props.onStartLearning] - Callback to start learning
+ */
+function LivingWorldView({
+  worldState,
+  worldImageUrl,
+  isLoading,
+  isEvolving,
+  tier,
+  hotspots,
+  error,
+  onInitializeWorld,
+  onHotspotClick,
+  onWorldInitialized,
+  onViewHistory,
+  onStartLearning,
+}) {
+
+  // Track previous image URL for transitions
+  const previousImageRef = useRef(null)
+
+  // Track if we're currently creating a world
+  const isCreatingRef = useRef(false)
+
+  /**
+   * Handle create world CTA click
+   */
+  const handleCreateWorld = useCallback(async () => {
+    if (isCreatingRef.current) {
+      return
+    }
+
+    isCreatingRef.current = true
+    const result = await onInitializeWorld()
+    isCreatingRef.current = false
+
+    if (result.success) {
+      onWorldInitialized?.()
+    }
+  }, [onInitializeWorld, onWorldInitialized])
+
+  /**
+   * Handle retry after error
+   */
+  const handleRetry = useCallback(() => {
+    // Re-fetch by reloading the page for now
+    // In production, this would call a refetch method
+    window.location.reload()
+  }, [])
+
+  /**
+   * Handle region tap on panorama
+   */
+  const handleRegionTap = useCallback((x, y) => {
+    onHotspotClick?.(x, y)
+  }, [onHotspotClick])
+
+  /**
+   * Handle transition completion
+   */
+  const handleTransitionComplete = useCallback(() => {
+    // Update previous image reference after transition
+    previousImageRef.current = worldImageUrl
+  }, [worldImageUrl])
+
+  // Extract topics learned from world state
+  const topicsLearned = worldState?.topicsLearned || []
+  const totalTopics = topicsLearned.length
+  const recentTopics = topicsLearned.slice(-3).reverse()
+
+  // Determine what to render
+  const showLoading = isLoading
+  const showEmpty = !isLoading && !worldState && !error
+  const showError = !isLoading && error
+  const showWorld = !isLoading && worldState && worldImageUrl
+
+  return (
+    <div
+      data-testid="living-world-view"
+      role="region"
+      aria-label="Living World view"
+      className="relative w-full"
+    >
+      {/* Loading State */}
+      {showLoading && <LoadingSkeleton />}
+
+      {/* Empty State */}
+      {showEmpty && (
+        <EmptyState
+          onCreateWorld={handleCreateWorld}
+          isCreating={isCreatingRef.current}
+        />
+      )}
+
+      {/* Error State */}
+      {showError && (
+        <ErrorState
+          message={error}
+          onRetry={handleRetry}
+        />
+      )}
+
+      {/* World Display */}
+      {showWorld && (
+        <div className="relative">
+          {/* Evolution Transition */}
+          {isEvolving ? (
+            <WorldTransition
+              oldImageUrl={previousImageRef.current}
+              newImageUrl={worldImageUrl}
+              isTransitioning={true}
+              onTransitionComplete={handleTransitionComplete}
+              showText={true}
+            />
+          ) : (
+            /* Normal Panorama View */
+            <PanoramaViewer
+              worldImageUrl={worldImageUrl}
+              isLoading={false}
+              hotspots={hotspots}
+              onRegionTap={handleRegionTap}
+            />
+          )}
+
+          {/* Info Panel Overlay */}
+          <div className="absolute top-3 right-3 z-10">
+            <WorldInfoPanel
+              tier={tier}
+              totalTopics={totalTopics}
+              recentTopics={recentTopics}
+              onViewHistory={onViewHistory}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default LivingWorldView

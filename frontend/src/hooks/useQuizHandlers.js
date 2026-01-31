@@ -4,44 +4,10 @@
  *
  * WB010: After quiz pass, generates world pieces and adds them to user's world
  */
-import { useCallback, useRef } from 'react'
+import { useCallback } from 'react'
 import { UI_STATE } from '../constants/appConfig.js'
 import logger from '../utils/logger.js'
 import { getClientId } from '../utils/clientId'
-
-/**
- * API base URL from environment
- */
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
-
-/**
- * Determine zone from topic name using keyword matching
- */
-function determineZone(topicName) {
-  const topicLower = (topicName || '').toLowerCase()
-
-  // Nature zone keywords
-  const natureKeywords = [
-    'volcano', 'mountain', 'ocean', 'river', 'forest', 'tree', 'plant',
-    'animal', 'dinosaur', 'fish', 'bird', 'insect', 'weather', 'rain',
-    'snow', 'earthquake', 'tornado', 'hurricane', 'ecosystem', 'biology',
-    'earth', 'rock', 'mineral', 'crystal', 'water', 'nature', 'wildlife',
-    'climate', 'environment', 'solar', 'star', 'planet', 'moon', 'sun',
-  ]
-
-  // Civilization zone keywords
-  const civilizationKeywords = [
-    'pyramid', 'castle', 'city', 'building', 'bridge', 'architecture',
-    'history', 'war', 'king', 'queen', 'empire', 'civilization', 'invention',
-    'machine', 'computer', 'robot', 'car', 'train', 'plane', 'ship',
-    'medicine', 'hospital', 'school', 'library', 'museum', 'art', 'music',
-    'sport', 'olympics', 'government', 'law', 'economy', 'money', 'trade',
-  ]
-
-  if (natureKeywords.some(kw => topicLower.includes(kw))) return 'nature'
-  if (civilizationKeywords.some(kw => topicLower.includes(kw))) return 'civilization'
-  return 'arcane'
-}
 
 /**
  * @param {Object} params - Hook parameters
@@ -65,7 +31,7 @@ function determineZone(topicName) {
  * @param {string} params.quizTopicId - Current quiz topic ID
  * @param {string} params.quizTopicName - Current quiz topic name
  * @param {Object|null} params.tierUpgradeInfo - Tier upgrade info if pending
- * @param {Function} [params.checkEvolutions] - WB020: Function to check for piece evolutions after unlock
+ * @param {Function} [params.evolveWorld] - Living World: Function to evolve world after quiz pass
  * @returns {Object} Quiz handler functions
  */
 export default function useQuizHandlers({
@@ -89,7 +55,7 @@ export default function useQuizHandlers({
   quizTopicId,
   quizTopicName,
   tierUpgradeInfo,
-  checkEvolutions,
+  evolveWorld, // Living World: Function to evolve world after quiz pass
 }) {
   /**
    * WB018: Start quiz flow - fetch questions from API
@@ -160,8 +126,8 @@ export default function useQuizHandlers({
   }, [activeTopic, visibleSlidesRef, setIsLoadingQuiz, setQuizTopicId, setQuizTopicName, setQuizQuestions, setQuizSlides, setUiState])
 
   /**
-   * WB018: Handle quiz completion - evaluate, generate piece, and unlock
-   * WB010: After quiz pass, generates world piece image and stores in world state
+   * Handle quiz completion - evaluate and evolve world
+   * Living World: After quiz pass, evolves the world with the learned topic
    */
   const handleQuizComplete = useCallback(async (results) => {
     setQuizResults(results)
@@ -172,168 +138,46 @@ export default function useQuizHandlers({
     if (passed && quizTopicId && quizTopicName) {
       try {
         const clientId = getClientId()
-        const zone = determineZone(quizTopicName)
 
-        logger.info('QUIZ', 'Generating world piece for passed quiz', {
+        logger.info('QUIZ', 'Evolving Living World for passed quiz', {
           topicName: quizTopicName,
-          zone,
           percentage: results.percentage
         })
 
-        // Step 1: Generate world piece image via API
-        const generateResponse = await fetch(`${API_BASE}/api/world/piece/generate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            topicName: quizTopicName,
-            zone,
-            summary: '', // Could pass slide summary in future
-          }),
-        })
+        // Living World: Evolve the world with the learned topic
+        if (evolveWorld) {
+          const evolutionResult = await evolveWorld(
+            quizTopicName,
+            '' // Could pass slide summary in future
+          )
 
-        let generatedPiece = null
-        if (generateResponse.ok) {
-          const generateData = await generateResponse.json()
-          generatedPiece = generateData.piece
-
-          // Step 2: Add piece to world state with position
-          if (generatedPiece) {
-            // Generate random position for this piece
-            const pieceX = Math.random() * 80 + 10
-            const pieceY = Math.random() * 60 + 20
-
-            // Add required fields for world storage
-            // Note: Backend expects position.x/y but frontend display uses x/y directly
-            const pieceToStore = {
-              ...generatedPiece,
-              topicId: quizTopicId,
-              name: quizTopicName, // WorldPiece component expects 'name'
-              x: pieceX, // Direct x/y for frontend display
-              y: pieceY,
-              position: {
-                // Also store in position object for backend compatibility
-                x: pieceX,
-                y: pieceY,
-              },
-            }
-
-            const addResponse = await fetch(`${API_BASE}/api/world/piece`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                clientId,
-                piece: pieceToStore,
-              }),
+          if (evolutionResult.success) {
+            logger.info('QUIZ', 'Living World evolved successfully', {
+              topicName: quizTopicName,
+              tier: evolutionResult.tier,
+              changesApplied: evolutionResult.changesApplied
             })
 
-            if (addResponse.ok) {
-              const addData = await addResponse.json()
-              logger.info('QUIZ', 'World piece added successfully', {
-                pieceId: generatedPiece.id,
-                zone
-              })
+            // Increment world badge for notification
+            setWorldBadge(prev => prev + 1)
 
-              // Set unlocked piece for celebration (using celebrations hook)
-              showPieceUnlock({
-                ...generatedPiece,
-                name: quizTopicName,
-                category: zone,
-              })
-              // Increment world badge for new piece notification
-              setWorldBadge(prev => prev + 1)
-
-              // UI008: Check for tier upgrade from world state update
-              if (addData.arcaneJustUnlocked) {
-                showTierUpgrade({ from: 'growing', to: 'arcane' })
-              }
-
-              // WB020: Check for piece evolutions after unlock
-              if (checkEvolutions) {
-                const unlockedPieceForEvolution = {
-                  ...generatedPiece,
-                  name: quizTopicName,
-                  category: zone,
-                }
-                checkEvolutions(unlockedPieceForEvolution).catch(err => {
-                  logger.warn('QUIZ', 'Evolution check failed', { error: err.message })
-                })
-              }
-            } else {
-              logger.warn('QUIZ', 'Failed to add piece to world', {
-                status: addResponse.status
+            // Check for tier upgrade
+            if (evolutionResult.changesApplied?.tierChanged) {
+              showTierUpgrade({
+                from: evolutionResult.changesApplied.previousTier,
+                to: evolutionResult.changesApplied.newTier
               })
             }
+          } else {
+            logger.warn('QUIZ', 'Living World evolution failed', {
+              error: evolutionResult.error
+            })
           }
         } else {
-          // Fallback: Create a piece with a placeholder icon if image generation fails
-          logger.warn('QUIZ', 'Failed to generate piece image, using fallback', {
-            status: generateResponse.status
-          })
-
-          // Create a fallback piece with an emoji icon
-          const fallbackPieceId = `piece_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
-          const fallbackX = Math.random() * 80 + 10
-          const fallbackY = Math.random() * 60 + 20
-
-          // Select an icon based on the zone
-          const zoneIcons = {
-            nature: ['🌿', '🌳', '🌻', '🦋', '🐦'],
-            civilization: ['🏛️', '🏰', '🏙️', '🚀', '📚'],
-            arcane: ['✨', '🔮', '💫', '⭐', '🌙'],
-          }
-          const icons = zoneIcons[zone] || zoneIcons.nature
-          const icon = icons[Math.floor(Math.random() * icons.length)]
-
-          const fallbackPiece = {
-            id: fallbackPieceId,
-            topicName: quizTopicName,
-            name: quizTopicName, // WorldPiece component expects 'name'
-            zone,
-            icon, // Emoji icon for display - used instead of imageUrl
-            prompt: `Fallback piece for ${quizTopicName}`,
-            topicId: quizTopicId,
-            x: fallbackX,
-            y: fallbackY,
-            position: {
-              x: fallbackX,
-              y: fallbackY,
-            },
-          }
-
-          // Still try to add the fallback piece to world
-          const addFallbackResponse = await fetch(`${API_BASE}/api/world/piece`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              clientId,
-              piece: fallbackPiece,
-            }),
-          })
-
-          if (addFallbackResponse.ok) {
-            logger.info('QUIZ', 'Fallback piece added successfully', {
-              pieceId: fallbackPieceId,
-              zone
-            })
-
-            showPieceUnlock({
-              ...fallbackPiece,
-              name: quizTopicName,
-              category: zone,
-            })
-            setWorldBadge(prev => prev + 1)
-            generatedPiece = fallbackPiece
-
-            // WB020: Check for piece evolutions after unlock (fallback piece)
-            if (checkEvolutions) {
-              checkEvolutions(fallbackPiece).catch(err => {
-                logger.warn('QUIZ', 'Evolution check failed (fallback)', { error: err.message })
-              })
-            }
-          }
+          logger.warn('QUIZ', 'evolveWorld function not available, skipping evolution')
         }
 
-        // Step 3: Award XP via evaluate endpoint (handles tier upgrades)
+        // Award XP via evaluate endpoint (handles additional tier upgrades)
         const questionsForEval = Array.isArray(results.questions) ? results.questions : []
         const answersForEval = Array.isArray(results.answers)
           ? results.answers.map((answer) => {
@@ -361,12 +205,9 @@ export default function useQuizHandlers({
 
         if (evalResponse.ok) {
           const evalData = await evalResponse.json()
-          // UI008: Handle tier upgrade celebration from XP award
+          // Handle tier upgrade celebration from XP award
           if (evalData.tierInfo?.tierUpgrade) {
-            // Show tier upgrade celebration (delay if piece celebration is showing)
-            if (!generatedPiece) {
-              showTierUpgrade(evalData.tierInfo.tierUpgrade)
-            }
+            showTierUpgrade(evalData.tierInfo.tierUpgrade)
           }
         }
       } catch (error) {
@@ -375,7 +216,7 @@ export default function useQuizHandlers({
     }
 
     setUiState(UI_STATE.QUIZ_RESULTS)
-  }, [quizTopicId, quizTopicName, setQuizResults, setUiState, showPieceUnlock, setWorldBadge, showTierUpgrade, checkEvolutions])
+  }, [quizTopicId, quizTopicName, setQuizResults, setUiState, setWorldBadge, showTierUpgrade, evolveWorld])
 
   /**
    * WB018: Handle quiz skip

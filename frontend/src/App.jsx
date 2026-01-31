@@ -14,7 +14,8 @@ import Confetti from './components/Confetti'
 import useUserProgress from './hooks/useUserProgress'
 // WB018: World Builder gamification imports
 import BottomTabBar from './components/BottomTabBar'
-import WorldView from './components/WorldView'
+// Living World: Replace old WorldView with new LivingWorldView
+import { LivingWorldView } from './components/LivingWorld'
 import PieceUnlockCelebration from './components/PieceUnlockCelebration'
 import TierUpCelebration from './components/TierUpCelebration'
 // WB015: Quick mode XP toast
@@ -25,6 +26,7 @@ import useSocraticHandlers from './hooks/useSocraticHandlers.js'
 import useSlideshowControl from './hooks/useSlideshowControl.js'
 import useCelebrations from './hooks/useCelebrations.js'
 import useTabNavigation from './hooks/useTabNavigation.js'
+import useLivingWorld from './hooks/useLivingWorld'
 // WB020: Evolution and pocket scene gamification
 import useEvolution from './hooks/useEvolution'
 import usePocketScene from './hooks/usePocketScene'
@@ -115,6 +117,20 @@ function App() {
   const abortControllerRef = useRef(null)
   const stillWorkingTimerRef = useRef(null)
   const currentQueryRef = useRef(null) // Track current query for fun fact refresh
+
+  // Living World: Hook for world state and evolution
+  // Lifted to App level so evolveWorld is available regardless of which tab is active
+  const {
+    worldState: livingWorldState,
+    worldImageUrl: livingWorldImageUrl,
+    isLoading: livingWorldIsLoading,
+    isEvolving: livingWorldIsEvolving,
+    tier: livingWorldTier,
+    hotspots: livingWorldHotspots,
+    error: livingWorldError,
+    evolveWorld,
+    initializeWorld,
+  } = useLivingWorld()
 
   // F015: Generation progress state from WebSocket
   const [generationProgress, setGenerationProgress] = useState({
@@ -1725,6 +1741,7 @@ function App() {
     quizTopicName,
     tierUpgradeInfo,
     checkEvolutions,
+    evolveWorld, // Living World: Direct function for world evolution
   })
 
   /**
@@ -2911,20 +2928,26 @@ function App() {
           />
         )}
 
-        {/* WB018: World View - shown when World tab is active */}
+        {/* Living World - shown when World tab is active */}
         {activeTab === 'world' && (
-          <WorldView
-            clientId={userClientId}
+          <LivingWorldView
+            worldState={livingWorldState}
+            worldImageUrl={livingWorldImageUrl}
+            isLoading={livingWorldIsLoading}
+            isEvolving={livingWorldIsEvolving}
+            tier={livingWorldTier}
+            hotspots={livingWorldHotspots}
+            error={livingWorldError}
+            onInitializeWorld={initializeWorld}
             onStartLearning={() => {
               setActiveTopicId(null)
               setUiState(UI_STATE.HOME)
               setActiveTab('learn')
             }}
-            onPieceClick={(piece) => {
-              // Could show piece details modal in future
-              logger.debug('WORLD', 'Piece clicked', { pieceId: piece?.id })
+            onHotspotClick={(hotspot) => {
+              // Show topic info when hotspot clicked
+              logger.debug('WORLD', 'Hotspot clicked', { topicName: hotspot?.topicName })
             }}
-            onPocketSceneGenerated={handlePocketSceneGenerated}
           />
         )}
 
