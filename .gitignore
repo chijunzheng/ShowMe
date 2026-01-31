@@ -30,6 +30,10 @@ data/
 # Test coverage
 coverage/
 
+# Playwright test artifacts
+playwright-report/
+test-results/
+
 # Python virtual environment
 .venv/
 __pycache__/
