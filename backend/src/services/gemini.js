@@ -2136,57 +2136,38 @@ Additional style requirements for world piece:
  * @param {Object} params
  * @param {string} params.topicName
  * @param {string} [params.summary]
- * @param {'nature'|'civilization'|'arcane'} [params.zone]
- * @param {string} params.terrainEffect
- * @param {'sky'|'background'|'midground'|'foreground'} [params.compositionLayer]
- * @param {number} [params.terrainLevel]
  * @param {string[]} [params.existingElements]
  * @param {string} [params.tier]
  * @param {string} [params.styleDescriptor]
- * @returns {Promise<{ elementToAdd: string|null, placementHint: string|null, error: string|null }>}
+ * @returns {Promise<{ elementToAdd: string|null, placementHint: string|null, targetLayer: string|null, error: string|null }>}
  */
 export async function generateLivingWorldEvolutionPlan(params = {}) {
   const ai = getAIClient()
   if (!ai) {
-    return { elementToAdd: null, placementHint: null, error: 'API_NOT_AVAILABLE' }
+    return { elementToAdd: null, placementHint: null, targetLayer: null, error: 'API_NOT_AVAILABLE' }
   }
 
   const {
     topicName,
     summary = '',
-    zone = 'nature',
-    terrainEffect,
-    compositionLayer = null,
-    terrainLevel = 0,
     existingElements = [],
     tier = 'barren',
     styleDescriptor = '',
   } = params || {}
 
   if (!topicName || typeof topicName !== 'string' || !topicName.trim()) {
-    return { elementToAdd: null, placementHint: null, error: 'INVALID_TOPIC' }
-  }
-
-  if (!terrainEffect || typeof terrainEffect !== 'string' || !terrainEffect.trim()) {
-    return { elementToAdd: null, placementHint: null, error: 'INVALID_TERRAIN_EFFECT' }
+    return { elementToAdd: null, placementHint: null, targetLayer: null, error: 'INVALID_TOPIC' }
   }
 
   const safeSummary = typeof summary === 'string' ? summary.trim() : ''
   const safeExisting = Array.isArray(existingElements) ? existingElements.filter(Boolean).slice(-12) : []
 
-  const layer = typeof compositionLayer === 'string' ? compositionLayer.trim().toLowerCase() : ''
-  const allowSky = terrainEffect === 'weather' || terrainEffect === 'abstract' || layer === 'sky'
-
   const prompt = `You are an art director for an evolving panoramic "Living World" (16:9 painterly landscape).
 
-Your job: propose ONE small, concrete visual element to ADD that represents the learned topic, and a short placement hint.
+Your job: propose ONE small, concrete visual element to ADD that directly represents the learned topic, and a short placement hint.
 
 WORLD CONTEXT:
 - Tier: ${tier}
-- Zone: ${zone}
-- Terrain effect: ${terrainEffect}
-- Target layer: ${layer || 'unspecified'}
-- Terrain level: ${Number.isFinite(Number(terrainLevel)) ? Number(terrainLevel) : 0} (0 = subtle/early, 4 = dramatic/fully developed)
 - Style DNA: ${styleDescriptor}
 
 TOPIC:
@@ -2197,21 +2178,24 @@ EXISTING ELEMENTS (must be preserved):
 ${safeExisting.length ? safeExisting.map(e => `- ${String(e).slice(0, 160)}`).join('\n') : '- (none yet)'}
 
 RULES:
-- Choose an element that fits the zone + terrain effect AND clearly relates to the topic.
-- Keep it SMALL and LOCAL (especially at low terrain levels). Do not repaint the whole scene.
-- The element must be grounded in the landscape (or water), not floating in the sky.
-${allowSky ? '' : '- Do NOT add auroras, sky ribbons, huge iridescent clouds, or dramatic new sky phenomena.'}
+- Choose an element that is semantically literal for the topic (avoid unrelated metaphors).
+- Keep it SMALL and LOCAL. Do not repaint the whole scene.
+- The element must be grounded in the landscape (or water) unless the topic is explicitly about the sky/space.
+- Do NOT add auroras, sky ribbons, huge iridescent clouds, or dramatic new sky phenomena unless the topic is explicitly about the sky/space.
 - No text, labels, symbols, UI, or letters.
 
 Return ONLY JSON:
 {
   "elementToAdd": "One short noun-phrase describing the new element (max 14 words)",
-  "placementHint": "One short hint for placement in the 16:9 frame (e.g., 'foreground lower-right near water edge')"
+  "placementHint": "One short hint for placement in the 16:9 frame (e.g., 'midground center-left near horizon')",
+  "targetLayer": "One of: sky | background | midground | foreground"
 }`
 
   try {
     const response = await ai.models.generateContent({
-      model: FAST_MODEL,
+      // Use the image model as the sole "classifier" for topic -> world element.
+      // We request JSON output (no image) to keep this step deterministic and structured.
+      model: IMAGE_MODEL,
       contents: prompt,
       config: {
         temperature: 0.6,
@@ -2226,23 +2210,25 @@ Return ONLY JSON:
 
     const elementToAdd = typeof parsed.elementToAdd === 'string' ? parsed.elementToAdd.trim() : ''
     const placementHint = typeof parsed.placementHint === 'string' ? parsed.placementHint.trim() : ''
+    const targetLayer = typeof parsed.targetLayer === 'string' ? parsed.targetLayer.trim().toLowerCase() : ''
 
     return {
       elementToAdd: elementToAdd || null,
       placementHint: placementHint || null,
+      targetLayer: ['sky', 'background', 'midground', 'foreground'].includes(targetLayer) ? targetLayer : null,
       error: null,
     }
   } catch (error) {
     console.error('[Gemini] Living World evolution plan error:', error.message)
 
     if (error.message?.includes('quota') || error.message?.includes('rate')) {
-      return { elementToAdd: null, placementHint: null, error: 'RATE_LIMITED' }
+      return { elementToAdd: null, placementHint: null, targetLayer: null, error: 'RATE_LIMITED' }
     }
     if (error.message?.includes('JSON')) {
-      return { elementToAdd: null, placementHint: null, error: 'PARSE_ERROR' }
+      return { elementToAdd: null, placementHint: null, targetLayer: null, error: 'PARSE_ERROR' }
     }
 
-    return { elementToAdd: null, placementHint: null, error: error.message || 'UNKNOWN_ERROR' }
+    return { elementToAdd: null, placementHint: null, targetLayer: null, error: error.message || 'UNKNOWN_ERROR' }
   }
 }
 
@@ -2346,8 +2332,9 @@ IMPORTANT: Evolve from the provided reference image.
 
   let lastError = null
 
-  // Try image generation with fallback models
-  for (const model of [IMAGE_MODEL, ...IMAGE_MODEL_FALLBACKS]) {
+  // Living World must use the image model only (no heuristic fallbacks),
+  // so evolution stays consistent and debuggable.
+  for (const model of [IMAGE_MODEL]) {
     try {
       const response = await ai.models.generateContent({
         model,

@@ -74,12 +74,13 @@ import {
 } from '../services/connectionScene.js'
 import {
   createInitialWorldState,
+  calculateTier,
   evolveWorld,
   getEvolutionWorldState,
   setEvolutionWorldState,
   resetEvolutionWorldState,
 } from '../services/worldEvolution.js'
-import { buildBaseWorldPrompt, buildEvolutionPrompt, getTerrainElement } from '../services/worldPromptBuilder.js'
+import { buildBaseWorldPrompt, buildEvolutionPrompt } from '../services/worldPromptBuilder.js'
 import { loadLivingWorldState, saveLivingWorldState } from '../services/livingWorldStore.js'
 
 const router = express.Router()
@@ -1438,9 +1439,32 @@ async function hydrateLivingWorldState(clientId) {
 }
 
 function getLivingWorldElements(worldState) {
+  const MAX_ELEMENTS = 12
   const elements = []
 
-  // Prefer explicit per-topic elements when available (more faithful than generic terrain summaries).
+  // Prefer Gemini-chosen element descriptions stored per evolution.
+  try {
+    const evolutions = worldState?.evolutions
+    if (Array.isArray(evolutions) && evolutions.length > 0) {
+      const seen = new Set()
+      for (const evo of evolutions) {
+        const element = typeof evo?.elementAdded === 'string' ? evo.elementAdded.trim() : ''
+        if (!element) continue
+        const key = element.toLowerCase()
+        if (seen.has(key)) continue
+        seen.add(key)
+        elements.push(element)
+      }
+
+      if (elements.length > 0) {
+        return elements.slice(-MAX_ELEMENTS)
+      }
+    }
+  } catch (error) {
+    // Fall back to older persisted states below.
+  }
+
+  // Backward-compat: older persisted states stored `elementAdded` on topics in `compositionMap`.
   try {
     const compositionMap = worldState?.compositionMap
     if (compositionMap && typeof compositionMap === 'object') {
@@ -1477,55 +1501,16 @@ function getLivingWorldElements(worldState) {
           elements.push(element)
         }
 
-        // Keep the prompt concise.
-        if (elements.length > 12) {
-          return elements.slice(-12)
-        }
-
         if (elements.length > 0) {
-          return elements
+          return elements.slice(-MAX_ELEMENTS)
         }
       }
     }
   } catch (error) {
-    // Fall back to terrain summaries below.
+    // ignore
   }
 
-  const progress = worldState?.terrainProgress
-
-  if (progress && typeof progress === 'object') {
-    for (const [terrainEffect, rawCount] of Object.entries(progress)) {
-      const count = Number(rawCount || 0)
-      if (!Number.isFinite(count) || count <= 0) continue
-      const element = getTerrainElement(terrainEffect, count - 1)
-      elements.push(`${terrainEffect}: ${element}`)
-    }
-  }
-
-  return elements
-}
-
-function inferFallbackElementToAdd({ topicName, summary, terrainEffect, terrainLevel }) {
-  const text = `${topicName || ''} ${summary || ''}`.toLowerCase()
-
-  if (terrainEffect === 'water') {
-    const isMarine = /\b(ocean|sea|marine|reef|coral|octopus|cephalopod|tide|tidal|kelp|shore|coast)\b/i.test(text)
-    if (isMarine) {
-      if (terrainLevel <= 0) return 'a small rocky tide pool with gentle ripples'
-      if (terrainLevel === 1) return 'a calm shallow shoreline with clear water'
-      if (terrainLevel === 2) return 'a brighter coastline with small waves'
-      return 'a lively coastal waterline with gentle surf'
-    }
-  }
-
-  if (terrainEffect === 'life') {
-    const isCephalopod = /\b(octopus|cephalopod)\b/i.test(text)
-    if (isCephalopod) {
-      return 'a small octopus in a shallow pool, subtly changing colors to blend with rocks'
-    }
-  }
-
-  return null
+  return []
 }
 
 /**
@@ -1836,30 +1821,6 @@ router.post('/living/evolve', async (req, res) => {
       hasSummary: !!summary
     })
 
-    // Evolve the world
-    const evolutionResult = await evolveWorld(sanitizedId, topicName, summary)
-
-    // Get updated state
-    const updatedState = getEvolutionWorldState(sanitizedId)
-
-    if (!updatedState.worldState) {
-      logger.timeEnd('API', 'world-living-evolve-request')
-      return res.status(500).json({ error: 'Failed to load updated world state' })
-    }
-
-    // If nothing changed (duplicate topic), return early
-    if (evolutionResult?.changesApplied?.skipped) {
-      logger.timeEnd('API', 'world-living-evolve-request')
-      return res.json({
-        worldState: updatedState.worldState,
-        worldImageUrl: updatedState.worldState?.worldImageUrl || null,
-        changesApplied: evolutionResult.changesApplied,
-        tier: updatedState.worldState?.tier || null,
-        tierUpgrade: null,
-        success: true,
-      })
-    }
-
     // Generate an evolved panorama image, preserving the previous world
     if (!isGeminiAvailable()) {
       logger.warn('API', '[World] Gemini API not available for living world evolve')
@@ -1878,76 +1839,107 @@ router.post('/living/evolve', async (req, res) => {
       })
     }
 
-    const terrainLevel = Number(evolutionResult?.changesApplied?.previousTerrainCount || 0)
-    const terrainEffect = evolutionResult?.changesApplied?.terrainEffect
-    const compositionLayer = evolutionResult?.changesApplied?.layer
-    const zone = evolutionResult?.changesApplied?.zone
+    const normalizedTopicName = typeof topicName === 'string' ? topicName.trim() : ''
 
-    // Default progression element for this terrain type/level (used if planning fails).
-    const defaultElementToAdd = getTerrainElement(terrainEffect, terrainLevel)
+    // Avoid spending Gemini calls on duplicate topics.
+    const learned = Array.isArray(hydratedState?.topicsLearned) ? hydratedState.topicsLearned : []
+    const alreadyApplied = normalizedTopicName
+      ? learned.some((t) => typeof t === 'string' && t.toLowerCase() === normalizedTopicName.toLowerCase())
+      : false
 
-    // Use Gemini (fast text) to pick a topic-specific element to add, so topics like
-    // "Octopus color change" don't become generic "stream" additions or sky overlays.
-    let plannedElementToAdd = null
-    let placementHint = null
-
-    try {
-      const plan = await generateLivingWorldEvolutionPlan({
-        topicName,
-        summary,
-        zone,
-        terrainEffect,
-        compositionLayer,
-        terrainLevel,
-        existingElements,
-        tier: updatedState.worldState?.tier || null,
-        styleDescriptor: updatedState.worldState?.styleDescriptor || null,
-      })
-
-      if (!plan?.error) {
-        plannedElementToAdd = plan?.elementToAdd || null
-        placementHint = plan?.placementHint || null
-      }
-    } catch (error) {
-      logger.warn('API', '[World] Failed to generate Living World evolution plan (continuing with fallback)', {
-        error: error.message,
-        clientId: sanitizedId,
+    if (alreadyApplied) {
+      logger.timeEnd('API', 'world-living-evolve-request')
+      return res.json({
+        worldState: hydratedState,
+        worldImageUrl: hydratedState?.worldImageUrl || null,
+        changesApplied: {
+          skipped: true,
+          reason: 'TOPIC_ALREADY_APPLIED',
+        },
+        tier: hydratedState?.tier || null,
+        tierUpgrade: null,
+        success: true,
       })
     }
 
-    const fallbackElementToAdd = inferFallbackElementToAdd({
-      topicName,
-      summary,
-      terrainEffect,
-      terrainLevel,
+    const currentTotalTopics = Number.isFinite(Number(hydratedState?.totalTopics))
+      ? Number(hydratedState.totalTopics)
+      : Array.isArray(hydratedState?.topicsLearned)
+        ? hydratedState.topicsLearned.length
+        : 0
+    const predictedTier = calculateTier(currentTotalTopics + 1)
+
+    // Use Gemini image model as the ONLY source of truth for topic -> world element.
+    let plan
+    try {
+      plan = await generateLivingWorldEvolutionPlan({
+        topicName,
+        summary,
+        existingElements,
+        tier: predictedTier,
+        styleDescriptor: hydratedState?.styleDescriptor || null,
+      })
+    } catch (error) {
+      logger.error('API', '[World] Failed to generate Living World evolution plan', {
+        error: error.message,
+        clientId: sanitizedId,
+      })
+      logger.timeEnd('API', 'world-living-evolve-request')
+      return res.status(500).json({
+        error: 'Failed to plan world evolution',
+      })
+    }
+
+    if (plan?.error === 'RATE_LIMITED') {
+      logger.timeEnd('API', 'world-living-evolve-request')
+      return res.status(429)
+        .set('Retry-After', '60')
+        .json({
+          error: 'Rate limit exceeded. Please try again later.',
+          retryAfter: 60,
+        })
+    }
+
+    const elementToAdd = typeof plan?.elementToAdd === 'string' ? plan.elementToAdd.trim() : ''
+    if (!elementToAdd) {
+      logger.warn('API', '[World] Evolution plan returned no element', {
+        clientId: sanitizedId,
+        topicName,
+        planError: plan?.error || null,
+      })
+      logger.timeEnd('API', 'world-living-evolve-request')
+      return res.status(500).json({
+        error: 'Failed to plan world evolution',
+      })
+    }
+
+    const placementHint = typeof plan?.placementHint === 'string' ? plan.placementHint.trim() : null
+    const targetLayer = typeof plan?.targetLayer === 'string' ? plan.targetLayer.trim() : null
+
+    // Evolve the state (tier/topics) only after we have a concrete plan.
+    const evolutionResult = await evolveWorld(sanitizedId, topicName, summary, {
+      elementAdded: elementToAdd,
+      placementHint,
+      model: null,
     })
 
-    const elementToAdd = plannedElementToAdd || fallbackElementToAdd || defaultElementToAdd
+    // Get updated state
+    const updatedState = getEvolutionWorldState(sanitizedId)
 
-    // Persist the chosen element so future evolutions can explicitly preserve it.
-    const layerKey = typeof compositionLayer === 'string' ? compositionLayer : null
-    const layerState = layerKey ? updatedState.worldState?.compositionMap?.[layerKey] : null
-    if (layerState && Array.isArray(layerState.topics) && layerState.topics.length > 0) {
-      const lastTopic = layerState.topics[layerState.topics.length - 1]
-      if (lastTopic && typeof lastTopic === 'object') {
-        lastTopic.elementAdded = elementToAdd
-        if (placementHint) {
-          lastTopic.placementHint = placementHint
-        }
-      }
+    if (!updatedState.worldState) {
+      logger.timeEnd('API', 'world-living-evolve-request')
+      return res.status(500).json({ error: 'Failed to load updated world state' })
     }
 
     const evolutionPrompt = buildEvolutionPrompt({
       topicName,
       summary,
-      zone,
-      terrainEffect,
-      compositionLayer,
-      existingElements,
-      styleDescriptor: updatedState.worldState?.styleDescriptor,
-      terrainLevel,
       elementToAdd,
       placementHint,
+      targetLayer,
+      existingElements,
+      styleDescriptor: updatedState.worldState?.styleDescriptor,
+      tier: updatedState.worldState?.tier || predictedTier,
     })
 
     const evolvedImage = await generateLivingWorldImage(evolutionPrompt, {

@@ -14,18 +14,17 @@ import worldRouter from '../world.js'
 // Mock dependencies BEFORE importing the module under test
 vi.mock('../../services/worldEvolution.js', () => ({
   createInitialWorldState: vi.fn(),
+  calculateTier: vi.fn(),
   evolveWorld: vi.fn(),
   getEvolutionWorldState: vi.fn(),
   setEvolutionWorldState: vi.fn(),
   resetEvolutionWorldState: vi.fn(),
   WORLD_STYLE: { base: 'mock style' },
-  COMPOSITION_STATES: {}
 }))
 
 vi.mock('../../services/worldPromptBuilder.js', () => ({
   buildBaseWorldPrompt: vi.fn(),
   buildEvolutionPrompt: vi.fn(),
-  getTerrainElement: vi.fn(),
   WORLD_STYLE: { base: 'mock style' }
 }))
 
@@ -61,13 +60,14 @@ vi.mock('../../utils/logger.js', () => ({
 // Import mocked modules
 import {
   createInitialWorldState,
+  calculateTier,
   evolveWorld,
   getEvolutionWorldState,
   setEvolutionWorldState,
   resetEvolutionWorldState
 } from '../../services/worldEvolution.js'
 import { buildBaseWorldPrompt, buildEvolutionPrompt } from '../../services/worldPromptBuilder.js'
-import { isGeminiAvailable, generateLivingWorldImage } from '../../services/gemini.js'
+import { isGeminiAvailable, generateLivingWorldEvolutionPlan, generateLivingWorldImage } from '../../services/gemini.js'
 import { loadLivingWorldState, saveLivingWorldState } from '../../services/livingWorldStore.js'
 import { sanitizeId } from '../../utils/sanitize.js'
 
@@ -300,11 +300,11 @@ describe('Living World API Endpoints', () => {
   describe('POST /api/world/living/evolve', () => {
     const mockEvolutionResult = {
       changesApplied: {
-        zone: 'nature',
-        terrainEffect: 'water',
-        layer: 'foreground',
-        previousState: 'cracked_earth',
-        newState: 'muddy_ground'
+        tierChanged: false,
+        previousTier: 'barren',
+        newTier: 'barren',
+        elementAdded: 'a small planned element',
+        placementHint: 'midground center'
       },
       tier: 'barren',
       tierUpgrade: null
@@ -315,13 +315,8 @@ describe('Living World API Endpoints', () => {
       worldImageUrl: 'data:image/png;base64,baseWorld',
       tier: 'barren',
       totalTopics: 0,
-      terrainProgress: {},
-      compositionMap: {
-        sky: { state: 'overcast', topics: [] },
-        background: { state: 'barren_hills', topics: [] },
-        midground: { state: 'empty_plains', topics: [] },
-        foreground: { state: 'cracked_earth', topics: [] }
-      }
+      topicsLearned: [],
+      evolutions: []
     }
 
     const mockWorldState = {
@@ -329,16 +324,19 @@ describe('Living World API Endpoints', () => {
       worldImageUrl: 'data:image/png;base64,currentWorld',
       tier: 'barren',
       totalTopics: 1,
-      compositionMap: {
-        sky: { state: 'overcast', topics: [] },
-        background: { state: 'barren_hills', topics: [] },
-        midground: { state: 'empty_plains', topics: [] },
-        foreground: { state: 'muddy_ground', topics: [{ name: 'ocean' }] }
-      }
+      topicsLearned: [],
+      evolutions: []
     }
 
     beforeEach(() => {
       vi.clearAllMocks()
+      calculateTier.mockReturnValue('barren')
+      generateLivingWorldEvolutionPlan.mockResolvedValue({
+        elementToAdd: 'a small planned element',
+        placementHint: 'midground center',
+        targetLayer: 'midground',
+        error: null,
+      })
     })
 
     it('updates world with topic using evolveWorld service', async () => {
@@ -370,11 +368,15 @@ describe('Living World API Endpoints', () => {
       expect(evolveWorld).toHaveBeenCalledWith(
         'test-client-123',
         'coral reefs',
-        'Underwater ecosystems'
+        'Underwater ecosystems',
+        expect.objectContaining({
+          elementAdded: 'a small planned element',
+          placementHint: 'midground center',
+        })
       )
     })
 
-    it('returns changesApplied object with zone, terrainEffect, and layer', async () => {
+    it('returns changesApplied object with tier change info', async () => {
       // Arrange
       evolveWorld.mockResolvedValue(mockEvolutionResult)
       getEvolutionWorldState
@@ -394,9 +396,9 @@ describe('Living World API Endpoints', () => {
       // Assert
       expect(response.status).toBe(200)
       expect(response.body.changesApplied).toBeDefined()
-      expect(response.body.changesApplied.zone).toBe('nature')
-      expect(response.body.changesApplied.terrainEffect).toBe('water')
-      expect(response.body.changesApplied.layer).toBe('foreground')
+      expect(response.body.changesApplied.tierChanged).toBe(false)
+      expect(response.body.changesApplied.previousTier).toBe('barren')
+      expect(response.body.changesApplied.newTier).toBe('barren')
     })
 
     it('returns updated worldState and tier', async () => {
@@ -499,7 +501,8 @@ describe('Living World API Endpoints', () => {
       expect(evolveWorld).toHaveBeenCalledWith(
         'test-client-123',
         'volcanoes',
-        undefined
+        undefined,
+        expect.any(Object)
       )
     })
 
@@ -619,20 +622,29 @@ describe('Living World API Endpoints', () => {
         worldImageUrl: 'data:image/png;base64,currentWorld',
         tier: 'barren',
         totalTopics: 1,
-        terrainProgress: {},
-        compositionMap: {
-          sky: { state: 'overcast', topics: [] },
-          background: { state: 'barren_hills', topics: [] },
-          midground: { state: 'empty_plains', topics: [] },
-          foreground: { state: 'cracked_earth', topics: [] },
-        },
+        topicsLearned: [],
+        evolutions: [],
       }
       getEvolutionWorldState
         .mockReturnValueOnce({ worldState: existingWorldState, error: null })
         .mockReturnValueOnce({ worldState: existingWorldState, error: null })
+      calculateTier.mockReturnValue('barren')
+      generateLivingWorldEvolutionPlan.mockResolvedValueOnce({
+        elementToAdd: 'a subtle glowing symbol etched into a rock',
+        placementHint: 'foreground lower-left near the rock formations',
+        targetLayer: 'foreground',
+        error: null,
+      })
       evolveWorld.mockResolvedValue({
-        changesApplied: { zone: 'nature', terrainEffect: 'water', layer: 'foreground' },
-        tier: 'barren'
+        changesApplied: {
+          tierChanged: false,
+          previousTier: 'barren',
+          newTier: 'barren',
+          elementAdded: 'a subtle glowing symbol etched into a rock',
+          placementHint: 'foreground lower-left near the rock formations',
+        },
+        tier: 'barren',
+        tierUpgrade: null,
       })
       buildEvolutionPrompt.mockReturnValue('Evolve prompt')
       generateLivingWorldImage.mockResolvedValue({ imageUrl: 'data:image/png;base64,evolvedWorld', error: null })
