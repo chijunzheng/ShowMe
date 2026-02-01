@@ -81,3 +81,21 @@ export async function saveLivingWorldState(clientId, worldState) {
   }
 }
 
+export async function deleteLivingWorldState(clientId) {
+  if (!LOCAL_ENABLED) return false
+  if (!clientId) return false
+
+  try {
+    const filePath = getStatePath(clientId)
+    await fs.rm(filePath, { force: true })
+    return true
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      logger.warn('WORLD', 'Failed to delete living world state from local store', {
+        error: error.message,
+        clientId,
+      })
+    }
+    return false
+  }
+}

@@ -46,12 +46,18 @@ const MAX_RECENT_TOPICS = 3
  * @param {number} [props.totalTopics=0] - Total number of topics learned
  * @param {Array<string>} [props.recentTopics=[]] - List of recently learned topic names
  * @param {Function} [props.onViewHistory] - Optional callback to view full history
+ * @param {Function} [props.onRegenerate] - Optional callback to regenerate the world
+ * @param {boolean} [props.isRegenerating=false] - Whether regeneration is in progress
+ * @param {string} [props.regenerateLabel] - Override label for regenerate button
  */
 function WorldInfoPanel({
   tier,
   totalTopics = 0,
   recentTopics = [],
   onViewHistory,
+  onRegenerate,
+  isRegenerating = false,
+  regenerateLabel,
 }) {
   // Get tier display values with fallback
   const tierIcon = TIER_ICONS[tier] || TIER_ICONS.barren
@@ -128,6 +134,26 @@ function WorldInfoPanel({
           aria-label="View all history"
         >
           View All
+        </button>
+      )}
+
+      {/* Regenerate Button */}
+      {onRegenerate && (
+        <button
+          onClick={onRegenerate}
+          disabled={isRegenerating}
+          className="
+            mt-2 w-full
+            text-xs text-slate-600 dark:text-slate-300
+            hover:text-slate-800 dark:hover:text-slate-100
+            font-medium
+            transition-colors duration-200
+            focus:outline-none focus:underline
+            disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:text-slate-600
+          "
+          aria-label="Regenerate world from current topics"
+        >
+          {isRegenerating ? (regenerateLabel || 'Regenerating...') : 'Regenerate World'}
         </button>
       )}
     </aside>

@@ -14,12 +14,15 @@
  * - Error handling with retry option
  */
 
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import PanoramaViewer from './PanoramaViewer'
 import WorldTransition from './WorldTransition'
 import WorldInfoPanel from './WorldInfoPanel'
 import SmartPrompt from '../WorldView/SmartPrompt'
 import WorldFAB from '../WorldView/WorldFAB'
+import SuggestionPanel from '../WorldView/SuggestionPanel'
+import QuickActionBar from '../WorldView/QuickActionBar'
+import useSuggestions from '../../hooks/useSuggestions'
 
 /**
  * Loading skeleton component
@@ -40,6 +43,34 @@ function LoadingSkeleton() {
       <div className="w-3/4 h-4 bg-slate-300 dark:bg-slate-600 rounded" />
       <div className="w-1/2 h-4 bg-slate-300 dark:bg-slate-600 rounded" />
       <div className="w-2/3 h-4 bg-slate-300 dark:bg-slate-600 rounded" />
+    </div>
+  )
+}
+
+function RegeneratingOverlay({ progress }) {
+  const total = Number.isFinite(progress?.total) ? progress.total : 0
+  const current = Number.isFinite(progress?.current) ? progress.current : 0
+  const percent = total > 0 ? Math.round((current / total) * 100) : 0
+
+  return (
+    <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
+      <div className="w-full max-w-xs bg-white/90 rounded-2xl shadow-xl px-5 py-4 text-center" role="status" aria-live="polite">
+        <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-base font-semibold text-gray-700">Regenerating world...</p>
+        {total > 0 && (
+          <div className="mt-3">
+            <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-300"
+                style={{ width: `${percent}%` }}
+              />
+            </div>
+            <p className="mt-2 text-xs text-gray-500">
+              {current}/{total} topics
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -162,6 +193,10 @@ function ErrorState({ message, onRetry }) {
  * @param {Object} [props.streak] - Streak data for SmartPrompt
  * @param {Function} [props.onPromptAction] - Callback for SmartPrompt actions
  * @param {Function} [props.onFABAction] - Callback for FAB actions
+ * @param {Function} [props.onSelectSuggestedTopic] - Callback when a suggested topic is selected
+ * @param {Function} [props.onRegenerateWorld] - Callback to regenerate the living world
+ * @param {boolean} [props.isRegeneratingWorld] - Whether a regeneration is in progress
+ * @param {Object} [props.regenerationProgress] - Progress { current, total } for regeneration
  */
 function LivingWorldView({
   worldState,
@@ -180,7 +215,24 @@ function LivingWorldView({
   streak = {},
   onPromptAction,
   onFABAction,
+  onSelectSuggestedTopic,
+  onRegenerateWorld,
+  isRegeneratingWorld = false,
+  regenerationProgress = { current: 0, total: 0 },
 }) {
+
+  // State for SuggestionPanel
+  const [isSuggestionPanelOpen, setIsSuggestionPanelOpen] = useState(false)
+
+  // State for QuickActionBar (shown on long-press of hotspot)
+  const [actionBarData, setActionBarData] = useState(null)
+
+  // Fetch suggestions when panel is open
+  const { suggestions, isLoading: suggestionsLoading } = useSuggestions({
+    pieces,
+    limit: 5,
+    autoFetch: isSuggestionPanelOpen,
+  })
 
   // Track previous image URL for transitions
   const previousImageRef = useRef(null)
@@ -229,17 +281,79 @@ function LivingWorldView({
     previousImageRef.current = worldImageUrl
   }, [worldImageUrl])
 
+  /**
+   * Handle FAB action with suggestions support
+   */
+  const handleFABAction = useCallback((actionId) => {
+    if (actionId === 'suggestions') {
+      setIsSuggestionPanelOpen(true)
+    } else {
+      onFABAction?.(actionId)
+    }
+  }, [onFABAction])
+
+  /**
+   * Handle selecting a suggested topic
+   */
+  const handleSelectTopic = useCallback((topicName) => {
+    setIsSuggestionPanelOpen(false)
+    onSelectSuggestedTopic?.(topicName)
+  }, [onSelectSuggestedTopic])
+
+  /**
+   * Close suggestion panel
+   */
+  const handleCloseSuggestions = useCallback(() => {
+    setIsSuggestionPanelOpen(false)
+  }, [])
+
+  /**
+   * Handle long-press on a hotspot - show QuickActionBar
+   */
+  const handleHotspotLongPress = useCallback(({ piece, position }) => {
+    setActionBarData({ piece, position })
+  }, [])
+
+  /**
+   * Handle action from QuickActionBar
+   */
+  const handleQuickAction = useCallback((actionId) => {
+    if (actionBarData?.piece) {
+      // Map actions to appropriate callbacks
+      if (actionId === 'review') {
+        onHotspotClick?.(actionBarData.piece)
+      } else if (actionId === 'quiz') {
+        onFABAction?.('quiz', actionBarData.piece)
+      } else if (actionId === 'related') {
+        onFABAction?.('related', actionBarData.piece)
+      } else if (actionId === 'suggestions') {
+        setIsSuggestionPanelOpen(true)
+      }
+    }
+    setActionBarData(null)
+  }, [actionBarData, onHotspotClick, onFABAction])
+
+  /**
+   * Close QuickActionBar
+   */
+  const handleCloseActionBar = useCallback(() => {
+    setActionBarData(null)
+  }, [])
+
   // Extract topics learned from world state
   const topicsLearned = Array.isArray(worldState?.topicsLearned) ? worldState.topicsLearned : []
   const totalTopics = typeof worldState?.totalTopics === 'number'
     ? worldState.totalTopics
     : topicsLearned.length
   const recentTopics = topicsLearned.slice(-3).reverse()
+  const regenerateLabel = regenerationProgress?.total
+    ? `Regenerating (${regenerationProgress.current}/${regenerationProgress.total})`
+    : undefined
 
   // Determine what to render
-  const showLoading = isLoading
-  const showEmpty = !isLoading && !worldState && !error
-  const showError = !isLoading && error
+  const showLoading = isLoading || (isRegeneratingWorld && !worldState)
+  const showEmpty = !isLoading && !worldState && !error && !isRegeneratingWorld
+  const showError = !isLoading && error && !worldImageUrl
   const showWorld = !isLoading && worldState && worldImageUrl
   const showGenerating = !isLoading && worldState && !worldImageUrl && !error
 
@@ -301,6 +415,9 @@ function LivingWorldView({
               totalTopics={totalTopics}
               recentTopics={recentTopics}
               onViewHistory={onViewHistory}
+              onRegenerate={onRegenerateWorld}
+              isRegenerating={isRegeneratingWorld}
+              regenerateLabel={regenerateLabel}
             />
           </div>
 
@@ -319,9 +436,22 @@ function LivingWorldView({
 
           {/* Floating Action Button */}
           <div className="absolute bottom-3 right-3 z-20">
-            <WorldFAB onAction={onFABAction} />
+            <WorldFAB onAction={handleFABAction} />
           </div>
+
+          {/* Suggestion Panel */}
+          <SuggestionPanel
+            isOpen={isSuggestionPanelOpen}
+            onClose={handleCloseSuggestions}
+            suggestions={suggestions}
+            isLoading={suggestionsLoading}
+            onSelectTopic={handleSelectTopic}
+          />
         </div>
+      )}
+
+      {isRegeneratingWorld && (
+        <RegeneratingOverlay progress={regenerationProgress} />
       )}
     </div>
   )

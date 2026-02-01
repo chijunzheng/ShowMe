@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
 
 /**
  * Tier configuration with colors, icons, and labels
@@ -46,6 +46,13 @@ function TopicSidebar({
   xpProgress = { current: 0, target: 250 },
   streakCount = 0,
 }) {
+  const MENU_GAP = 8
+  const MENU_MARGIN = 8
+  const BOTTOM_BAR_HEIGHT = 64
+  const safeCurrentXP = Number.isFinite(xpProgress?.current) ? Math.max(0, xpProgress.current) : 0
+  const safeTargetXP = Number.isFinite(xpProgress?.target) && xpProgress.target > 0 ? xpProgress.target : 1
+  const progressPercent = Math.min(100, (safeCurrentXP / safeTargetXP) * 100)
+
   // Mobile sidebar open/closed state
   const [isOpen, setIsOpen] = useState(false)
   // Track which topic's menu is open
@@ -108,12 +115,47 @@ function TopicSidebar({
       const rect = button.getBoundingClientRect()
       setMenuPosition({
         top: rect.top,
-        left: rect.right + 8, // 8px gap from button
+        left: rect.right + MENU_GAP,
       })
     }
 
     setMenuOpenForTopic(topicId)
-  }, [menuOpenForTopic])
+  }, [menuOpenForTopic, MENU_GAP])
+
+  /**
+   * Adjust dropdown position to stay within viewport and above bottom bar.
+   */
+  useLayoutEffect(() => {
+    if (!menuOpenForTopic) return
+
+    const menu = menuRef.current
+    const button = menuButtonRefs.current[menuOpenForTopic]
+    if (!menu || !button) return
+
+    const buttonRect = button.getBoundingClientRect()
+    const menuRect = menu.getBoundingClientRect()
+    const viewportWidth = window.innerWidth
+    const viewportHeight = window.innerHeight
+    const bottomBuffer = BOTTOM_BAR_HEIGHT + MENU_MARGIN
+
+    let top = buttonRect.top
+    let left = buttonRect.right + MENU_GAP
+
+    const maxTop = viewportHeight - bottomBuffer - menuRect.height
+    if (top > maxTop) {
+      top = Math.max(MENU_MARGIN, maxTop)
+    }
+
+    const maxLeft = viewportWidth - MENU_MARGIN - menuRect.width
+    if (left > maxLeft) {
+      left = Math.max(MENU_MARGIN, buttonRect.left - MENU_GAP - menuRect.width)
+    }
+
+    setMenuPosition((prev) => {
+      if (prev.top === top && prev.left === left) return prev
+      return { top, left }
+    })
+  }, [menuOpenForTopic, MENU_GAP, MENU_MARGIN, BOTTOM_BAR_HEIGHT])
 
   /**
    * Start renaming a topic
@@ -283,11 +325,11 @@ function TopicSidebar({
       <aside
         id="topic-sidebar"
         className={`
-          fixed top-0 left-0 h-full z-40
+          fixed top-0 left-0 h-full z-50
           w-64 bg-cream-50 border-r border-cream-200
           flex flex-col
           transition-transform duration-300 ease-in-out
-          md:translate-x-0 md:static md:z-auto md:flex-shrink-0
+          md:translate-x-0 md:relative md:z-50 md:flex-shrink-0
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
         `}
         role="navigation"
@@ -331,7 +373,7 @@ function TopicSidebar({
               {TIER_CONFIG[tier]?.icon} {TIER_CONFIG[tier]?.label}
             </span>
             <span className="text-gray-500 text-xs">
-              {xpProgress.current}/{xpProgress.target} XP
+              {Math.round(safeCurrentXP)}/{Math.round(safeTargetXP)} XP
             </span>
           </div>
           {/* XP Progress bar + Streak row */}
@@ -340,7 +382,7 @@ function TopicSidebar({
             <div className="flex-1 h-1.5 bg-primary-100 rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-primary-400 to-primary-500 rounded-full transition-all duration-500"
-                style={{ width: `${Math.min(100, (xpProgress.current / xpProgress.target) * 100)}%` }}
+                style={{ width: `${progressPercent}%` }}
               />
             </div>
             {/* Streak */}

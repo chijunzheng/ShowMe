@@ -13,7 +13,8 @@
  * - Full accessibility support
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
+import useLongPress from '../../hooks/useLongPress'
 
 /**
  * Minimum distance (in pixels) to consider movement as a drag vs a tap
@@ -29,25 +30,51 @@ const ZOOM_SENSITIVITY = 0.002
 
 /**
  * Hotspot Component - Renders an interactive region marker
+ * Supports tap (short press) and long-press for quick actions
  */
-function Hotspot({ x, y, topicName, glow, onTap }) {
+function Hotspot({ x, y, topicName, glow, piece, onTap, onLongPress }) {
+  const hotspotRef = useRef(null)
+
   const handleClick = useCallback(
     (e) => {
       e.stopPropagation()
-      onTap?.(x, y)
+      onTap?.(piece || { name: topicName, x, y })
     },
-    [x, y, onTap]
+    [piece, topicName, x, y, onTap]
   )
+
+  const handleLongPress = useCallback(
+    ({ x: pressX, y: pressY }) => {
+      if (!onLongPress || !hotspotRef.current) return
+
+      // Get element bounds for positioning
+      const rect = hotspotRef.current.getBoundingClientRect()
+      const centerX = rect.left + rect.width / 2
+      const centerY = rect.top
+
+      onLongPress({
+        piece: piece || { id: topicName, name: topicName, zone: 'nature' },
+        position: { x: centerX, y: centerY },
+      })
+    },
+    [piece, topicName, onLongPress]
+  )
+
+  // Long-press detection
+  const longPressHandlers = useLongPress(handleLongPress, {
+    delay: 500,
+    onClick: handleClick,
+  })
 
   const handleKeyDown = useCallback(
     (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault()
         e.stopPropagation()
-        onTap?.(x, y)
+        onTap?.(piece || { name: topicName, x, y })
       }
     },
-    [x, y, onTap]
+    [piece, topicName, x, y, onTap]
   )
 
   // Clamp coordinates to valid range
@@ -56,10 +83,11 @@ function Hotspot({ x, y, topicName, glow, onTap }) {
 
   return (
     <div
+      ref={hotspotRef}
       data-testid="hotspot"
       role="button"
       tabIndex={0}
-      aria-label={`Explore ${topicName}`}
+      aria-label={`Explore ${topicName}. Long-press for quick actions.`}
       className={`
         absolute transform -translate-x-1/2 -translate-y-1/2
         min-w-[44px] min-h-[44px] w-12 h-12
@@ -78,8 +106,8 @@ function Hotspot({ x, y, topicName, glow, onTap }) {
         left: `${clampedX * 100}%`,
         top: `${clampedY * 100}%`,
       }}
-      onClick={handleClick}
       onKeyDown={handleKeyDown}
+      {...longPressHandlers}
     >
       <span className="text-xs font-medium text-white dark:text-white/90 text-center px-1 truncate max-w-[80px]">
         {topicName}
@@ -114,12 +142,14 @@ function LoadingSkeleton() {
  * @param {string} [props.worldImageUrl] - URL of the world panorama image
  * @param {boolean} [props.isLoading=false] - Whether to show loading state
  * @param {Function} [props.onRegionTap] - Callback when user taps a region: (x, y) => void
- * @param {Array} [props.hotspots=[]] - Areas to highlight: [{ x, y, topicName, glow }]
+ * @param {Function} [props.onHotspotLongPress] - Callback when user long-presses a hotspot: ({ piece, position }) => void
+ * @param {Array} [props.hotspots=[]] - Areas to highlight: [{ x, y, topicName, glow, piece }]
  */
 function PanoramaViewer({
   worldImageUrl,
   isLoading = false,
   onRegionTap,
+  onHotspotLongPress,
   hotspots = [],
 }) {
   // Pan state
@@ -492,7 +522,9 @@ function PanoramaViewer({
             y={hotspot.y}
             topicName={hotspot.topicName}
             glow={hotspot.glow}
+            piece={hotspot.piece}
             onTap={onRegionTap}
+            onLongPress={onHotspotLongPress}
           />
         ))}
     </div>

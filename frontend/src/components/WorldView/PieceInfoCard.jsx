@@ -5,13 +5,16 @@
  * Displays piece information and provides actions:
  * - Review slides: Navigate to slideshow for the piece's topic
  * - Quiz: Start a review quiz for the piece's topic
+ * - Find Related: Discover related topics
  *
  * Features:
  * - Centered modal overlay with backdrop
  * - Piece icon/image display
  * - Time since last review calculation
  * - Evolution tier progress indicator
- * - Two action buttons: Review and Quiz
+ * - Related Topics section (clickable chips)
+ * - Suggested Next section (when near evolution)
+ * - Three action buttons: Review, Quiz, Find Related
  * - Close via button or backdrop tap
  */
 
@@ -115,6 +118,31 @@ function getEvolutionProgress(currentTier, relatedCount = 1) {
 }
 
 /**
+ * Check if a piece is near evolution to the next tier
+ * "Near" is defined as being within 1 topic of the threshold
+ *
+ * @param {string} currentTier - Current evolution tier
+ * @param {number} relatedCount - Number of related topics learned
+ * @returns {boolean} - True if within 1 topic of next tier threshold
+ */
+function isNearEvolutionThreshold(currentTier, relatedCount = 1) {
+  const tierOrder = ['seedling', 'growing', 'flourishing', 'legendary']
+  const currentIndex = tierOrder.indexOf(currentTier || 'seedling')
+
+  // Already at max tier
+  if (currentTier === 'legendary') {
+    return false
+  }
+
+  // Get next tier threshold
+  const nextTier = tierOrder[currentIndex + 1]
+  const nextThreshold = EVOLUTION_TIERS[nextTier]?.threshold || 3
+
+  // Near evolution if within 1 of threshold
+  return relatedCount >= nextThreshold - 1
+}
+
+/**
  * PieceInfoCard - Modal card displaying piece details and actions
  *
  * @param {Object} props - Component props
@@ -130,12 +158,24 @@ function getEvolutionProgress(currentTier, relatedCount = 1) {
  * @param {Function} props.onClose - Callback when card is closed
  * @param {Function} props.onReviewSlides - Callback when Review button is clicked
  * @param {Function} props.onStartQuiz - Callback when Quiz button is clicked
+ * @param {Array} [props.relatedPieces] - Array of related pieces { id, name, icon, zone }
+ * @param {Object} [props.suggestedNext] - Suggested next topic { topic: string, reason: string }
+ * @param {boolean} [props.isNearEvolution] - Optional override for near evolution state
+ * @param {Function} [props.onRelatedPieceClick] - Callback when a related piece chip is clicked
+ * @param {Function} [props.onSuggestedClick] - Callback when suggested topic is clicked
+ * @param {Function} [props.onFindRelated] - Callback when Find Related button is clicked
  */
 function PieceInfoCard({
   piece,
   onClose,
   onReviewSlides,
   onStartQuiz,
+  relatedPieces,
+  suggestedNext,
+  isNearEvolution: isNearEvolutionOverride,
+  onRelatedPieceClick,
+  onSuggestedClick,
+  onFindRelated,
 }) {
   const [isVisible, setIsVisible] = useState(false)
   const [isExiting, setIsExiting] = useState(false)
@@ -158,6 +198,29 @@ function PieceInfoCard({
     getEvolutionProgress(piece?.evolutionTier || piece?.tier, piece?.relatedTopics || piece?.relatedCount || 1),
     [piece?.evolutionTier, piece?.tier, piece?.relatedTopics, piece?.relatedCount]
   )
+
+  // Determine if near evolution (use override if provided)
+  const nearEvolution = useMemo(() => {
+    if (isNearEvolutionOverride !== undefined) {
+      return isNearEvolutionOverride
+    }
+    return isNearEvolutionThreshold(
+      piece?.evolutionTier || piece?.tier,
+      piece?.relatedTopics || piece?.relatedCount || 1
+    )
+  }, [isNearEvolutionOverride, piece?.evolutionTier, piece?.tier, piece?.relatedTopics, piece?.relatedCount])
+
+  // Filter related pieces to show (max 3)
+  const displayedRelatedPieces = useMemo(() => {
+    if (!relatedPieces || relatedPieces.length === 0) return []
+    return relatedPieces.slice(0, 3)
+  }, [relatedPieces])
+
+  // Count of additional related pieces not shown
+  const additionalRelatedCount = useMemo(() => {
+    if (!relatedPieces || relatedPieces.length <= 3) return 0
+    return relatedPieces.length - 3
+  }, [relatedPieces])
 
   /**
    * Handle close with exit animation
@@ -198,6 +261,30 @@ function PieceInfoCard({
       onStartQuiz?.(piece)
     }, 200)
   }, [piece, onStartQuiz])
+
+  /**
+   * Handle Find Related button click
+   */
+  const handleFindRelated = useCallback(() => {
+    setIsExiting(true)
+    setTimeout(() => {
+      onFindRelated?.(piece)
+    }, 200)
+  }, [piece, onFindRelated])
+
+  /**
+   * Handle related piece chip click
+   */
+  const handleRelatedPieceClick = useCallback((relatedPiece) => {
+    onRelatedPieceClick?.(relatedPiece)
+  }, [onRelatedPieceClick])
+
+  /**
+   * Handle suggested topic click
+   */
+  const handleSuggestedClick = useCallback(() => {
+    onSuggestedClick?.(suggestedNext?.topic)
+  }, [onSuggestedClick, suggestedNext?.topic])
 
   /**
    * Handle keyboard escape
@@ -348,6 +435,93 @@ function PieceInfoCard({
               />
             </div>
           )}
+
+          {/* Related Topics section */}
+          {displayedRelatedPieces.length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                Related Topics
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {displayedRelatedPieces.map((relatedPiece) => (
+                  <button
+                    key={relatedPiece.id}
+                    onClick={() => handleRelatedPieceClick(relatedPiece)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleRelatedPieceClick(relatedPiece)
+                      }
+                    }}
+                    className="
+                      inline-flex items-center gap-1.5
+                      px-3 py-1.5
+                      bg-slate-100 dark:bg-slate-700
+                      hover:bg-slate-200 dark:hover:bg-slate-600
+                      rounded-full
+                      text-sm text-slate-700 dark:text-slate-300
+                      transition-colors
+                      focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-1
+                    "
+                    aria-label={relatedPiece.name}
+                  >
+                    <span className="text-sm">{relatedPiece.icon || '🌍'}</span>
+                    <span>{relatedPiece.name}</span>
+                  </button>
+                ))}
+                {additionalRelatedCount > 0 && (
+                  <span className="
+                    inline-flex items-center
+                    px-3 py-1.5
+                    bg-slate-50 dark:bg-slate-800
+                    rounded-full
+                    text-sm text-slate-500 dark:text-slate-400
+                  ">
+                    +{additionalRelatedCount} more
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Suggested Next section */}
+          {nearEvolution && suggestedNext && suggestedNext.topic && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                Suggested Next
+              </h3>
+              <button
+                onClick={handleSuggestedClick}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleSuggestedClick()
+                  }
+                }}
+                className="
+                  w-full p-3
+                  bg-amber-50 dark:bg-amber-900/20
+                  hover:bg-amber-100 dark:hover:bg-amber-900/30
+                  border border-amber-200 dark:border-amber-800
+                  rounded-xl
+                  text-left
+                  transition-colors
+                  focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-1
+                "
+                aria-label={suggestedNext.topic}
+              >
+                <div className="flex items-start gap-2">
+                  <span className="text-lg">💡</span>
+                  <div>
+                    <p className="font-medium text-slate-800 dark:text-slate-200">
+                      {suggestedNext.topic}
+                    </p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
+                      {suggestedNext.reason}
+                    </p>
+                  </div>
+                </div>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Action buttons */}
@@ -404,6 +578,38 @@ function PieceInfoCard({
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
             </svg>
             Quiz
+          </button>
+
+          {/* Find Related button */}
+          <button
+            onClick={handleFindRelated}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                handleFindRelated()
+              }
+            }}
+            className="
+              flex-1 py-3 px-4
+              bg-cyan-500 text-white font-semibold
+              rounded-xl
+              hover:bg-cyan-400 hover:scale-[1.02]
+              active:scale-98
+              transition-all duration-200
+              flex items-center justify-center gap-2
+              focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:ring-offset-2
+            "
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="w-5 h-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+            </svg>
+            Find Related
           </button>
         </div>
       </div>

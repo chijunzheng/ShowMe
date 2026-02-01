@@ -14,6 +14,8 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import ZoneLayer from './ZoneLayer'
+import QuickActionBar from './QuickActionBar'
+import useWorldDensity from '../../hooks/useWorldDensity'
 
 /**
  * Parallax speed multipliers for each zone
@@ -111,6 +113,7 @@ function categorizePocketsByZone(pockets) {
  * @param {Array} [props.pockets=[]] - WB013: Array of pocket portal objects
  * @param {Function} [props.onPieceClick] - Callback when a piece is clicked
  * @param {Function} [props.onPocketClick] - WB013: Callback when a pocket portal is clicked
+ * @param {Function} [props.onQuickAction] - Callback when a quick action is triggered: (actionId, piece) => void
  * @param {boolean} [props.arcaneUnlocked=false] - WB017: Whether the arcane zone is unlocked
  * @param {number} [props.topicsNeeded=0] - WB017: Number of topics needed to unlock arcane
  */
@@ -120,6 +123,7 @@ function ParallaxDiorama({
   pockets = [],
   onPieceClick,
   onPocketClick,
+  onQuickAction,
   arcaneUnlocked = false,
   topicsNeeded = 0,
 }) {
@@ -128,6 +132,9 @@ function ParallaxDiorama({
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart, setDragStart] = useState(0)
   const [dragStartOffset, setDragStartOffset] = useState(0)
+
+  // Quick Action Bar state
+  const [actionBarData, setActionBarData] = useState(null)
 
   // Refs for drag handling
   const containerRef = useRef(null)
@@ -152,6 +159,9 @@ function ParallaxDiorama({
 
   // WB013: Organize pockets by zone for rendering portals in correct layers
   const pocketsByZone = useMemo(() => categorizePocketsByZone(pockets), [pockets])
+
+  // WB024: Get density information for smart piece display
+  const { zoneDensities, visiblePieces, showMoreIndicator } = useWorldDensity(pieces)
 
   // Get tier background or default
   const backgroundClass = TIER_BACKGROUNDS[tier] || DEFAULT_BACKGROUND
@@ -277,6 +287,30 @@ function ParallaxDiorama({
   }, [clampOffset])
 
   /**
+   * Handle long-press on a piece - show QuickActionBar
+   */
+  const handlePieceLongPress = useCallback(({ piece, position }) => {
+    setActionBarData({ piece, position })
+  }, [])
+
+  /**
+   * Handle action from QuickActionBar
+   */
+  const handleQuickAction = useCallback((actionId) => {
+    if (actionBarData?.piece) {
+      onQuickAction?.(actionId, actionBarData.piece)
+    }
+    setActionBarData(null)
+  }, [actionBarData, onQuickAction])
+
+  /**
+   * Close QuickActionBar
+   */
+  const handleCloseActionBar = useCallback(() => {
+    setActionBarData(null)
+  }, [])
+
+  /**
    * Cleanup animation frame on unmount
    */
   useEffect(() => {
@@ -311,41 +345,56 @@ function ParallaxDiorama({
     >
       {/* Background layer - Arcane pieces (sky/cosmic) */}
       {/* WB017: Arcane zone hidden until unlocked */}
+      {/* WB024: Uses density-aware visible pieces */}
       <ZoneLayer
         zone="arcane"
-        pieces={piecesByZone.arcane}
+        pieces={visiblePieces.arcane || piecesByZone.arcane}
         pockets={pocketsByZone.arcane}
         scrollOffset={scrollOffset}
         speed={PARALLAX_SPEEDS.arcane}
         layerWidth={layerWidth}
         onPieceClick={onPieceClick}
         onPocketClick={onPocketClick}
+        onPieceLongPress={handlePieceLongPress}
         hidden={false}
         topicsNeeded={0}
+        densityMode={zoneDensities.arcane}
+        showMoreIndicator={showMoreIndicator.arcane}
+        totalPieceCount={piecesByZone.arcane.length}
       />
 
       {/* Midground layer - Civilization pieces (structures) */}
+      {/* WB024: Uses density-aware visible pieces */}
       <ZoneLayer
         zone="civilization"
-        pieces={piecesByZone.civilization}
+        pieces={visiblePieces.civilization || piecesByZone.civilization}
         pockets={pocketsByZone.civilization}
         scrollOffset={scrollOffset}
         speed={PARALLAX_SPEEDS.civilization}
         layerWidth={layerWidth}
         onPieceClick={onPieceClick}
         onPocketClick={onPocketClick}
+        onPieceLongPress={handlePieceLongPress}
+        densityMode={zoneDensities.civilization}
+        showMoreIndicator={showMoreIndicator.civilization}
+        totalPieceCount={piecesByZone.civilization.length}
       />
 
       {/* Foreground layer - Nature pieces (terrain/plants) */}
+      {/* WB024: Uses density-aware visible pieces */}
       <ZoneLayer
         zone="nature"
-        pieces={piecesByZone.nature}
+        pieces={visiblePieces.nature || piecesByZone.nature}
         pockets={pocketsByZone.nature}
         scrollOffset={scrollOffset}
         speed={PARALLAX_SPEEDS.nature}
         layerWidth={layerWidth}
         onPieceClick={onPieceClick}
         onPocketClick={onPocketClick}
+        onPieceLongPress={handlePieceLongPress}
+        densityMode={zoneDensities.nature}
+        showMoreIndicator={showMoreIndicator.nature}
+        totalPieceCount={piecesByZone.nature.length}
       />
 
       {/* Scroll indicator hint */}
@@ -363,6 +412,16 @@ function ParallaxDiorama({
         <div className="absolute top-2 right-2 bg-black/50 text-white text-xs p-2 rounded pointer-events-none">
           Offset: {scrollOffset.toFixed(0)}px | Pieces: {pieces.length}
         </div>
+      )}
+
+      {/* Quick Action Bar - shown on long-press of a piece */}
+      {actionBarData && (
+        <QuickActionBar
+          piece={actionBarData.piece}
+          position={actionBarData.position}
+          onAction={handleQuickAction}
+          onClose={handleCloseActionBar}
+        />
       )}
     </div>
   )

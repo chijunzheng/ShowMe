@@ -80,6 +80,7 @@ export default function Quiz({
   questions = [],
   slides = [],
   level = 'standard',
+  hasSidebar = false,
   onComplete,
   onSkip
 }) {
@@ -817,6 +818,7 @@ export default function Quiz({
         isActive={timerActive}
         speedThreshold={gamification.rules.speedThreshold}
         level={level}
+        hasSidebar={hasSidebar}
       />
 
       {/* Skip button */}

@@ -120,12 +120,14 @@ function LightningIcon({ className = '' }) {
  * @param {number|null} props.speedThreshold - Seconds for speed bonus (null = hidden)
  * @param {'simple' | 'standard' | 'deep'} props.level - Quiz difficulty level
  * @param {(elapsed: number) => void} [props.onTick] - Optional callback called each second
+ * @param {boolean} [props.hasSidebar] - Whether the topic sidebar is visible (offsets timer on desktop)
  */
 export default function QuizTimer({
   isActive = false,
   speedThreshold = null,
   level = 'standard',
   onTick,
+  hasSidebar = false,
 }) {
   const [elapsed, setElapsed] = useState(0)
   const intervalRef = useRef(null)
@@ -184,13 +186,14 @@ export default function QuizTimer({
   const remaining = Math.max(0, speedThreshold - elapsed)
   const colors = TIMER_COLORS[timerState]
   const isInBonusTerritory = timerState === 'bonus' || timerState === 'approaching'
+  const positionClasses = hasSidebar ? 'left-4 md:left-72' : 'left-4'
 
   // Standard level: Subtle, informational display in top-left
   if (level === 'standard') {
     return (
       <div
         className={`
-          fixed top-4 left-4 z-40
+          fixed top-4 ${positionClasses} z-40
           flex items-center gap-1.5
           px-2.5 py-1.5 rounded-full
           ${colors.bg} ${colors.border} border
@@ -213,7 +216,7 @@ export default function QuizTimer({
   return (
     <div
       className={`
-        fixed top-4 left-4 z-40
+        fixed top-4 ${positionClasses} z-40
         flex flex-col items-center gap-1
         animate-fade-in
       `}

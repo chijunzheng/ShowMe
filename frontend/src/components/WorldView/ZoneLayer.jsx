@@ -11,6 +11,7 @@
 
 import WorldPiece from './WorldPiece'
 import PocketPortal from './PocketPortal'
+import ZoneCluster from './ZoneCluster'
 
 /**
  * Zone layer configuration with z-index and visual properties
@@ -109,6 +110,33 @@ function calculatePortalPositions(pockets, layerWidth) {
 }
 
 /**
+ * WB024: Calculate cluster positions within the layer
+ * Positions clusters at intervals, similar to pieces but with more spacing
+ *
+ * @param {Array} clusters - Array of cluster objects
+ * @param {number} layerWidth - Width of the layer in pixels
+ * @returns {Array} Clusters with calculated x,y positions
+ */
+function calculateClusterPositions(clusters, layerWidth) {
+  if (!clusters || clusters.length === 0) return []
+
+  // Spread clusters across the layer width with generous padding
+  const padding = 80 // px from edges
+  const usableWidth = Math.max(layerWidth - padding * 2, 200)
+  const spacing = usableWidth / Math.max(clusters.length, 1)
+
+  return clusters.map((cluster, index) => {
+    // Calculate x position with spacing
+    const x = padding + (index * spacing) + (spacing / 2)
+
+    // Vertical variation within the layer (30-70% of layer height)
+    const y = 30 + (Math.sin(index * 1.7) * 20) + 20
+
+    return { ...cluster, calculatedX: x, calculatedY: y }
+  })
+}
+
+/**
  * ZoneLayer - Renders pieces and pocket portals within a parallax layer
  *
  * @param {Object} props - Component props
@@ -119,9 +147,15 @@ function calculatePortalPositions(pockets, layerWidth) {
  * @param {number} props.speed - Parallax speed multiplier (0.2, 0.5, or 1.0)
  * @param {number} props.layerWidth - Total width of the scrollable area
  * @param {Function} [props.onPieceClick] - Callback when a piece is clicked
+ * @param {Function} [props.onPieceLongPress] - Callback when a piece is long-pressed: ({ piece, position }) => void
  * @param {Function} [props.onPocketClick] - WB013: Callback when a pocket portal is clicked
  * @param {boolean} [props.hidden] - WB017: Whether the zone should be hidden/clouded (for arcane zone)
  * @param {number} [props.topicsNeeded] - WB017: Number of topics needed to unlock (for hint display)
+ * @param {string} [props.densityMode] - WB024: Density mode (sparse, moderate, dense, crowded)
+ * @param {Array} [props.clusters=[]] - WB024: Array of cluster objects for grouped pieces
+ * @param {Function} [props.onClusterClick] - WB024: Callback when a cluster is clicked
+ * @param {boolean} [props.showMoreIndicator] - WB024: Whether more pieces exist than shown
+ * @param {number} [props.totalPieceCount] - WB024: Total piece count for this zone (for indicator)
  */
 function ZoneLayer({
   zone,
@@ -131,9 +165,15 @@ function ZoneLayer({
   speed = 1,
   layerWidth = 2000,
   onPieceClick,
+  onPieceLongPress,
   onPocketClick,
   hidden = false,
   topicsNeeded = 0,
+  densityMode = 'sparse',
+  clusters = [],
+  onClusterClick,
+  showMoreIndicator = false,
+  totalPieceCount = 0,
 }) {
   const config = ZONE_CONFIG[zone] || DEFAULT_CONFIG
 
@@ -146,6 +186,9 @@ function ZoneLayer({
 
   // WB013: Position pocket portals within the layer
   const positionedPockets = calculatePortalPositions(pockets, layerWidth)
+
+  // WB024: Position clusters within the layer
+  const positionedClusters = calculateClusterPositions(clusters, layerWidth)
 
   // WB017: Render hidden/clouded state for arcane zone
   if (hidden && zone === 'arcane') {
@@ -255,6 +298,7 @@ function ZoneLayer({
             <WorldPiece
               piece={piece}
               onClick={onPieceClick}
+              onLongPress={onPieceLongPress}
             />
           </div>
         ))}
@@ -279,6 +323,45 @@ function ZoneLayer({
             />
           </div>
         ))}
+
+        {/* WB024: Render clusters at calculated positions */}
+        {positionedClusters.map((cluster, index) => (
+          <div
+            key={`cluster-${cluster.label || index}`}
+            className="absolute pointer-events-auto"
+            style={{
+              left: `${cluster.calculatedX}px`,
+              top: `${cluster.calculatedY}%`,
+              transform: 'translate(-50%, -50%)',
+            }}
+          >
+            <ZoneCluster
+              pieces={cluster.pieces}
+              label={cluster.label}
+              zone={zone}
+              onClick={onClusterClick}
+            />
+          </div>
+        ))}
+
+        {/* WB024: Show more indicator when pieces are hidden */}
+        {showMoreIndicator && totalPieceCount > pieces.length && (
+          <div
+            className="absolute right-4 bottom-4 pointer-events-auto"
+            data-testid={`${zone}-show-more`}
+          >
+            <div
+              className={`
+                px-3 py-1.5 rounded-full
+                bg-slate-800/80 text-white text-xs
+                backdrop-blur-sm shadow-lg
+                animate-pulse
+              `}
+            >
+              +{totalPieceCount - pieces.length} more
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Decorative elements based on zone type */}

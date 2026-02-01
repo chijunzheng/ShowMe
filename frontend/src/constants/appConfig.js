@@ -12,6 +12,7 @@ export const UI_STATE = {
   SOCRATIC: 'socratic',
   QUIZ_PROMPT: 'quiz_prompt',
   QUIZ: 'quiz',
+  QUIZ_COMPLETING: 'quiz_completing',
   QUIZ_RESULTS: 'quiz_results',
   ERROR: 'error',
 }

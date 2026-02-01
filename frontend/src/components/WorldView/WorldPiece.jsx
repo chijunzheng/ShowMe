@@ -20,7 +20,8 @@
  * - Sleepy (14+ days): Noticeably faded with "zzz" indicator
  */
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useRef } from 'react'
+import useLongPress from '../../hooks/useLongPress'
 import './WorldPiece.css'
 
 /**
@@ -240,11 +241,13 @@ function TierBadge({ tier }) {
  * @param {number} [props.piece.x] - Horizontal position within layer (0-100)
  * @param {number} [props.piece.y] - Vertical position within layer (0-100)
  * @param {Function} [props.onClick] - Callback when piece is clicked
+ * @param {Function} [props.onLongPress] - Callback when piece is long-pressed: ({ piece, position: { x, y } }) => void
  * @param {boolean} [props.isRefreshed] - WB021: Whether piece was just refreshed (triggers animation)
  */
-function WorldPiece({ piece, onClick, isRefreshed = false }) {
+function WorldPiece({ piece, onClick, onLongPress, isRefreshed = false }) {
   const [isHovered, setIsHovered] = useState(false)
   const [imageError, setImageError] = useState(false)
+  const pieceRef = useRef(null)
 
   const zoneStyle = ZONE_STYLES[piece.zone] || DEFAULT_ZONE_STYLE
 
@@ -276,6 +279,41 @@ function WorldPiece({ piece, onClick, isRefreshed = false }) {
       handleClick()
     }
   }, [handleClick])
+
+  /**
+   * Handle long-press - trigger action bar with position
+   */
+  const handleLongPress = useCallback(
+    ({ x, y }) => {
+      if (!onLongPress || !pieceRef.current) return
+
+      // Get element bounds for better positioning
+      const rect = pieceRef.current.getBoundingClientRect()
+      const centerX = rect.left + rect.width / 2
+      const centerY = rect.top
+
+      onLongPress({
+        piece,
+        position: { x: centerX, y: centerY },
+      })
+    },
+    [piece, onLongPress]
+  )
+
+  // Long-press detection handlers
+  const baseLongPressHandlers = useLongPress(handleLongPress, {
+    delay: 500,
+    onClick: handleClick,
+  })
+
+  // Combine long-press handlers with hover state
+  const longPressHandlers = useMemo(() => ({
+    ...baseLongPressHandlers,
+    onMouseLeave: (e) => {
+      setIsHovered(false)
+      baseLongPressHandlers.onMouseLeave?.(e)
+    },
+  }), [baseLongPressHandlers])
 
   /**
    * Handle image load error - fall back to icon display
@@ -328,15 +366,15 @@ function WorldPiece({ piece, onClick, isRefreshed = false }) {
 
   return (
     <div
+      ref={pieceRef}
       role="button"
       tabIndex={0}
-      onClick={handleClick}
       onKeyDown={handleKeyDown}
       onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
       className={containerClasses}
       style={{ boxShadow: boxShadowStyle }}
-      aria-label={`${piece.name} - ${piece.zone} piece, ${tier} tier`}
+      aria-label={`${piece.name} - ${piece.zone} piece, ${tier} tier. Long-press for quick actions.`}
+      {...longPressHandlers}
     >
       {/* Tier evolution badge */}
       <TierBadge tier={tier} />

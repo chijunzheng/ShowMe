@@ -10,12 +10,14 @@ import Quiz from '../Quiz/index.jsx'
  * @param {Array} props.slides - Slides with images for visual quiz questions
  * @param {Function} props.onComplete - Handler when quiz is completed
  * @param {Function} props.onSkip - Handler when user skips the quiz
+ * @param {boolean} [props.hasSidebar] - Whether the topic sidebar is visible
  */
 export default function QuizActiveScreen({
   questions,
   slides = [],
   onComplete,
   onSkip,
+  hasSidebar = false,
 }) {
   return (
     <Quiz
@@ -23,6 +25,7 @@ export default function QuizActiveScreen({
       slides={slides}
       onComplete={onComplete}
       onSkip={onSkip}
+      hasSidebar={hasSidebar}
     />
   )
 }

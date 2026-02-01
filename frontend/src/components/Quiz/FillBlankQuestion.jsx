@@ -142,6 +142,27 @@ export default function FillBlankQuestion({
     }
   }, [inputValue, showFeedback, handleSubmit])
 
+  const getBlankFillTokens = useCallback((answer, blanksCount) => {
+    if (!answer || blanksCount === 0) return []
+    if (Array.isArray(answer)) return answer.filter(Boolean)
+
+    const trimmedAnswer = String(answer).trim()
+    if (!trimmedAnswer) return []
+    if (blanksCount <= 1) return [trimmedAnswer]
+
+    const andSplit = trimmedAnswer.split(/\s+and\s+/i).map(part => part.trim()).filter(Boolean)
+    if (andSplit.length === blanksCount) {
+      return andSplit
+    }
+
+    const commaSplit = trimmedAnswer.split(/\s*,\s*/).map(part => part.trim()).filter(Boolean)
+    if (commaSplit.length === blanksCount) {
+      return commaSplit
+    }
+
+    return [trimmedAnswer]
+  }, [])
+
   // Render sentence with blank highlighted and filled word
   const renderSentenceWithBlank = () => {
     if (!blankSentence) return null
@@ -156,6 +177,8 @@ export default function FillBlankQuestion({
       : useTypingMode
         ? inputValue
         : selectedWord
+
+    const fillTokens = getBlankFillTokens(displayWord, blanks.length)
 
     return (
       <p className="text-xl md:text-2xl font-medium text-gray-800 dark:text-gray-100 leading-relaxed">
@@ -173,14 +196,14 @@ export default function FillBlankQuestion({
                       : isPartial
                         ? 'bg-yellow-100 border-yellow-500 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
                         : 'bg-red-100 border-red-500 text-red-600 dark:bg-red-900/30 dark:text-red-400'
-                    : displayWord
+                    : fillTokens[index]
                       ? 'bg-primary/20 border-primary text-primary-600 dark:text-primary-400'
                       : 'bg-primary/10 border-primary/50 text-primary/60'
                   }
                   transition-all duration-300
                 `}
               >
-                {displayWord || '___'}
+                {fillTokens[index] || '___'}
               </span>
             )}
           </span>

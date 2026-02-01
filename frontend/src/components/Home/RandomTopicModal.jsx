@@ -14,6 +14,44 @@ import { useState, useEffect, useCallback } from 'react'
 import { LEVEL_CONFIG, EXPLANATION_LEVEL } from '../../constants/appConfig.js'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
+const RECENT_TOPICS_STORAGE_KEY = 'showme_random_topic_history'
+const MAX_RECENT_TOPICS = 8
+
+function normalizeTopicList(list) {
+  if (!Array.isArray(list)) return []
+  const seen = new Set()
+  return list
+    .filter((topic) => typeof topic === 'string')
+    .map((topic) => topic.trim())
+    .filter((topic) => topic.length > 0)
+    .filter((topic) => {
+      const key = topic.toLowerCase()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+}
+
+function loadRecentTopics() {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(RECENT_TOPICS_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return normalizeTopicList(parsed).slice(0, MAX_RECENT_TOPICS)
+  } catch (error) {
+    return []
+  }
+}
+
+function saveRecentTopics(list) {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(RECENT_TOPICS_STORAGE_KEY, JSON.stringify(list))
+  } catch (error) {
+    // Ignore storage errors (quota, privacy mode).
+  }
+}
 
 /**
  * @param {Object} props
@@ -38,7 +76,18 @@ export default function RandomTopicModal({
     setError(null)
 
     try {
-      const response = await fetch(`${API_BASE}/api/random-topic`)
+      const excludeTopics = normalizeTopicList([
+        ...loadRecentTopics(),
+        ...(topic ? [topic] : []),
+      ]).slice(0, MAX_RECENT_TOPICS)
+
+      const params = new URLSearchParams()
+      if (excludeTopics.length > 0) {
+        params.set('exclude', JSON.stringify(excludeTopics))
+      }
+
+      const url = `${API_BASE}/api/random-topic${params.toString() ? `?${params.toString()}` : ''}`
+      const response = await fetch(url)
 
       if (!response.ok) {
         throw new Error('Failed to fetch random topic')
@@ -48,13 +97,17 @@ export default function RandomTopicModal({
       setTopic(data.topic)
       setCategory(data.category || 'General')
       setEmoji(data.emoji || '✨')
+      if (data.topic) {
+        const updated = normalizeTopicList([data.topic, ...loadRecentTopics()]).slice(0, MAX_RECENT_TOPICS)
+        saveRecentTopics(updated)
+      }
     } catch (err) {
       console.error('[RandomTopicModal] Fetch error:', err)
       setError('Oops! Could not get a random topic. Try again?')
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [topic])
 
   // Fetch on open
   useEffect(() => {

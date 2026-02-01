@@ -368,6 +368,25 @@ export async function initializeWorldState(clientId) {
 }
 
 /**
+ * Reset world state for a user (clears pieces, XP, tier, streak, etc.)
+ * @param {string} clientId
+ * @returns {Promise<{ worldState: Object | null, error: string | null }>}
+ */
+export async function resetWorldState(clientId) {
+  const worldState = createDefaultWorldState(clientId)
+  const result = await persistWorldState(clientId, worldState)
+
+  if (result.error) {
+    logger.error('WORLD', 'Failed to reset world state', { clientId, error: result.error })
+    return { worldState: null, error: result.error }
+  }
+
+  logger.info('WORLD', 'World state reset', { clientId, tier: worldState.tier })
+
+  return { worldState, error: null }
+}
+
+/**
  * Get world state for a user, creating a default one if it doesn't exist
  * @param {string} clientId
  * @returns {Promise<{ worldState: Object | null, error: string | null }>}
@@ -1379,6 +1398,7 @@ export async function getPiecesNeedingReview(clientId, daysThreshold = 7) {
 export default {
   getWorldState,
   initializeWorldState,
+  resetWorldState,
   addWorldPiece,
   addXP,
   awardQuizXP,

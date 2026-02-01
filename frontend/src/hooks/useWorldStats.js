@@ -15,85 +15,94 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
 
 /**
  * Tier thresholds and XP requirements
- * Tiers are based on piece count, but we track XP for progress bars
+ * Backend tiers are based on total XP, not piece count.
  */
 const TIER_CONFIG = {
   barren: {
-    minPieces: 0,
-    xpPerPiece: 50,
-    nextTier: 'sprouting',
     icon: '🏜️',
     label: 'Barren',
   },
   sprouting: {
-    minPieces: 5,
-    xpPerPiece: 50,
-    nextTier: 'growing',
     icon: '🌱',
     label: 'Sprouting',
   },
   growing: {
-    minPieces: 15,
-    xpPerPiece: 50,
-    nextTier: 'thriving',
     icon: '🌿',
     label: 'Growing',
   },
   thriving: {
-    minPieces: 30,
-    xpPerPiece: 50,
-    nextTier: 'legendary',
     icon: '🌳',
     label: 'Thriving',
   },
   legendary: {
-    minPieces: 50,
-    xpPerPiece: 50,
-    nextTier: null,
     icon: '✨',
     label: 'Legendary',
   },
 }
 
+const DEFAULT_TIER_THRESHOLDS = {
+  barren: 0,
+  sprouting: 100,
+  growing: 300,
+  thriving: 600,
+  legendary: 1000,
+}
+
+const DEFAULT_TIER_ORDER = ['barren', 'sprouting', 'growing', 'thriving', 'legendary']
+
 /**
- * Calculate tier based on piece count
+ * Calculate tier based on total XP thresholds
  */
-function calculateTier(pieceCount) {
-  if (pieceCount >= 50) return 'legendary'
-  if (pieceCount >= 30) return 'thriving'
-  if (pieceCount >= 15) return 'growing'
-  if (pieceCount >= 5) return 'sprouting'
-  return 'barren'
+function calculateTierFromXP(totalXP, thresholds, order) {
+  const safeXP = Number.isFinite(totalXP) ? totalXP : 0
+  const tierOrder = Array.isArray(order) && order.length > 0 ? order : DEFAULT_TIER_ORDER
+  const tierThresholds = thresholds && typeof thresholds === 'object' ? thresholds : DEFAULT_TIER_THRESHOLDS
+
+  let currentTier = tierOrder[0] || 'barren'
+  for (const tier of tierOrder) {
+    const threshold = Number.isFinite(tierThresholds[tier]) ? tierThresholds[tier] : 0
+    if (safeXP >= threshold) {
+      currentTier = tier
+    } else {
+      break
+    }
+  }
+
+  return currentTier
 }
 
 /**
  * Calculate XP progress within current tier
  */
-function calculateXPProgress(pieceCount, tier) {
-  const tierConfig = TIER_CONFIG[tier]
-  const currentTierXP = pieceCount * tierConfig.xpPerPiece
-  const currentTierMinPieces = tierConfig.minPieces
+function calculateXPProgress(totalXP, thresholds, order) {
+  const safeXP = Number.isFinite(totalXP) ? totalXP : 0
+  const tierOrder = Array.isArray(order) && order.length > 0 ? order : DEFAULT_TIER_ORDER
+  const tierThresholds = thresholds && typeof thresholds === 'object' ? thresholds : DEFAULT_TIER_THRESHOLDS
 
-  if (!tierConfig.nextTier) {
-    // At max tier, show total XP
+  const currentTier = calculateTierFromXP(safeXP, tierThresholds, tierOrder)
+  const currentIndex = tierOrder.indexOf(currentTier)
+  const currentThreshold = Number.isFinite(tierThresholds[currentTier]) ? tierThresholds[currentTier] : 0
+  const nextTier = currentIndex >= 0 && currentIndex < tierOrder.length - 1 ? tierOrder[currentIndex + 1] : null
+
+  if (!nextTier) {
+    const current = Math.max(0, safeXP)
     return {
-      current: currentTierXP,
-      target: currentTierXP,
+      current,
+      target: Math.max(current, 1),
       percentage: 100,
+      tier: currentTier,
     }
   }
 
-  const nextTierConfig = TIER_CONFIG[tierConfig.nextTier]
-  const piecesInCurrentTier = pieceCount - currentTierMinPieces
-  const piecesToNextTier = nextTierConfig.minPieces - currentTierMinPieces
-
-  const current = piecesInCurrentTier * tierConfig.xpPerPiece
-  const target = piecesToNextTier * tierConfig.xpPerPiece
+  const nextThreshold = Number.isFinite(tierThresholds[nextTier]) ? tierThresholds[nextTier] : currentThreshold
+  const target = Math.max(1, nextThreshold - currentThreshold)
+  const current = Math.max(0, safeXP - currentThreshold)
 
   return {
     current,
     target,
     percentage: Math.min(100, (current / target) * 100),
+    tier: currentTier,
   }
 }
 
@@ -108,7 +117,7 @@ export default function useWorldStats(clientId) {
     totalXP: 0,
     tier: 'barren',
     tierConfig: TIER_CONFIG.barren,
-    xpProgress: { current: 0, target: 250, percentage: 0 },
+    xpProgress: { current: 0, target: 100, percentage: 0 },
     pieceCount: 0,
     pieces: [],
   })
@@ -141,20 +150,27 @@ export default function useWorldStats(clientId) {
 
       const data = await response.json()
       const worldState = data.worldState || {}
+      const tierInfo = data.tiers || {}
+      const tierThresholds = tierInfo.tiers || DEFAULT_TIER_THRESHOLDS
+      const tierOrder = tierInfo.order || DEFAULT_TIER_ORDER
 
       if (!isMountedRef.current) return
 
       const pieceCount = worldState.pieces?.length || 0
-      const tier = worldState.tier || calculateTier(pieceCount)
-      const tierConfig = TIER_CONFIG[tier]
-      const xpProgress = calculateXPProgress(pieceCount, tier)
-      const totalXP = pieceCount * tierConfig.xpPerPiece
+      const totalXP = Number.isFinite(worldState.totalXP) ? worldState.totalXP : 0
+      const xpProgress = calculateXPProgress(totalXP, tierThresholds, tierOrder)
+      const tier = worldState.tier || xpProgress.tier
+      const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.barren
 
       setWorldStats({
         totalXP,
         tier,
         tierConfig,
-        xpProgress,
+        xpProgress: {
+          current: xpProgress.current,
+          target: xpProgress.target,
+          percentage: xpProgress.percentage,
+        },
         pieceCount,
         pieces: worldState.pieces || [],
       })
@@ -169,7 +185,7 @@ export default function useWorldStats(clientId) {
         totalXP: 0,
         tier: 'barren',
         tierConfig: TIER_CONFIG.barren,
-        xpProgress: { current: 0, target: 250, percentage: 0 },
+        xpProgress: { current: 0, target: 100, percentage: 0 },
         pieceCount: 0,
         pieces: [],
       })

@@ -12,6 +12,7 @@
  * WB023: Living World - Continuous landscape evolution
  *
  * GET /api/world - Get user's world state
+ * POST /api/world/reset - Reset user's world state
  * POST /api/world/piece - Add a new piece (after quiz pass)
  * POST /api/world/piece/generate - Generate a world piece (prompt + image)
  * POST /api/world/piece/review - Record a review quiz completion (WB022)
@@ -30,6 +31,10 @@
  * POST /api/world/living/initialize - Initialize barren world for new user
  * POST /api/world/living/evolve - Evolve world with a learned topic
  * GET /api/world/living - Get current living world state
+ * POST /api/world/living/reset - Reset living world state
+ *
+ * Topic Suggestions (WB024):
+ * POST /api/world/suggestions - Get personalized topic suggestions
  */
 
 import express from 'express'
@@ -56,6 +61,7 @@ import {
   getPocket,
   recordReview,
   getPiecesNeedingReview,
+  resetWorldState,
   XP_REWARDS,
   TIER_THRESHOLDS
 } from '../services/worldState.js'
@@ -81,7 +87,8 @@ import {
   resetEvolutionWorldState,
 } from '../services/worldEvolution.js'
 import { buildBaseWorldPrompt, buildEvolutionPrompt } from '../services/worldPromptBuilder.js'
-import { loadLivingWorldState, saveLivingWorldState } from '../services/livingWorldStore.js'
+import { loadLivingWorldState, saveLivingWorldState, deleteLivingWorldState } from '../services/livingWorldStore.js'
+import { generateSuggestions } from '../services/topicSuggestions.js'
 
 const router = express.Router()
 
@@ -131,6 +138,50 @@ router.get('/', async (req, res) => {
     })
   } catch (error) {
     logger.error('WORLD', 'Unexpected error getting world state', { error: error.message })
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
+ * POST /api/world/reset
+ * Reset a user's world state (pieces, XP, tier, streak)
+ *
+ * Request body:
+ * - clientId: string - The client identifier
+ *
+ * Response:
+ * - worldState: Reset world state object
+ */
+router.post('/reset', async (req, res) => {
+  try {
+    const { clientId } = req.body
+
+    if (!clientId || typeof clientId !== 'string') {
+      return res.status(400).json({
+        error: 'Missing or invalid clientId',
+        field: 'clientId'
+      })
+    }
+
+    const { sanitized: sanitizedId, error: idError } = sanitizeId(clientId)
+    if (idError) {
+      return res.status(400).json({
+        error: idError,
+        field: 'clientId'
+      })
+    }
+
+    logger.info('WORLD', 'Resetting world state', { clientId: sanitizedId })
+
+    const result = await resetWorldState(sanitizedId)
+    if (result.error) {
+      logger.error('WORLD', 'Failed to reset world state', { error: result.error })
+      return res.status(500).json({ error: result.error })
+    }
+
+    return res.json({ worldState: result.worldState })
+  } catch (error) {
+    logger.error('WORLD', 'Unexpected error resetting world state', { error: error.message })
     return res.status(500).json({ error: 'Internal server error' })
   }
 })
@@ -1565,6 +1616,53 @@ router.get('/living', async (req, res) => {
 })
 
 /**
+ * POST /api/world/living/reset
+ * Reset living world state for a user
+ *
+ * Request body:
+ * - clientId (required): string - The client identifier
+ *
+ * Response:
+ * - worldState: null
+ * - worldImageUrl: null
+ * - success: boolean
+ */
+router.post('/living/reset', async (req, res) => {
+  try {
+    const { clientId } = req.body
+
+    if (!clientId || typeof clientId !== 'string') {
+      return res.status(400).json({
+        error: 'Missing or invalid clientId',
+        field: 'clientId'
+      })
+    }
+
+    const { sanitized: sanitizedId, error: idError } = sanitizeId(clientId)
+    if (idError) {
+      return res.status(400).json({
+        error: idError,
+        field: 'clientId'
+      })
+    }
+
+    logger.info('WORLD', 'Resetting living world state', { clientId: sanitizedId })
+
+    resetEvolutionWorldState(sanitizedId)
+    await deleteLivingWorldState(sanitizedId)
+
+    return res.json({
+      worldState: null,
+      worldImageUrl: null,
+      success: true
+    })
+  } catch (error) {
+    logger.error('WORLD', 'Unexpected error resetting living world state', { error: error.message })
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
  * POST /api/world/living/initialize
  * Initialize a new barren world for a user
  *
@@ -2008,6 +2106,140 @@ router.post('/living/evolve', async (req, res) => {
 
     return res.status(500).json({
       error: 'Internal server error'
+    })
+  }
+})
+
+// ============================================================================
+// Topic Suggestions Endpoints (WB024)
+// ============================================================================
+
+/**
+ * POST /api/world/suggestions
+ * Get personalized topic suggestions based on user's learning progress
+ * WB024: Smart topic suggestions for World Builder gamification
+ *
+ * Request body:
+ * - clientId (required): string - The client identifier
+ * - learnedTopics (optional): string[] - Topics already learned
+ * - zones (optional): { nature: number, civilization: number, arcane: number }
+ * - limit (optional): number - Max suggestions (default 5)
+ *
+ * Response:
+ * - suggestions: Array<{ type, topic, reason, zone }>
+ * - meta: { season, weakestZone, exploredClusters }
+ */
+router.post('/suggestions', async (req, res) => {
+  try {
+    const { clientId, learnedTopics = [], zones = {}, limit = 5 } = req.body
+
+    // Validate clientId
+    if (!clientId || typeof clientId !== 'string') {
+      return res.status(400).json({
+        error: 'Missing or invalid clientId',
+        field: 'clientId',
+      })
+    }
+
+    const { sanitized: sanitizedId, error: idError } = sanitizeId(clientId)
+    if (idError) {
+      return res.status(400).json({
+        error: idError,
+        field: 'clientId',
+      })
+    }
+
+    // Validate learnedTopics is array
+    if (!Array.isArray(learnedTopics)) {
+      return res.status(400).json({
+        error: 'learnedTopics must be an array',
+        field: 'learnedTopics',
+      })
+    }
+
+    // Validate zones is object
+    if (typeof zones !== 'object' || Array.isArray(zones)) {
+      return res.status(400).json({
+        error: 'zones must be an object',
+        field: 'zones',
+      })
+    }
+
+    // Validate limit
+    const parsedLimit = parseInt(limit, 10)
+    if (isNaN(parsedLimit) || parsedLimit < 1 || parsedLimit > 20) {
+      return res.status(400).json({
+        error: 'limit must be a number between 1 and 20',
+        field: 'limit',
+      })
+    }
+
+    logger.info('SUGGESTIONS', 'Generating topic suggestions', {
+      clientId: sanitizedId,
+      learnedCount: learnedTopics.length,
+      zones,
+      limit: parsedLimit,
+    })
+
+    // If no learnedTopics or zones provided, try to get from world state
+    let effectiveTopics = learnedTopics
+    let effectiveZones = zones
+
+    if (learnedTopics.length === 0 || Object.keys(zones).length === 0) {
+      const worldStateResult = await getWorldState(sanitizedId)
+      if (!worldStateResult.error && worldStateResult.worldState) {
+        const pieces = worldStateResult.worldState.pieces || []
+
+        // Extract topics from pieces if not provided
+        if (learnedTopics.length === 0) {
+          effectiveTopics = pieces.map((p) => p.topicName).filter(Boolean)
+        }
+
+        // Calculate zones from pieces if not provided
+        if (Object.keys(zones).length === 0) {
+          effectiveZones = { nature: 0, civilization: 0, arcane: 0 }
+          for (const piece of pieces) {
+            if (piece.zone && effectiveZones[piece.zone] !== undefined) {
+              effectiveZones[piece.zone]++
+            }
+          }
+        }
+      }
+    }
+
+    // Generate suggestions
+    const result = generateSuggestions({
+      learnedTopics: effectiveTopics,
+      zones: effectiveZones,
+      limit: parsedLimit,
+    })
+
+    if (result.error) {
+      logger.error('SUGGESTIONS', 'Failed to generate suggestions', {
+        error: result.error,
+        clientId: sanitizedId,
+      })
+      return res.status(500).json({
+        error: 'Failed to generate suggestions',
+      })
+    }
+
+    logger.info('SUGGESTIONS', 'Suggestions generated', {
+      clientId: sanitizedId,
+      count: result.suggestions.length,
+    })
+
+    return res.json({
+      suggestions: result.suggestions,
+      meta: result.meta,
+    })
+  } catch (error) {
+    logger.error('SUGGESTIONS', 'Unexpected error generating suggestions', {
+      error: error.message,
+      stack: error.stack,
+    })
+    return res.status(500).json({
+      error: 'Internal server error',
     })
   }
 })

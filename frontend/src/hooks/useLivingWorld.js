@@ -236,6 +236,39 @@ export default function useLivingWorld() {
     }
   }, [])
 
+  /**
+   * Reset the living world back to an uninitialized state
+   *
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
+  const resetWorld = useCallback(async () => {
+    try {
+      setError(null)
+
+      const clientId = getClientId()
+      const response = await fetch(
+        `${API_BASE}/api/world/living/reset`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ clientId }),
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error('Failed to reset living world')
+      }
+
+      setWorldState(null)
+      return { success: true }
+    } catch (err) {
+      setError(err.message)
+      return { success: false, error: err.message }
+    }
+  }, [])
+
   // Fetch world state on mount
   useEffect(() => {
     if (!initialFetchDone.current) {
@@ -263,5 +296,6 @@ export default function useLivingWorld() {
     // Actions
     evolveWorld,
     initializeWorld,
+    resetWorld,
   }
 }

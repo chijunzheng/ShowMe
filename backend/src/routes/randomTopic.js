@@ -28,6 +28,28 @@ router.get('/', async (req, res) => {
   logger.time('API', 'random-topic-request')
 
   try {
+    const { exclude } = req.query
+    let excludeTopics = []
+
+    if (typeof exclude === 'string' && exclude.trim().length > 0) {
+      try {
+        const parsed = JSON.parse(exclude)
+        if (Array.isArray(parsed)) {
+          excludeTopics = parsed
+        }
+      } catch (error) {
+        excludeTopics = exclude.split('|')
+      }
+    } else if (Array.isArray(exclude)) {
+      excludeTopics = exclude
+    }
+
+    excludeTopics = excludeTopics
+      .filter((topic) => typeof topic === 'string')
+      .map((topic) => topic.trim())
+      .filter((topic) => topic.length > 0 && topic.length <= 80)
+      .slice(0, 8)
+
     // Check if Gemini is available
     if (!isGeminiAvailable()) {
       logger.warn('API', '[RandomTopic] Gemini API not available')
@@ -39,7 +61,7 @@ router.get('/', async (req, res) => {
 
     logger.info('API', '[RandomTopic] Generating random topic')
 
-    const result = await generateRandomTopic()
+    const result = await generateRandomTopic({ excludeTopics })
 
     if (result.error) {
       logger.error('API', '[RandomTopic] Generation failed', {

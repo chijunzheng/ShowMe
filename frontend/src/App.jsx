@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import Toast from './components/Toast'
 import TopicSidebar from './components/TopicSidebar'
-import { HomeScreen, ListeningScreen, GeneratingScreen, ErrorScreen, QuizResultsScreen, LoadingTopicScreen, SlideshowScreen, SocraticScreen, QuizPromptScreen, QuizActiveScreen } from './components/screens'
+import { HomeScreen, ListeningScreen, GeneratingScreen, ErrorScreen, QuizResultsScreen, LoadingTopicScreen, SlideshowScreen, SocraticScreen, QuizPromptScreen, QuizActiveScreen, QuizCompletionScreen } from './components/screens'
 import RaiseHandButton from './components/RaiseHandButton'
 import { useWebSocket, PROGRESS_TYPES } from './hooks/useWebSocket'
 import useSlideAudio from './hooks/useSlideAudio.js'
@@ -73,6 +73,7 @@ import {
   isTrivialTranscription,
   pruneSlideCache as pruneSlidesCacheHelper,
 } from './utils/slideHelpers.js'
+import { buildLivingWorldSummaryFromSlides } from './utils/livingWorldSummary.js'
 
 // Extract constants from STORAGE_LIMITS for local use
 const MAX_CACHED_TOPICS = STORAGE_LIMITS.MAX_CACHED_TOPICS
@@ -130,7 +131,11 @@ function App() {
     error: livingWorldError,
     evolveWorld,
     initializeWorld,
+    resetWorld: resetLivingWorld,
   } = useLivingWorld()
+
+  const [isWorldRegenerating, setIsWorldRegenerating] = useState(false)
+  const [worldRegenProgress, setWorldRegenProgress] = useState({ current: 0, total: 0 })
 
   // F015: Generation progress state from WebSocket
   const [generationProgress, setGenerationProgress] = useState({
@@ -261,6 +266,15 @@ function App() {
     completeCurrentReview,
     endReviewSession,
   } = useReviewSession(worldPieces)
+
+  const resetLivingWorldState = useCallback(async () => {
+    const result = await resetLivingWorld()
+    if (!result?.success) {
+      logger.warn('WORLD', 'Failed to reset living world', { error: result?.error })
+      return false
+    }
+    return true
+  }, [resetLivingWorld])
 
   // WB020: Load world pieces for review session on mount and after piece unlocks
   useEffect(() => {
@@ -1001,6 +1015,82 @@ function App() {
   const showToast = useCallback((message) => setToast({ visible: true, message }), [])
   const hideToast = useCallback(() => setToast({ visible: false, message: '' }), [])
 
+  const regenerateLivingWorld = useCallback(async () => {
+    if (isWorldRegenerating) return
+
+    if (!evolveWorld) {
+      showToast('World regeneration unavailable')
+      return
+    }
+
+    const topicList = Array.isArray(topics) ? topics : []
+    if (topicList.length === 0) {
+      const resetOk = await resetLivingWorldState()
+      if (resetOk) {
+        showToast('World reset. Add topics to grow it again.')
+      } else {
+        showToast('World reset failed')
+      }
+      return
+    }
+
+    setIsWorldRegenerating(true)
+    showToast('Regenerating world...')
+
+    try {
+      const resetOk = await resetLivingWorldState()
+      if (!resetOk) {
+        showToast('World reset failed')
+        return
+      }
+
+      const orderedTopics = [...topicList].sort((a, b) => {
+        const aTime = a?.createdAt || a?.lastAccessedAt || 0
+        const bTime = b?.createdAt || b?.lastAccessedAt || 0
+        return aTime - bTime
+      })
+
+      const seen = new Set()
+      const uniqueTopics = orderedTopics.filter((topic) => {
+        const name = typeof topic?.name === 'string' ? topic.name.trim() : ''
+        if (!name) return false
+        const key = name.toLowerCase()
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+
+      setWorldRegenProgress({ current: 0, total: uniqueTopics.length })
+
+      for (let index = 0; index < uniqueTopics.length; index += 1) {
+        const topic = uniqueTopics[index]
+        const slides = (Array.isArray(topic.slides) && topic.slides.length > 0)
+          ? topic.slides
+          : (loadSlidesForTopic(topic) || [])
+        const summary = buildLivingWorldSummaryFromSlides(slides)
+
+        setWorldRegenProgress({ current: index + 1, total: uniqueTopics.length })
+        await evolveWorld(topic.name, summary)
+      }
+
+      showToast('World regenerated from current topics')
+    } catch (error) {
+      logger.warn('WORLD', 'Failed to regenerate living world', { error: error.message })
+      showToast('World regeneration failed')
+    } finally {
+      setWorldRegenProgress({ current: 0, total: 0 })
+      setIsWorldRegenerating(false)
+    }
+  }, [
+    buildLivingWorldSummaryFromSlides,
+    evolveWorld,
+    isWorldRegenerating,
+    loadSlidesForTopic,
+    resetLivingWorldState,
+    showToast,
+    topics,
+  ])
+
   /**
    * Toggle a question's queue status (F047)
    * Adds if not in queue, removes if already queued
@@ -1672,9 +1762,6 @@ function App() {
     if (tab === 'world') {
       // Clear world badge when user views world
       setWorldBadge(0)
-    }
-    if (tab === 'learn') {
-      setUiState(UI_STATE.HOME)
     }
     if (tab === 'quiz') {
       // Reset quiz tab state when navigating to Quiz tab
@@ -2376,6 +2463,7 @@ function App() {
    */
   const handleNavigateToTopic = useCallback(async (topicId) => {
     if (!topicId) return
+    setActiveTab('learn')
     const targetTopic = topics.find((topic) => topic.id === topicId)
     const needsSlides = !targetTopic?.slides || targetTopic.slides.length === 0
     // Use loadSlidesForTopic to try version-specific storage first, then legacy
@@ -2473,7 +2561,7 @@ function App() {
     if (uiState !== UI_STATE.SLIDESHOW && topics.length > 0) {
       setUiState(UI_STATE.SLIDESHOW)
     }
-  }, [uiState, topics, pruneSlideCache, fetchSlidesFromServer, requestSlideAudio])
+  }, [uiState, topics, pruneSlideCache, fetchSlidesFromServer, requestSlideAudio, setActiveTab])
 
   /**
    * Handle topic deletion from sidebar
@@ -2482,15 +2570,20 @@ function App() {
   const handleDeleteTopic = useCallback((topicId) => {
     if (!topicId) return
 
+    const remainingTopics = topics.filter((topic) => topic.id !== topicId)
+
     // Remove topic from state
     setTopics((prev) => prev.filter((topic) => topic.id !== topicId))
 
     // Clear cached slides for this topic
     removeTopicSlides(topicId)
 
+    if (remainingTopics.length === 0) {
+      void resetLivingWorldState()
+    }
+
     // If deleting the active topic, switch to another topic or listening state
     if (activeTopicId === topicId) {
-      const remainingTopics = topics.filter((topic) => topic.id !== topicId)
       if (remainingTopics.length > 0) {
         // Switch to the most recently accessed remaining topic
         const sortedByAccess = [...remainingTopics].sort(
@@ -2507,7 +2600,7 @@ function App() {
     }
 
     logger.info('STATE', 'Topic deleted', { topicId })
-  }, [activeTopicId, topics])
+  }, [activeTopicId, topics, resetLivingWorldState])
 
   /**
    * Handle regeneration of a topic at a different explanation level.
@@ -2825,7 +2918,9 @@ function App() {
           onNewTopic={() => {
             setActiveTopicId(null)
             setUiState(UI_STATE.HOME)
+            setActiveTab('learn')
           }}
+          onDeleteTopic={handleDeleteTopic}
           tier={worldTier}
           xpProgress={xpProgress}
           streakCount={userProgress?.streakCount || 0}
@@ -2917,7 +3012,13 @@ function App() {
             slides={quizSlides}
             onComplete={handleQuizComplete}
             onSkip={handleQuizSkip}
+            hasSidebar={topics.length > 0}
           />
+        )}
+
+        {/* WB018: Quiz completion loading screen */}
+        {uiState === UI_STATE.QUIZ_COMPLETING && activeTab === 'learn' && (
+          <QuizCompletionScreen />
         )}
 
         {/* WB018: Quiz results screen */}
@@ -2939,6 +3040,9 @@ function App() {
             hotspots={livingWorldHotspots}
             error={livingWorldError}
             onInitializeWorld={initializeWorld}
+            onRegenerateWorld={regenerateLivingWorld}
+            isRegeneratingWorld={isWorldRegenerating}
+            regenerationProgress={worldRegenProgress}
             onStartLearning={() => {
               setActiveTopicId(null)
               setUiState(UI_STATE.HOME)
@@ -2957,6 +3061,12 @@ function App() {
             onFABAction={(actionId) => {
               if (actionId === 'learn') setActiveTab('learn')
               else if (actionId === 'quick_quiz') setActiveTab('quiz')
+            }}
+            onSelectSuggestedTopic={(topicName) => {
+              // Auto-start learning about the suggested topic
+              setActiveTab('learn')
+              // Trigger generation pipeline with the suggested topic
+              handleQuestion(topicName, { source: 'world_suggestion' })
             }}
           />
         )}

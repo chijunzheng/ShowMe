@@ -40,6 +40,7 @@ vi.mock('../../services/gemini.js', () => ({
 vi.mock('../../services/livingWorldStore.js', () => ({
   loadLivingWorldState: vi.fn(),
   saveLivingWorldState: vi.fn(),
+  deleteLivingWorldState: vi.fn(),
 }))
 
 vi.mock('../../utils/sanitize.js', () => ({

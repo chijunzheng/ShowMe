@@ -1587,7 +1587,7 @@ Example: ["How do black holes work?", "Why do we dream?", "How does WiFi work?"]
  *
  * @returns {Promise<{topic: string, category: string, emoji: string, error: string|null}>}
  */
-export async function generateRandomTopic() {
+export async function generateRandomTopic({ excludeTopics = [] } = {}) {
   if (!isGeminiAvailable()) {
     return { topic: null, category: null, emoji: null, error: 'API_KEY_MISSING' }
   }
@@ -1595,7 +1595,16 @@ export async function generateRandomTopic() {
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
 
-    const prompt = `Generate ONE random educational topic that would make an interesting visual slideshow.
+    const cleanedExclude = Array.isArray(excludeTopics)
+      ? excludeTopics
+        .filter((topic) => typeof topic === 'string')
+        .map((topic) => topic.trim())
+        .filter((topic) => topic.length > 0)
+        .slice(0, 8)
+      : []
+    const excludeSet = new Set(cleanedExclude.map((topic) => topic.toLowerCase()))
+
+    const promptBase = `Generate ONE random educational topic that would make an interesting visual slideshow.
 
 Requirements:
 - Topic should spark curiosity and be visually explainable
@@ -1603,6 +1612,7 @@ Requirements:
 - Keep it concise (under 10 words)
 - Avoid controversial, political, or sensitive topics
 - Mix of categories: science, nature, technology, history, animals, space, human body, etc.
+${cleanedExclude.length > 0 ? `- Avoid repeating or closely mirroring these recent topics: ${cleanedExclude.map((topic) => `"${topic}"`).join(', ')}` : ''}
 
 Return ONLY valid JSON (no markdown):
 {
@@ -1614,25 +1624,48 @@ Return ONLY valid JSON (no markdown):
 Example response:
 {"topic": "Why do fireflies glow?", "category": "Biology", "emoji": "🪲"}`
 
-    const response = await ai.models.generateContent({
-      model: FAST_MODEL,
-      contents: prompt,
-    })
+    const MAX_ATTEMPTS = 3
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+      const seed = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      const prompt = `${promptBase}
 
-    const text = response.text || ''
-    const jsonStr = extractJSON(text)
-    const result = JSON.parse(jsonStr)
+Random seed: ${seed}`
+      const response = await ai.models.generateContent({
+        model: FAST_MODEL,
+        contents: prompt,
+        config: {
+          temperature: 1.0,
+          topP: 0.95,
+          topK: 40,
+          maxOutputTokens: 256,
+          responseMimeType: 'application/json',
+        }
+      })
 
-    if (!result.topic || typeof result.topic !== 'string') {
-      return { topic: null, category: null, emoji: null, error: 'INVALID_RESPONSE' }
+      const text = response.text || ''
+      const jsonStr = extractJSON(text)
+      const result = JSON.parse(jsonStr)
+
+      if (!result.topic || typeof result.topic !== 'string') {
+        return { topic: null, category: null, emoji: null, error: 'INVALID_RESPONSE' }
+      }
+
+      const topic = result.topic.trim()
+      if (excludeSet.size > 0 && excludeSet.has(topic.toLowerCase())) {
+        if (attempt < MAX_ATTEMPTS - 1) {
+          continue
+        }
+        return { topic: null, category: null, emoji: null, error: 'DUPLICATE_TOPIC' }
+      }
+
+      return {
+        topic,
+        category: result.category?.trim() || 'General',
+        emoji: result.emoji || '✨',
+        error: null,
+      }
     }
-
-    return {
-      topic: result.topic.trim(),
-      category: result.category?.trim() || 'General',
-      emoji: result.emoji || '✨',
-      error: null,
-    }
+    return { topic: null, category: null, emoji: null, error: 'DUPLICATE_TOPIC' }
   } catch (error) {
     console.error('[Gemini] Random topic error:', error.message)
 

@@ -8,28 +8,24 @@ import { useCallback, useRef } from 'react'
 import { UI_STATE } from '../constants/appConfig.js'
 import logger from '../utils/logger.js'
 import { getClientId } from '../utils/clientId'
+import { buildLivingWorldSummaryFromSlides } from '../utils/livingWorldSummary.js'
+import { determineZone, selectPieceIcon, generatePieceId } from './useWorldPiece.js'
 
-const MAX_LIVING_WORLD_SUMMARY_LENGTH = 900
+const POSITION_RANGE = {
+  minX: 8,
+  maxX: 92,
+  minY: 15,
+  maxY: 85,
+}
 
-function buildLivingWorldSummaryFromSlides(slides = []) {
-  if (!Array.isArray(slides) || slides.length === 0) return ''
+function createPiecePosition() {
+  const rangeX = POSITION_RANGE.maxX - POSITION_RANGE.minX
+  const rangeY = POSITION_RANGE.maxY - POSITION_RANGE.minY
 
-  const text = slides
-    .filter(s => s?.type !== 'header' && s?.type !== 'suggestions')
-    .map((slide) => {
-      const subtitle = typeof slide.subtitle === 'string' ? slide.subtitle.trim() : ''
-      const script = typeof slide.script === 'string' ? slide.script.trim() : ''
-      if (subtitle && script) return `${subtitle}: ${script}`
-      return subtitle || script
-    })
-    .filter(Boolean)
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-
-  if (!text) return ''
-  if (text.length <= MAX_LIVING_WORLD_SUMMARY_LENGTH) return text
-  return `${text.slice(0, MAX_LIVING_WORLD_SUMMARY_LENGTH).trim()}…`
+  return {
+    x: Math.round(POSITION_RANGE.minX + Math.random() * rangeX),
+    y: Math.round(POSITION_RANGE.minY + Math.random() * rangeY),
+  }
 }
 
 /**
@@ -51,6 +47,7 @@ function buildLivingWorldSummaryFromSlides(slides = []) {
  * @param {Function} params.dismissTierCelebration - Celebration hook: dismiss tier celebration
  * @param {Function} params.setActiveTab - Setter for active tab
  * @param {Function} params.refreshWorldStats - Function to refresh world stats
+ * @param {Function} [params.checkEvolutions] - Evolution hook: check for piece evolutions
  * @param {string} params.quizTopicId - Current quiz topic ID
  * @param {string} params.quizTopicName - Current quiz topic name
  * @param {Object|null} params.tierUpgradeInfo - Tier upgrade info if pending
@@ -75,12 +72,80 @@ export default function useQuizHandlers({
   dismissTierCelebration,
   setActiveTab,
   refreshWorldStats,
+  checkEvolutions,
   quizTopicId,
   quizTopicName,
   tierUpgradeInfo,
   evolveWorld, // Living World: Function to evolve world after quiz pass
 }) {
   const quizSummaryRef = useRef('')
+
+  const createWorldPiece = useCallback(async ({ topicId, topicName, summary }) => {
+    if (!topicId || !topicName) {
+      return { piece: null, error: 'Missing topic info for world piece' }
+    }
+
+    const zone = determineZone(topicName)
+    const icon = selectPieceIcon(topicName, zone)
+    const clientId = getClientId()
+    let generatedPiece = null
+
+    try {
+      const generateResponse = await fetch('/api/world/piece/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topicName,
+          zone,
+          summary,
+        }),
+      })
+
+      if (generateResponse.ok) {
+        const generateData = await generateResponse.json()
+        generatedPiece = generateData.piece || null
+      } else {
+        const errorData = await generateResponse.json().catch(() => ({}))
+        logger.warn('WORLD', 'Piece image generation failed, using fallback', {
+          error: errorData?.error || `status_${generateResponse.status}`,
+        })
+      }
+    } catch (error) {
+      logger.warn('WORLD', 'Piece image generation error, using fallback', { error: error.message })
+    }
+
+    const piece = {
+      id: generatedPiece?.id || generatePieceId(),
+      topicId,
+      topicName,
+      name: topicName,
+      zone,
+      icon,
+      imageUrl: generatedPiece?.imageUrl || null,
+      prompt: generatedPiece?.prompt || null,
+      position: createPiecePosition(),
+    }
+
+    try {
+      const addResponse = await fetch('/api/world/piece', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientId,
+          piece,
+        }),
+      })
+
+      if (!addResponse.ok) {
+        const errorData = await addResponse.json().catch(() => ({}))
+        return { piece: null, error: errorData?.error || 'Failed to add piece to world' }
+      }
+
+      return { piece, error: null }
+    } catch (error) {
+      return { piece: null, error: error.message }
+    }
+  }, [determineZone, selectPieceIcon, generatePieceId])
 
   /**
    * WB018: Start quiz flow - fetch questions from API
@@ -158,18 +223,24 @@ export default function useQuizHandlers({
    */
   const handleQuizComplete = useCallback(async (results) => {
     setQuizResults(results)
+    setUiState(UI_STATE.QUIZ_COMPLETING)
 
-    // Check if user passed (>= 60% score)
-    const passed = results.percentage >= 60
+    const passed = results?.passed ?? results.percentage >= 60
+    const effectiveTopicName = quizTopicName || activeTopic?.name || activeTopic?.topicName || null
+    const effectiveTopicId = quizTopicId
+      || activeTopic?.id
+      || activeTopic?.topicId
+      || effectiveTopicName
+      || null
 
-    if (passed && quizTopicId && quizTopicName) {
+    if (passed && effectiveTopicId && effectiveTopicName) {
       try {
         const clientId = getClientId()
         const summaryFromSlides = quizSummaryRef.current
           || buildLivingWorldSummaryFromSlides(visibleSlidesRef.current || [])
 
         logger.info('QUIZ', 'Evolving Living World for passed quiz', {
-          topicName: quizTopicName,
+          topicName: effectiveTopicName,
           percentage: results.percentage,
           hasSummary: !!summaryFromSlides,
         })
@@ -177,13 +248,13 @@ export default function useQuizHandlers({
         // Living World: Evolve the world with the learned topic
         if (evolveWorld) {
           const evolutionResult = await evolveWorld(
-            quizTopicName,
+            effectiveTopicName,
             summaryFromSlides
           )
 
           if (evolutionResult.success) {
             logger.info('QUIZ', 'Living World evolved successfully', {
-              topicName: quizTopicName,
+              topicName: effectiveTopicName,
               tier: evolutionResult.changesApplied?.newTier,
               changesApplied: evolutionResult.changesApplied
             })
@@ -207,6 +278,20 @@ export default function useQuizHandlers({
           logger.warn('QUIZ', 'evolveWorld function not available, skipping evolution')
         }
 
+        // World piece unlock flow
+        const pieceResult = await createWorldPiece({
+          topicId: effectiveTopicId,
+          topicName: effectiveTopicName,
+          summary: summaryFromSlides,
+        })
+
+        if (pieceResult?.piece) {
+          showPieceUnlock(pieceResult.piece)
+          checkEvolutions?.(pieceResult.piece)
+        } else if (pieceResult?.error) {
+          logger.warn('QUIZ', 'World piece unlock failed', { error: pieceResult.error })
+        }
+
         // Award XP via evaluate endpoint (handles additional tier upgrades)
         const questionsForEval = Array.isArray(results.questions) ? results.questions : []
         const answersForEval = Array.isArray(results.answers)
@@ -224,8 +309,8 @@ export default function useQuizHandlers({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            topicId: quizTopicId,
-            topicName: quizTopicName,
+            topicId: effectiveTopicId,
+            topicName: effectiveTopicName,
             answers: answersForEval,
             questions: questionsForEval,
             clientId,
@@ -242,11 +327,27 @@ export default function useQuizHandlers({
         }
       } catch (error) {
         logger.error('QUIZ', 'Failed to complete quiz flow', { error: error.message })
+      } finally {
+        refreshWorldStats()
       }
     }
 
     setUiState(UI_STATE.QUIZ_RESULTS)
-  }, [quizTopicId, quizTopicName, visibleSlidesRef, setQuizResults, setUiState, setWorldBadge, showTierUpgrade, evolveWorld])
+  }, [
+    activeTopic,
+    quizTopicId,
+    quizTopicName,
+    visibleSlidesRef,
+    setQuizResults,
+    setUiState,
+    setWorldBadge,
+    showTierUpgrade,
+    evolveWorld,
+    createWorldPiece,
+    showPieceUnlock,
+    checkEvolutions,
+    refreshWorldStats,
+  ])
 
   /**
    * WB018: Handle quiz skip
