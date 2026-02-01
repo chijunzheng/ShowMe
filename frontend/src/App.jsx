@@ -2948,6 +2948,16 @@ function App() {
               // Show topic info when hotspot clicked
               logger.debug('WORLD', 'Hotspot clicked', { topicName: hotspot?.topicName })
             }}
+            pieces={worldPieces}
+            streak={{ current: userProgress?.streakCount || 0, todayCompleted: false }}
+            onPromptAction={(actionType) => {
+              if (actionType === 'learn') setActiveTab('learn')
+              else if (actionType === 'review' || actionType === 'quiz') setActiveTab('quiz')
+            }}
+            onFABAction={(actionId) => {
+              if (actionId === 'learn') setActiveTab('learn')
+              else if (actionId === 'quick_quiz') setActiveTab('quiz')
+            }}
           />
         )}
 

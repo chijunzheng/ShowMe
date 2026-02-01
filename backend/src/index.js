@@ -29,9 +29,12 @@ import {
 const app = express()
 const PORT = process.env.PORT || 3002
 
-// Allowed origins for CORS - only allow frontend
+// Allowed origins for CORS - only allow frontend (multiple ports for Vite fallback)
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5175',
+  'http://localhost:5176',
   'http://localhost:3002',
   process.env.CORS_ORIGIN,
 ].filter(Boolean)

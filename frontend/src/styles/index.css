@@ -648,3 +648,19 @@ body {
 .animate-badge-bounce {
   animation: badge-bounce 0.5s ease-out;
 }
+
+/* WorldFAB slide-up animation for menu */
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.2s ease-out forwards;
+}

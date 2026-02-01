@@ -18,6 +18,8 @@ import { useCallback, useRef } from 'react'
 import PanoramaViewer from './PanoramaViewer'
 import WorldTransition from './WorldTransition'
 import WorldInfoPanel from './WorldInfoPanel'
+import SmartPrompt from '../WorldView/SmartPrompt'
+import WorldFAB from '../WorldView/WorldFAB'
 
 /**
  * Loading skeleton component
@@ -156,6 +158,10 @@ function ErrorState({ message, onRetry }) {
  * @param {Function} [props.onWorldInitialized] - Callback after world is created
  * @param {Function} [props.onViewHistory] - Callback to view history
  * @param {Function} [props.onStartLearning] - Callback to start learning
+ * @param {Array} [props.pieces] - World pieces for SmartPrompt
+ * @param {Object} [props.streak] - Streak data for SmartPrompt
+ * @param {Function} [props.onPromptAction] - Callback for SmartPrompt actions
+ * @param {Function} [props.onFABAction] - Callback for FAB actions
  */
 function LivingWorldView({
   worldState,
@@ -170,6 +176,10 @@ function LivingWorldView({
   onWorldInitialized,
   onViewHistory,
   onStartLearning,
+  pieces = [],
+  streak = {},
+  onPromptAction,
+  onFABAction,
 }) {
 
   // Track previous image URL for transitions
@@ -292,6 +302,24 @@ function LivingWorldView({
               recentTopics={recentTopics}
               onViewHistory={onViewHistory}
             />
+          </div>
+
+          {/* Smart Prompt - context-aware action suggestion */}
+          {pieces.length > 0 && (
+            <div className="absolute bottom-16 left-3 right-3 z-10">
+              <SmartPrompt
+                pieces={pieces}
+                streak={streak}
+                tier={tier}
+                totalPieces={totalTopics}
+                onAction={onPromptAction}
+              />
+            </div>
+          )}
+
+          {/* Floating Action Button */}
+          <div className="absolute bottom-3 right-3 z-20">
+            <WorldFAB onAction={onFABAction} />
           </div>
         </div>
       )}
