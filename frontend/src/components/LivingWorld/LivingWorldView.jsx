@@ -405,6 +405,7 @@ function LivingWorldView({
               isLoading={false}
               hotspots={hotspots}
               onRegionTap={handleRegionTap}
+              onHotspotLongPress={handleHotspotLongPress}
             />
           )}
 
@@ -447,6 +448,16 @@ function LivingWorldView({
             isLoading={suggestionsLoading}
             onSelectTopic={handleSelectTopic}
           />
+
+          {/* Quick Action Bar - shown on long-press of hotspot */}
+          {actionBarData && (
+            <QuickActionBar
+              piece={actionBarData.piece}
+              position={actionBarData.position}
+              onAction={handleQuickAction}
+              onClose={handleCloseActionBar}
+            />
+          )}
         </div>
       )}
 

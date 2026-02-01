@@ -964,7 +964,9 @@ describe('LivingWorld Integration Tests', () => {
       expect(hotspots.length).toBeGreaterThan(0)
 
       await act(async () => {
-        fireEvent.click(hotspots[0])
+        // Use mouseDown + mouseUp to simulate click (useLongPress hook intercepts mouse events)
+        fireEvent.mouseDown(hotspots[0], { clientX: 100, clientY: 100 })
+        fireEvent.mouseUp(hotspots[0], { clientX: 100, clientY: 100 })
       })
 
       // Topic info modal should appear
@@ -990,7 +992,9 @@ describe('LivingWorld Integration Tests', () => {
 
       const hotspots = screen.getAllByTestId('hotspot')
       await act(async () => {
-        fireEvent.click(hotspots[0])
+        // Use mouseDown + mouseUp to simulate click (useLongPress hook intercepts mouse events)
+        fireEvent.mouseDown(hotspots[0], { clientX: 100, clientY: 100 })
+        fireEvent.mouseUp(hotspots[0], { clientX: 100, clientY: 100 })
       })
 
       await waitFor(() => {
@@ -1017,7 +1021,9 @@ describe('LivingWorld Integration Tests', () => {
 
       const hotspots = screen.getAllByTestId('hotspot')
       await act(async () => {
-        fireEvent.click(hotspots[0])
+        // Use mouseDown + mouseUp to simulate click (useLongPress hook intercepts mouse events)
+        fireEvent.mouseDown(hotspots[0], { clientX: 100, clientY: 100 })
+        fireEvent.mouseUp(hotspots[0], { clientX: 100, clientY: 100 })
       })
 
       await waitFor(() => {
@@ -1043,7 +1049,9 @@ describe('LivingWorld Integration Tests', () => {
 
       const hotspots = screen.getAllByTestId('hotspot')
       await act(async () => {
-        fireEvent.click(hotspots[0])
+        // Use mouseDown + mouseUp to simulate click (useLongPress hook intercepts mouse events)
+        fireEvent.mouseDown(hotspots[0], { clientX: 100, clientY: 100 })
+        fireEvent.mouseUp(hotspots[0], { clientX: 100, clientY: 100 })
       })
 
       await waitFor(() => {
@@ -1079,7 +1087,9 @@ describe('LivingWorld Integration Tests', () => {
 
       const hotspots = screen.getAllByTestId('hotspot')
       await act(async () => {
-        fireEvent.click(hotspots[0])
+        // Use mouseDown + mouseUp to simulate click (useLongPress hook intercepts mouse events)
+        fireEvent.mouseDown(hotspots[0], { clientX: 100, clientY: 100 })
+        fireEvent.mouseUp(hotspots[0], { clientX: 100, clientY: 100 })
       })
 
       expect(onTopicInfoRequest).toHaveBeenCalledWith(

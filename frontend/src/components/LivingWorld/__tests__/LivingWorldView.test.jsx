@@ -360,7 +360,9 @@ describe('LivingWorldView', () => {
       simulateImageLoad()
 
       const hotspot = screen.getByTestId('hotspot')
-      fireEvent.click(hotspot)
+      // Use mouseDown + mouseUp to simulate click (useLongPress hook intercepts mouse events)
+      fireEvent.mouseDown(hotspot, { clientX: 100, clientY: 100 })
+      fireEvent.mouseUp(hotspot, { clientX: 100, clientY: 100 })
 
       expect(onHotspotClick).toHaveBeenCalledWith(0.5, 0.5)
     })

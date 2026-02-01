@@ -246,7 +246,9 @@ describe('PanoramaViewer', () => {
       simulateImageLoad()
 
       const hotspots = screen.getAllByTestId('hotspot')
-      fireEvent.click(hotspots[0])
+      // Use mouseDown + mouseUp to simulate click (useLongPress hook intercepts mouse events)
+      fireEvent.mouseDown(hotspots[0], { clientX: 100, clientY: 100 })
+      fireEvent.mouseUp(hotspots[0], { clientX: 100, clientY: 100 })
 
       expect(onRegionTap).toHaveBeenCalledWith(0.2, 0.3)
     })

@@ -38,9 +38,14 @@ function Hotspot({ x, y, topicName, glow, piece, onTap, onLongPress }) {
   const handleClick = useCallback(
     (e) => {
       e.stopPropagation()
-      onTap?.(piece || { name: topicName, x, y })
+      // Keep backward compatibility - pass piece if available, otherwise x,y
+      if (piece) {
+        onTap?.(piece)
+      } else {
+        onTap?.(x, y)
+      }
     },
-    [piece, topicName, x, y, onTap]
+    [piece, x, y, onTap]
   )
 
   const handleLongPress = useCallback(
@@ -71,10 +76,14 @@ function Hotspot({ x, y, topicName, glow, piece, onTap, onLongPress }) {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault()
         e.stopPropagation()
-        onTap?.(piece || { name: topicName, x, y })
+        if (piece) {
+          onTap?.(piece)
+        } else {
+          onTap?.(x, y)
+        }
       }
     },
-    [piece, topicName, x, y, onTap]
+    [piece, x, y, onTap]
   )
 
   // Clamp coordinates to valid range
