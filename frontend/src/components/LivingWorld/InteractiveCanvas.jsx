@@ -29,6 +29,7 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   useRef,
 } from 'react'
@@ -52,10 +53,10 @@ const SMOOTH_ANIMATION = {
 function CanvasControls({ onControlsReady }) {
   const controls = useControls()
 
-  // Pass controls to parent on mount
-  useCallback(() => {
+  // Pass controls to parent on mount using useEffect (not useCallback)
+  useEffect(() => {
     onControlsReady?.(controls)
-  }, [controls, onControlsReady])()
+  }, [controls, onControlsReady])
 
   return null
 }
