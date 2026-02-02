@@ -9,7 +9,7 @@ import { UI_STATE } from '../constants/appConfig.js'
 import logger from '../utils/logger.js'
 import { getClientId } from '../utils/clientId'
 import { buildLivingWorldSummaryFromSlides } from '../utils/livingWorldSummary.js'
-import { determineZone, selectPieceIcon, generatePieceId } from './useWorldPiece.js'
+import { determineZone, selectPieceIcon, generatePieceId } from '../utils/worldUtils.js'
 
 const POSITION_RANGE = {
   minX: 8,

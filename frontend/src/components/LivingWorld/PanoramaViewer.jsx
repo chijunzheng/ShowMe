@@ -5,34 +5,39 @@
  * Part of the "Living World" feature for continuous panoramic landscape.
  *
  * Features:
- * - Pan: Touch drag or mouse drag
- * - Zoom: Pinch gesture or scroll wheel
- * - Momentum scrolling with bounds
+ * - Pan: Touch drag or mouse drag (via InteractiveCanvas)
+ * - Zoom: Pinch gesture, scroll wheel, or double-tap (via InteractiveCanvas)
+ * - Momentum scrolling with bounds (via InteractiveCanvas)
  * - Interactive hotspots with glow effects
  * - Loading skeleton with 16:9 aspect ratio
  * - Full accessibility support
  */
 
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import useLongPress from '../../hooks/useLongPress'
-
-/**
- * Minimum distance (in pixels) to consider movement as a drag vs a tap
- */
-const DRAG_THRESHOLD = 5
+import InteractiveCanvas from './InteractiveCanvas'
 
 /**
  * Zoom constraints
  */
 const MIN_ZOOM = 1
 const MAX_ZOOM = 3
-const ZOOM_SENSITIVITY = 0.002
 
 /**
  * Hotspot Component - Renders an interactive region marker
  * Supports tap (short press) and long-press for quick actions
+ *
+ * @param {Object} props - Component props
+ * @param {number} props.x - X position (0-1 normalized)
+ * @param {number} props.y - Y position (0-1 normalized)
+ * @param {string} props.topicName - Display name for the hotspot
+ * @param {boolean} [props.glow] - Whether to show glow effect
+ * @param {Object} [props.piece] - Optional piece data for callbacks
+ * @param {Function} [props.onTap] - Callback when tapped
+ * @param {Function} [props.onLongPress] - Callback when long-pressed
+ * @param {number} [props.zoom=1] - Current zoom level for scaling
  */
-function Hotspot({ x, y, topicName, glow, piece, onTap, onLongPress }) {
+function Hotspot({ x, y, topicName, glow, piece, onTap, onLongPress, zoom = 1 }) {
   const hotspotRef = useRef(null)
 
   const handleClick = useCallback(
@@ -90,6 +95,10 @@ function Hotspot({ x, y, topicName, glow, piece, onTap, onLongPress }) {
   const clampedX = Math.max(0, Math.min(1, x))
   const clampedY = Math.max(0, Math.min(1, y))
 
+  // Sub-linear scaling: hotspots shrink when zoomed in, but not proportionally
+  // This keeps them readable at high zoom without becoming giant at zoom=1
+  const hotspotScale = 1 / Math.sqrt(zoom)
+
   return (
     <div
       ref={hotspotRef}
@@ -114,6 +123,7 @@ function Hotspot({ x, y, topicName, glow, piece, onTap, onLongPress }) {
       style={{
         left: `${clampedX * 100}%`,
         top: `${clampedY * 100}%`,
+        transform: `translate(-50%, -50%) scale(${hotspotScale})`,
       }}
       onKeyDown={handleKeyDown}
       {...longPressHandlers}
@@ -153,6 +163,9 @@ function LoadingSkeleton() {
  * @param {Function} [props.onRegionTap] - Callback when user taps a region: (x, y) => void
  * @param {Function} [props.onHotspotLongPress] - Callback when user long-presses a hotspot: ({ piece, position }) => void
  * @param {Array} [props.hotspots=[]] - Areas to highlight: [{ x, y, topicName, glow, piece }]
+ * @param {Function} [props.onZoomChange] - Callback when zoom level changes: (zoom) => void
+ * @param {Function} [props.onViewportChange] - Callback when viewport changes: ({ x, y, width, height }) => void
+ * @param {React.Ref} [props.canvasRef] - Ref to access InteractiveCanvas methods
  */
 function PanoramaViewer({
   worldImageUrl,
@@ -160,238 +173,108 @@ function PanoramaViewer({
   onRegionTap,
   onHotspotLongPress,
   hotspots = [],
+  onZoomChange,
+  onViewportChange,
+  canvasRef: externalCanvasRef,
 }) {
-  // Pan state
-  const [offset, setOffset] = useState({ x: 0, y: 0 })
+  // Track current zoom for hotspot scaling
+  const [currentZoom, setCurrentZoom] = useState(1)
+
+  // Track dragging state for cursor styling
   const [isDragging, setIsDragging] = useState(false)
-  const dragStartRef = useRef({ x: 0, y: 0 })
-  const dragStartOffsetRef = useRef({ x: 0, y: 0 })
-  const totalDragDistanceRef = useRef(0)
 
-  // Zoom state
-  const [zoom, setZoom] = useState(1)
-
-  // Momentum scrolling
-  const velocityRef = useRef({ x: 0, y: 0 })
-  const lastPositionRef = useRef({ x: 0, y: 0 })
-  const animationRef = useRef(null)
-
-  // Container and image refs
+  // Container and canvas refs
   const containerRef = useRef(null)
-  const imageRef = useRef(null)
+  const canvasRef = useRef(null)
 
   // Image loading state
   const [imageLoaded, setImageLoaded] = useState(false)
   const [imageError, setImageError] = useState(false)
 
   /**
-   * Clamp offset to keep image within bounds
+   * Handle zoom change from InteractiveCanvas
+   * Updates local state and notifies parent
+   * Note: Viewport rect is updated via onTransformed for continuous tracking
    */
-  const clampOffset = useCallback(
-    (newOffset, currentZoom = zoom) => {
-      if (!containerRef.current || !imageRef.current) {
-        return newOffset
-      }
+  const handleZoomChange = useCallback(
+    (zoom) => {
+      setCurrentZoom(zoom)
+      onZoomChange?.(zoom)
+    },
+    [onZoomChange]
+  )
 
-      const container = containerRef.current.getBoundingClientRect()
-      const scaledWidth = container.width * currentZoom
-      const scaledHeight = container.height * currentZoom
+  /**
+   * Handle transform start (for cursor styling)
+   */
+  const handleTransformStart = useCallback(() => {
+    setIsDragging(true)
+  }, [])
 
-      const maxX = Math.max(0, (scaledWidth - container.width) / 2)
-      const maxY = Math.max(0, (scaledHeight - container.height) / 2)
+  /**
+   * Handle transform end (for cursor styling)
+   */
+  const handleTransformEnd = useCallback(() => {
+    setIsDragging(false)
+  }, [])
+
+  /**
+   * Calculate viewport rect from transform state
+   * Returns normalized (0-1) coordinates representing visible area
+   */
+  const calculateViewportRect = useCallback(
+    (transformState) => {
+      if (!containerRef.current) return null
+
+      const { scale, positionX, positionY } = transformState
+      const rect = containerRef.current.getBoundingClientRect()
+
+      // Calculate visible area dimensions in normalized coordinates
+      // At scale=1, viewport is full image (width=1, height=1)
+      // At scale=2, viewport is half the image (width=0.5, height=0.5)
+      const viewWidth = 1 / scale
+      const viewHeight = 1 / scale
+
+      // Convert pixel position to normalized coordinates
+      // positionX/Y represent the offset of the content from the viewport origin
+      // When positionX is 0, content left edge aligns with viewport left edge
+      // When positionX is negative, content is shifted left (viewport sees right portion)
+      const normalizedX = -positionX / (rect.width * scale)
+      const normalizedY = -positionY / (rect.height * scale)
 
       return {
-        x: Math.max(-maxX, Math.min(maxX, newOffset.x)),
-        y: Math.max(-maxY, Math.min(maxY, newOffset.y)),
+        x: Math.max(0, Math.min(1 - viewWidth, normalizedX)),
+        y: Math.max(0, Math.min(1 - viewHeight, normalizedY)),
+        width: viewWidth,
+        height: viewHeight,
       }
     },
-    [zoom]
+    []
   )
 
   /**
-   * Handle momentum scrolling animation
+   * Handle continuous transform updates (fires during pan/zoom/pinch)
+   * Updates viewport rect for minimap synchronization
    */
-  useEffect(() => {
-    if (isDragging) {
-      return
-    }
+  const handleTransformed = useCallback(
+    (transformState) => {
+      if (!onViewportChange) return
 
-    const animate = () => {
-      const velocity = velocityRef.current
-      const friction = 0.95
-
-      if (Math.abs(velocity.x) > 0.5 || Math.abs(velocity.y) > 0.5) {
-        velocityRef.current = {
-          x: velocity.x * friction,
-          y: velocity.y * friction,
-        }
-
-        setOffset((prev) =>
-          clampOffset({
-            x: prev.x + velocityRef.current.x,
-            y: prev.y + velocityRef.current.y,
-          })
-        )
-
-        animationRef.current = requestAnimationFrame(animate)
-      }
-    }
-
-    if (Math.abs(velocityRef.current.x) > 0.5 || Math.abs(velocityRef.current.y) > 0.5) {
-      animationRef.current = requestAnimationFrame(animate)
-    }
-
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current)
-      }
-    }
-  }, [isDragging, clampOffset])
-
-  /**
-   * Mouse event handlers
-   */
-  const handleMouseDown = useCallback(
-    (e) => {
-      // Ignore if clicking on a hotspot
-      if (e.target.closest('[data-testid="hotspot"]')) {
-        return
-      }
-
-      setIsDragging(true)
-      dragStartRef.current = { x: e.clientX, y: e.clientY }
-      dragStartOffsetRef.current = { ...offset }
-      lastPositionRef.current = { x: e.clientX, y: e.clientY }
-      totalDragDistanceRef.current = 0
-      velocityRef.current = { x: 0, y: 0 }
-
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current)
+      const viewportRect = calculateViewportRect(transformState)
+      if (viewportRect) {
+        onViewportChange(viewportRect)
       }
     },
-    [offset]
-  )
-
-  const handleMouseMove = useCallback(
-    (e) => {
-      if (!isDragging) {
-        return
-      }
-
-      const deltaX = e.clientX - dragStartRef.current.x
-      const deltaY = e.clientY - dragStartRef.current.y
-
-      totalDragDistanceRef.current = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
-
-      // Calculate velocity for momentum
-      velocityRef.current = {
-        x: e.clientX - lastPositionRef.current.x,
-        y: e.clientY - lastPositionRef.current.y,
-      }
-      lastPositionRef.current = { x: e.clientX, y: e.clientY }
-
-      setOffset(
-        clampOffset({
-          x: dragStartOffsetRef.current.x + deltaX,
-          y: dragStartOffsetRef.current.y + deltaY,
-        })
-      )
-    },
-    [isDragging, clampOffset]
-  )
-
-  const handleMouseUp = useCallback(() => {
-    setIsDragging(false)
-  }, [])
-
-  const handleMouseLeave = useCallback(() => {
-    if (isDragging) {
-      setIsDragging(false)
-    }
-  }, [isDragging])
-
-  /**
-   * Touch event handlers
-   */
-  const handleTouchStart = useCallback(
-    (e) => {
-      if (e.target.closest('[data-testid="hotspot"]')) {
-        return
-      }
-
-      const touch = e.touches[0]
-      setIsDragging(true)
-      dragStartRef.current = { x: touch.clientX, y: touch.clientY }
-      dragStartOffsetRef.current = { ...offset }
-      lastPositionRef.current = { x: touch.clientX, y: touch.clientY }
-      totalDragDistanceRef.current = 0
-      velocityRef.current = { x: 0, y: 0 }
-
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current)
-      }
-    },
-    [offset]
-  )
-
-  const handleTouchMove = useCallback(
-    (e) => {
-      if (!isDragging || e.touches.length !== 1) {
-        return
-      }
-
-      const touch = e.touches[0]
-      const deltaX = touch.clientX - dragStartRef.current.x
-      const deltaY = touch.clientY - dragStartRef.current.y
-
-      totalDragDistanceRef.current = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
-
-      velocityRef.current = {
-        x: touch.clientX - lastPositionRef.current.x,
-        y: touch.clientY - lastPositionRef.current.y,
-      }
-      lastPositionRef.current = { x: touch.clientX, y: touch.clientY }
-
-      setOffset(
-        clampOffset({
-          x: dragStartOffsetRef.current.x + deltaX,
-          y: dragStartOffsetRef.current.y + deltaY,
-        })
-      )
-    },
-    [isDragging, clampOffset]
-  )
-
-  const handleTouchEnd = useCallback(() => {
-    setIsDragging(false)
-  }, [])
-
-  /**
-   * Wheel handler for zooming
-   */
-  const handleWheel = useCallback(
-    (e) => {
-      e.preventDefault()
-
-      const delta = -e.deltaY * ZOOM_SENSITIVITY
-      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom + delta))
-
-      setZoom(newZoom)
-      setOffset((prev) => clampOffset(prev, newZoom))
-    },
-    [zoom, clampOffset]
+    [calculateViewportRect, onViewportChange]
   )
 
   /**
    * Handle click/tap on the panorama
+   * Note: InteractiveCanvas handles drag detection internally, so clicks
+   * only fire for actual taps, not drags
    */
   const handleClick = useCallback(
     (e) => {
-      // Don't trigger tap if it was a drag
-      if (totalDragDistanceRef.current > DRAG_THRESHOLD) {
-        return
-      }
-
       // Don't trigger if clicking a hotspot
       if (e.target.closest('[data-testid="hotspot"]')) {
         return
@@ -436,17 +319,6 @@ function PanoramaViewer({
     }
   }, [worldImageUrl])
 
-  /**
-   * Cleanup animation frame on unmount
-   */
-  useEffect(() => {
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current)
-      }
-    }
-  }, [])
-
   const showSkeleton = isLoading || (worldImageUrl && !imageLoaded && !imageError)
 
   return (
@@ -464,39 +336,38 @@ function PanoramaViewer({
         cursor-grab
         ${isDragging ? 'cursor-grabbing' : ''}
       `}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseLeave}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-      onWheel={handleWheel}
       onClick={handleClick}
     >
       {/* Loading Skeleton */}
       {showSkeleton && <LoadingSkeleton />}
 
-      {/* World Image */}
+      {/* InteractiveCanvas handles pan/zoom/pinch gestures */}
       {worldImageUrl && (
-        <img
-          ref={imageRef}
-          src={worldImageUrl}
-          alt="World panorama landscape"
-          className={`
-            absolute inset-0 w-full h-full
-            object-cover
-            transition-opacity duration-500
-            ${imageLoaded ? 'opacity-100' : 'opacity-0'}
-          `}
-          style={{
-            transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
-            transformOrigin: 'center center',
-          }}
-          onLoad={handleImageLoad}
-          onError={handleImageError}
-          draggable={false}
-        />
+        <InteractiveCanvas
+          ref={externalCanvasRef || canvasRef}
+          minZoom={MIN_ZOOM}
+          maxZoom={MAX_ZOOM}
+          onZoomChange={handleZoomChange}
+          onTransformStart={handleTransformStart}
+          onTransformEnd={handleTransformEnd}
+          onTransformed={handleTransformed}
+          className="w-full h-full"
+        >
+          {/* World Image */}
+          <img
+            src={worldImageUrl}
+            alt="World panorama landscape"
+            className={`
+              w-full h-full
+              object-cover
+              transition-opacity duration-500
+              ${imageLoaded ? 'opacity-100' : 'opacity-0'}
+            `}
+            onLoad={handleImageLoad}
+            onError={handleImageError}
+            draggable={false}
+          />
+        </InteractiveCanvas>
       )}
 
       {/* Error State */}
@@ -521,7 +392,7 @@ function PanoramaViewer({
         </div>
       )}
 
-      {/* Hotspots */}
+      {/* Hotspots - rendered outside InteractiveCanvas for consistent positioning */}
       {!isLoading &&
         imageLoaded &&
         hotspots?.map((hotspot, index) => (
@@ -534,6 +405,7 @@ function PanoramaViewer({
             piece={hotspot.piece}
             onTap={onRegionTap}
             onLongPress={onHotspotLongPress}
+            zoom={currentZoom}
           />
         ))}
     </div>

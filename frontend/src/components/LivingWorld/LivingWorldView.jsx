@@ -12,12 +12,23 @@
  * - WorldTransition for smooth evolution animations
  * - WorldInfoPanel overlay for tier and topics info
  * - Error handling with retry option
+ *
+ * Phase 2-4 Gamification Features:
+ * - ConnectionLine: SVG lines connecting related topics
+ * - Minimap: Navigation minimap when zoomed in (visible at zoom > 1.2)
+ * - DiscoveryPopover: Suggestion popover for undiscovered connections
+ * - TrophyBadge: For milestone achievements display (available for integration)
  */
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useRef, useState, useEffect } from 'react'
 import PanoramaViewer from './PanoramaViewer'
 import WorldTransition from './WorldTransition'
 import WorldInfoPanel from './WorldInfoPanel'
+import ConnectionLine from './ConnectionLine'
+import DiscoveryPopover from './DiscoveryPopover'
+import Minimap from './Minimap'
+// TrophyBadge is available for milestone achievements integration
+// import TrophyBadge from './TrophyBadge'
 import SmartPrompt from '../WorldView/SmartPrompt'
 import WorldFAB from '../WorldView/WorldFAB'
 import SuggestionPanel from '../WorldView/SuggestionPanel'
@@ -227,6 +238,24 @@ function LivingWorldView({
   // State for QuickActionBar (shown on long-press of hotspot)
   const [actionBarData, setActionBarData] = useState(null)
 
+  // Minimap state - track viewport and zoom for navigation
+  const [viewportRect, setViewportRect] = useState({ x: 0, y: 0, width: 1, height: 1 })
+  const [currentZoom, setCurrentZoom] = useState(1)
+
+  // Discovery popover state - for suggesting related topics
+  const [discoveryPopover, setDiscoveryPopover] = useState({
+    isOpen: false,
+    position: { x: 0, y: 0 },
+    suggestions: [],
+  })
+
+  // Container ref and dimensions for ConnectionLine component
+  const containerRef = useRef(null)
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
+
+  // Ref to InteractiveCanvas for minimap navigation
+  const canvasRef = useRef(null)
+
   // Fetch suggestions when panel is open
   const { suggestions, isLoading: suggestionsLoading } = useSuggestions({
     pieces,
@@ -239,6 +268,23 @@ function LivingWorldView({
 
   // Track if we're currently creating a world
   const isCreatingRef = useRef(false)
+
+  /**
+   * Track container size for ConnectionLine component
+   */
+  useEffect(() => {
+    if (!containerRef.current) return
+
+    const observer = new ResizeObserver(([entry]) => {
+      setContainerSize({
+        width: entry.contentRect.width,
+        height: entry.contentRect.height,
+      })
+    })
+    observer.observe(containerRef.current)
+
+    return () => observer.disconnect()
+  }, [])
 
   /**
    * Handle create world CTA click
@@ -340,6 +386,63 @@ function LivingWorldView({
     setActionBarData(null)
   }, [])
 
+  /**
+   * Handle zoom change from PanoramaViewer
+   */
+  const handleZoomChange = useCallback((zoom) => {
+    setCurrentZoom(zoom)
+  }, [])
+
+  /**
+   * Handle viewport change from PanoramaViewer
+   */
+  const handleViewportChange = useCallback((rect) => {
+    setViewportRect(rect)
+  }, [])
+
+  /**
+   * Handle minimap navigation - center view on clicked position
+   */
+  const handleMinimapNavigate = useCallback((x, y) => {
+    if (!canvasRef.current) return
+
+    // Convert normalized coordinates to canvas position
+    // Need to calculate the transform to center the view on the clicked point
+    const containerWidth = containerSize.width || 1
+    const containerHeight = containerSize.height || 1
+
+    // Calculate the position offset to center on (x, y)
+    // When zoomed in, we need to translate to bring the target point to center
+    const targetX = -x * containerWidth * currentZoom + containerWidth / 2
+    const targetY = -y * containerHeight * currentZoom + containerHeight / 2
+
+    canvasRef.current.setTransform(targetX, targetY, currentZoom, 200)
+  }, [containerSize, currentZoom])
+
+  /**
+   * Handle selecting a topic from discovery popover
+   */
+  const handleSelectDiscoveryTopic = useCallback((topicName) => {
+    setDiscoveryPopover((prev) => ({ ...prev, isOpen: false }))
+    onSelectSuggestedTopic?.(topicName)
+  }, [onSelectSuggestedTopic])
+
+  /**
+   * Generate connections between adjacent learned topics
+   * Creates a simple linear chain connecting sequential hotspots
+   */
+  const generateConnections = useCallback((hotspotList) => {
+    if (!hotspotList || hotspotList.length < 2) return []
+
+    // Connect each hotspot to its nearest neighbor (simple heuristic)
+    return hotspotList.slice(0, -1).map((from, i) => ({
+      from: { x: from.x, y: from.y, topicName: from.topicName },
+      to: { x: hotspotList[i + 1].x, y: hotspotList[i + 1].y, topicName: hotspotList[i + 1].topicName },
+      strength: 0.7,
+      discovered: true,
+    }))
+  }, [])
+
   // Extract topics learned from world state
   const topicsLearned = Array.isArray(worldState?.topicsLearned) ? worldState.topicsLearned : []
   const totalTopics = typeof worldState?.totalTopics === 'number'
@@ -388,7 +491,7 @@ function LivingWorldView({
 
       {/* World Display */}
       {showWorld && (
-        <div className="relative">
+        <div ref={containerRef} className="relative">
           {/* Evolution Transition */}
           {isEvolving ? (
             <WorldTransition
@@ -406,8 +509,32 @@ function LivingWorldView({
               hotspots={hotspots}
               onRegionTap={handleRegionTap}
               onHotspotLongPress={handleHotspotLongPress}
+              onZoomChange={handleZoomChange}
+              onViewportChange={handleViewportChange}
+              canvasRef={canvasRef}
             />
           )}
+
+          {/* Connection Lines between related topics */}
+          {containerSize.width > 0 && hotspots && hotspots.length > 1 && (
+            <ConnectionLine
+              connections={generateConnections(hotspots)}
+              containerWidth={containerSize.width}
+              containerHeight={containerSize.height}
+              zoom={currentZoom}
+              animated={true}
+            />
+          )}
+
+          {/* Navigation Minimap - visible when zoomed in */}
+          <Minimap
+            worldImageUrl={worldImageUrl}
+            hotspots={hotspots}
+            viewportRect={viewportRect}
+            onNavigate={handleMinimapNavigate}
+            isVisible={currentZoom > 1.2}
+            position="bottom-left"
+          />
 
           {/* Info Panel Overlay */}
           <div className="absolute top-3 right-3 z-10">
@@ -458,6 +585,15 @@ function LivingWorldView({
               onClose={handleCloseActionBar}
             />
           )}
+
+          {/* Discovery Popover - suggests related topics */}
+          <DiscoveryPopover
+            isOpen={discoveryPopover.isOpen}
+            position={discoveryPopover.position}
+            suggestions={discoveryPopover.suggestions}
+            onSelectTopic={handleSelectDiscoveryTopic}
+            onClose={() => setDiscoveryPopover((prev) => ({ ...prev, isOpen: false }))}
+          />
         </div>
       )}
 
