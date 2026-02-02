@@ -10,10 +10,10 @@
  * - Backdrop click to close
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { LEVEL_CONFIG, EXPLANATION_LEVEL } from '../../constants/appConfig.js'
 
-const API_BASE = import.meta.env.VITE_API_URL || ''
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
 const RECENT_TOPICS_STORAGE_KEY = 'showme_random_topic_history'
 const MAX_RECENT_TOPICS = 8
 
@@ -70,6 +70,12 @@ export default function RandomTopicModal({
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
 
+  // Ref to access current topic in callbacks without adding to dependencies
+  const topicRef = useRef(null)
+  useEffect(() => {
+    topicRef.current = topic
+  }, [topic])
+
   // Fetch a random topic from the API
   const fetchRandomTopic = useCallback(async () => {
     setIsLoading(true)
@@ -78,7 +84,7 @@ export default function RandomTopicModal({
     try {
       const excludeTopics = normalizeTopicList([
         ...loadRecentTopics(),
-        ...(topic ? [topic] : []),
+        ...(topicRef.current ? [topicRef.current] : []),
       ]).slice(0, MAX_RECENT_TOPICS)
 
       const params = new URLSearchParams()
@@ -107,7 +113,7 @@ export default function RandomTopicModal({
     } finally {
       setIsLoading(false)
     }
-  }, [topic])
+  }, [])
 
   // Fetch on open
   useEffect(() => {
