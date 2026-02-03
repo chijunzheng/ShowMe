@@ -62,3 +62,55 @@ export const POWER_UPS = {
     effect: { type: 'hint', value: 1 },
   },
 }
+
+/**
+ * Quick Wins Configuration
+ *
+ * Configuration for Phase 6 engagement features:
+ * - Dramatic pause for suspense before answer reveal
+ * - Streak flames for celebrating answer streaks
+ * - Contextual feedback based on quiz difficulty level
+ */
+export const QUICK_WINS = {
+  /**
+   * Dramatic pause configuration for suspense before answer reveal.
+   */
+  dramaticPause: {
+    duration: 800,
+    showSuspenseText: true,
+    soundEnabled: true,
+  },
+
+  /**
+   * Streak milestones that trigger flame celebrations.
+   * Each milestone shows progressively more intense flames.
+   */
+  streakMilestones: [3, 5, 7, 10],
+
+  /**
+   * Flame intensity mapping for each streak milestone.
+   * Higher streaks = more intense visual effect.
+   */
+  flameIntensity: {
+    3: 'low',
+    5: 'medium',
+    7: 'high',
+    10: 'inferno',
+  },
+
+  /**
+   * Contextual feedback configuration per difficulty level.
+   * Celebration intensity increases with difficulty.
+   */
+  contextualFeedback: {
+    simple: {
+      celebrationIntensity: 'low',
+    },
+    standard: {
+      celebrationIntensity: 'medium',
+    },
+    deep: {
+      celebrationIntensity: 'high',
+    },
+  },
+}

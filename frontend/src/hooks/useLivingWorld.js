@@ -9,6 +9,7 @@
  * - Initialize barren world for new users
  * - Evolve world when topics are learned
  * - Parse hotspots from composition map
+ * - Quiz reaction system for tree animations
  *
  * API Endpoints:
  * - GET /api/world/living - Fetch current world state
@@ -16,8 +17,9 @@
  * - POST /api/world/living/evolve - Evolve world with new topic
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { getClientId } from '../utils/clientId'
+import { calculateTreeLevel, groupTopicsByZone, getZoneForCategory } from '../components/MagicalTree/treeUtils'
 
 /**
  * API base URL from environment
@@ -55,22 +57,64 @@ function sleep(ms) {
 }
 
 /**
- * Parse hotspots from composition map
+ * Parse hotspots from world state evolutions
  *
- * @param {Object|null} compositionMap - World composition map
- * @returns {Array} Array of hotspot objects
+ * The backend stores learned topics in the `evolutions` array with:
+ * - topicName: string
+ * - placementHint: string (e.g., "midground center")
+ *
+ * We generate pseudo-positions from the placement hints and distribute
+ * hotspots across the canvas to avoid overlap.
+ *
+ * @param {Object|null} worldState - World state object
+ * @returns {Array} Array of hotspot objects with x, y, topicName, layer
  */
-function parseHotspots(compositionMap) {
-  if (!compositionMap || !compositionMap.regions) {
+function parseHotspots(worldState) {
+  // Support legacy compositionMap.regions format
+  if (worldState?.compositionMap?.regions) {
+    return worldState.compositionMap.regions.map(region => ({
+      x: region.x,
+      y: region.y,
+      topicName: region.topicName,
+      layer: region.layer,
+    }))
+  }
+
+  // Parse from evolutions array (new format)
+  const evolutions = worldState?.evolutions
+  if (!Array.isArray(evolutions) || evolutions.length === 0) {
     return []
   }
 
-  return compositionMap.regions.map(region => ({
-    x: region.x,
-    y: region.y,
-    topicName: region.topicName,
-    layer: region.layer,
-  }))
+  // Distribute hotspots across the canvas based on index
+  // Use a grid-like pattern with some randomness for visual interest
+  return evolutions.map((evolution, index) => {
+    const { topicName, placementHint } = evolution
+
+    // Parse layer from placementHint (e.g., "midground center" -> "midground")
+    const hintLower = (placementHint || '').toLowerCase()
+    let layer = 'midground'
+    if (hintLower.includes('foreground')) layer = 'foreground'
+    else if (hintLower.includes('background')) layer = 'background'
+
+    // Generate position based on index with some distribution
+    // Use golden ratio for better distribution
+    const goldenRatio = 0.618033988749895
+    const baseX = ((index * goldenRatio) % 1) * 70 + 15 // 15-85% range
+    const baseY = ((index * goldenRatio * 1.5) % 1) * 50 + 25 // 25-75% range
+
+    // Add small random offset for natural feel (seeded by topic name)
+    const seed = topicName ? topicName.charCodeAt(0) : index
+    const offsetX = ((seed % 10) - 5) * 2
+    const offsetY = (((seed * 7) % 10) - 5) * 2
+
+    return {
+      x: Math.round(Math.max(10, Math.min(90, baseX + offsetX))),
+      y: Math.round(Math.max(15, Math.min(85, baseY + offsetY))),
+      topicName: topicName || `Topic ${index + 1}`,
+      layer,
+    }
+  })
 }
 
 /**
@@ -90,6 +134,9 @@ export default function useLivingWorld() {
 
   // Error state
   const [error, setError] = useState(null)
+
+  // Quiz reaction state for tree animations
+  const [pendingQuizReaction, setPendingQuizReaction] = useState(null)
 
   // Track if initial fetch has been done
   const initialFetchDone = useRef(false)
@@ -237,6 +284,33 @@ export default function useLivingWorld() {
   }, [])
 
   /**
+   * Trigger a quiz reaction on the tree
+   *
+   * Creates a reaction object with type, options, and timestamp.
+   * The reaction is stored in pendingQuizReaction state for the
+   * TreeQuizReaction component to display.
+   *
+   * @param {string} type - Reaction type ('pass' | 'perfect' | 'boss_victory' | 'streak' | 'fail')
+   * @param {Object} options - Additional options (score, topicName, streakCount)
+   */
+  const triggerQuizReaction = useCallback((type, options = {}) => {
+    setPendingQuizReaction({
+      type,
+      ...options,
+      timestamp: Date.now(),
+    })
+  }, [])
+
+  /**
+   * Clear the pending quiz reaction
+   *
+   * Called when the reaction animation completes or needs to be dismissed.
+   */
+  const clearQuizReaction = useCallback(() => {
+    setPendingQuizReaction(null)
+  }, [])
+
+  /**
    * Reset the living world back to an uninitialized state
    *
    * @returns {Promise<{success: boolean, error?: string}>}
@@ -281,7 +355,32 @@ export default function useLivingWorld() {
   // Backend uses `worldImageUrl` (WB023). Keep `imageUrl` as a legacy fallback.
   const worldImageUrl = worldState?.worldImageUrl || worldState?.imageUrl || null
   const tier = worldState?.tier || null
-  const hotspots = parseHotspots(worldState?.compositionMap)
+  const hotspots = parseHotspots(worldState)
+
+  // Tree-related derived state
+  const topicsLearned = worldState?.topicsLearned || []
+  const topicCount = topicsLearned.length
+
+  // Calculate tree level from topic count
+  const treeLevel = useMemo(() => {
+    return calculateTreeLevel(topicCount)
+  }, [topicCount])
+
+  // Convert evolutions to topics with zone for tree branches
+  const branches = useMemo(() => {
+    const evolutions = worldState?.evolutions || []
+
+    // Convert evolutions to topic format for groupTopicsByZone
+    const topics = evolutions.map((evolution, index) => ({
+      id: `topic-${index}`,
+      name: evolution.topicName,
+      topicName: evolution.topicName,
+      category: evolution.category || 'general',
+      earnedAt: evolution.timestamp || new Date().toISOString(),
+    }))
+
+    return groupTopicsByZone(topics)
+  }, [worldState?.evolutions])
 
   return {
     // State
@@ -293,9 +392,22 @@ export default function useLivingWorld() {
     hotspots,
     error,
 
+    // Tree-specific state
+    treeLevel,
+    branches,
+    topicCount,
+    topicsLearned,
+
+    // Quiz reaction state
+    pendingQuizReaction,
+
     // Actions
     evolveWorld,
     initializeWorld,
     resetWorld,
+
+    // Quiz reaction actions
+    triggerQuizReaction,
+    clearQuizReaction,
   }
 }

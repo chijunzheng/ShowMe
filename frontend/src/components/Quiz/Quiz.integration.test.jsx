@@ -298,6 +298,11 @@ describe('Quiz Sound & Haptic Integration', () => {
       await selectAndSubmitMCQ('4')
       expect(playCorrectSound).toHaveBeenCalledTimes(1)
 
+      // Advance timers to complete the dramatic pause (800ms)
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+
       // Click continue to go to next question
       const continueButton = screen.getByRole('button', { name: /next challenge/i })
 
@@ -318,9 +323,11 @@ describe('Quiz Sound & Haptic Integration', () => {
 describe('Quiz without sound (graceful degradation)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.useFakeTimers()
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     cleanup()
   })
 
@@ -354,6 +361,11 @@ describe('Quiz without sound (graceful degradation)', () => {
     // Should not throw
     await act(async () => {
       fireEvent.click(submitButton)
+    })
+
+    // Advance timers to complete the dramatic pause (800ms)
+    act(() => {
+      vi.advanceTimersByTime(1000)
     })
 
     // Quiz should still be functional (feedback shown - "Next Challenge" button)

@@ -10,7 +10,7 @@
  * - Animated transitions between questions
  */
 
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import QuizProgress from './QuizProgress'
 import MCQQuestion from './MCQQuestion'
 import FillBlankQuestion from './FillBlankQuestion'
@@ -40,6 +40,22 @@ import {
   playSelectSound,
 } from '../../utils/soundEffects'
 import { vibrateSuccess, vibrateError, vibrateShort } from '../../utils/haptics'
+
+// Phase 1: Rarity System
+import QuestionRarityBadge from './engagement/QuestionRarityBadge'
+import { selectRandomRarity, applyRarityMultiplier } from '../../hooks/game/rarityConfig'
+
+// Phase 2: Boss Battle
+import BossBattleIntro from './engagement/BossBattleIntro'
+import BossBattle from './engagement/BossBattle'
+import BossDefeated from './celebrations/BossDefeated'
+import BossEscaped from './celebrations/BossEscaped'
+import { BOSS_BATTLE_CONFIG } from '../../hooks/game/bossBattleConfig'
+
+// Phase 6: Quick Wins
+import DramaticPause from './engagement/DramaticPause'
+import StreakFlames from './celebrations/StreakFlames'
+import { QUICK_WINS } from '../../hooks/game/gameConfig'
 
 /**
  * Question types supported by the quiz
@@ -94,6 +110,23 @@ export default function Quiz({
   const [showMicroCelebration, setShowMicroCelebration] = useState(false)
   const [celebrationData, setCelebrationData] = useState({ xpGained: 0, streak: 0 })
 
+  // Phase 1: Rarity System - assign rarity to each question
+  const [questionRarities, setQuestionRarities] = useState([])
+
+  // Phase 2: Boss Battle - state machine for final question drama
+  // Values: 'inactive' | 'intro' | 'active' | 'victory' | 'escaped'
+  const [bossBattlePhase, setBossBattlePhase] = useState('inactive')
+  const [bossResult, setBossResult] = useState(null)
+
+  // Phase 6: Dramatic Pause - suspense before showing answer result
+  const [showDramaticPause, setShowDramaticPause] = useState(false)
+  const [pendingFeedback, setPendingFeedback] = useState(null)
+
+  // Phase 6: Streak Flames - fire effects at streak milestones
+  const [showStreakFlames, setShowStreakFlames] = useState(false)
+  const [streakFlameIntensity, setStreakFlameIntensity] = useState('low')
+  const streakFlamesTimeoutRef = useRef(null)
+
   // Initialize gamification system based on level
   const gamification = useQuizGamification(level)
 
@@ -106,6 +139,20 @@ export default function Quiz({
       setTimerActive(false)
     }
   }, [currentIndex, state, gamification.startQuestionTimer])
+
+  // Phase 1: Assign random rarity to each question on mount
+  useEffect(() => {
+    if (questions.length > 0 && questionRarities.length === 0) {
+      const rarities = questions.map(() => selectRandomRarity())
+      setQuestionRarities(rarities)
+    }
+  }, [questions, questionRarities.length])
+
+  // Get current question's rarity
+  const currentRarity = questionRarities[currentIndex] || 'common'
+
+  // Total questions - defined early as it's used in multiple places
+  const totalQuestions = questions.length
 
   // Current question
   const currentQuestion = useMemo(() => {
@@ -121,8 +168,27 @@ export default function Quiz({
     return slide?.imageUrl || null
   }, [currentQuestion, slides])
 
-  // Total questions
-  const totalQuestions = questions.length
+  // Phase 2: Trigger boss battle intro on final question
+  useEffect(() => {
+    const isFinalQuestion = currentIndex === totalQuestions - 1
+    const shouldShowBossIntro = isFinalQuestion &&
+                                state === QUIZ_STATE.ANSWERING &&
+                                bossBattlePhase === 'inactive' &&
+                                totalQuestions > 1 // Only show boss for multi-question quizzes
+
+    if (shouldShowBossIntro) {
+      setBossBattlePhase('intro')
+    }
+  }, [currentIndex, totalQuestions, state, bossBattlePhase])
+
+  // Clean up streak flames timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (streakFlamesTimeoutRef.current) {
+        clearTimeout(streakFlamesTimeoutRef.current)
+      }
+    }
+  }, [])
 
   // Calculate final results
   const calculateResults = useCallback(() => {
@@ -194,6 +260,91 @@ export default function Quiz({
     setShowMicroCelebration(false)
   }, [])
 
+  /**
+   * Phase 2: Handle boss battle intro completion
+   * Transitions from intro animation to active boss battle
+   */
+  const handleBossIntroComplete = useCallback(() => {
+    setBossBattlePhase('active')
+  }, [])
+
+  /**
+   * Phase 2: Handle boss victory celebration completion
+   * Proceeds to show normal feedback after victory animation
+   */
+  const handleBossVictoryComplete = useCallback(() => {
+    setBossBattlePhase('inactive')
+    // Show the feedback that was pending during boss celebration
+    if (pendingFeedback) {
+      setCurrentFeedback(pendingFeedback)
+      setState(QUIZ_STATE.SHOWING_FEEDBACK)
+      setPendingFeedback(null)
+    }
+  }, [pendingFeedback])
+
+  /**
+   * Phase 2: Handle boss escaped (defeat) completion
+   * Proceeds to show normal feedback after escape animation
+   */
+  const handleBossEscapedComplete = useCallback(() => {
+    setBossBattlePhase('inactive')
+    // Show the feedback that was pending during boss celebration
+    if (pendingFeedback) {
+      setCurrentFeedback(pendingFeedback)
+      setState(QUIZ_STATE.SHOWING_FEEDBACK)
+      setPendingFeedback(null)
+    }
+  }, [pendingFeedback])
+
+  /**
+   * Phase 6: Handle dramatic pause completion
+   * Shows the feedback after suspense animation
+   */
+  const handleDramaticPauseComplete = useCallback(() => {
+    setShowDramaticPause(false)
+    if (pendingFeedback) {
+      // Check if this is boss battle final question
+      const isFinalQuestion = currentIndex === totalQuestions - 1
+      if (isFinalQuestion && bossBattlePhase === 'active') {
+        // Show boss victory or escape instead of immediate feedback
+        if (pendingFeedback.isCorrect) {
+          setBossResult({ defeated: true, xpBonus: BOSS_BATTLE_CONFIG.rewards.victoryXpBonus })
+          setBossBattlePhase('victory')
+        } else {
+          setBossResult({ defeated: false })
+          setBossBattlePhase('escaped')
+        }
+        // Don't clear pendingFeedback yet - boss handlers will do it
+      } else {
+        // Normal question - show feedback immediately
+        setCurrentFeedback(pendingFeedback)
+        setState(QUIZ_STATE.SHOWING_FEEDBACK)
+        setPendingFeedback(null)
+      }
+    }
+  }, [pendingFeedback, currentIndex, totalQuestions, bossBattlePhase])
+
+  /**
+   * Phase 6: Trigger streak flames at milestones
+   * Shows fire effects on screen edges for streak achievements
+   */
+  const triggerStreakFlames = useCallback((streak) => {
+    const milestone = QUICK_WINS.streakMilestones.find(m => streak === m)
+    if (milestone) {
+      const intensity = QUICK_WINS.flameIntensity[milestone] || 'low'
+      setStreakFlameIntensity(intensity)
+      setShowStreakFlames(true)
+
+      // Auto-hide after 2 seconds
+      if (streakFlamesTimeoutRef.current) {
+        clearTimeout(streakFlamesTimeoutRef.current)
+      }
+      streakFlamesTimeoutRef.current = setTimeout(() => {
+        setShowStreakFlames(false)
+      }, 2000)
+    }
+  }, [])
+
   // Handle MCQ answer
   const handleMCQAnswer = useCallback((selectedIndex) => {
     if (!currentQuestion || currentQuestion.type !== 'mcq') return
@@ -203,12 +354,17 @@ export default function Quiz({
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, false)
 
+    // Phase 1: Apply rarity multiplier to XP
+    const rarityMultipliedXp = applyRarityMultiplier(gamificationResult.xpGained, currentRarity)
+
     // Play sound and haptic feedback
     playAnswerFeedback(isCorrect, false)
 
     // Trigger celebration for correct answers
     if (isCorrect) {
-      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+      triggerCelebration(rarityMultipliedXp, gamificationResult.newStreak)
+      // Phase 6: Check for streak milestone
+      triggerStreakFlames(gamificationResult.newStreak)
     }
 
     const feedback = {
@@ -219,13 +375,15 @@ export default function Quiz({
       userAnswer: selectedIndex,
       correctAnswer: currentQuestion.correctIndex,
       explanation: currentQuestion.explanation,
-      xpGained: gamificationResult.xpGained,
-      speedBonus: gamificationResult.speedBonus
+      xpGained: rarityMultipliedXp,
+      speedBonus: gamificationResult.speedBonus,
+      rarity: currentRarity
     }
 
-    setCurrentFeedback(feedback)
-    setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
+    // Phase 6: Use dramatic pause before showing feedback
+    setPendingFeedback(feedback)
+    setShowDramaticPause(true)
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration, currentRarity, triggerStreakFlames])
 
   // Handle Fill-in-blank answer
   const handleFillBlankAnswer = useCallback((userAnswer) => {
@@ -241,12 +399,16 @@ export default function Quiz({
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(matchResult.isCorrect, matchResult.isPartial)
 
+    // Phase 1: Apply rarity multiplier to XP
+    const rarityMultipliedXp = applyRarityMultiplier(gamificationResult.xpGained, currentRarity)
+
     // Play sound and haptic feedback
     playAnswerFeedback(matchResult.isCorrect, matchResult.isPartial)
 
     // Trigger celebration for correct/partial answers
     if (matchResult.isCorrect || matchResult.isPartial) {
-      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+      triggerCelebration(rarityMultipliedXp, gamificationResult.newStreak)
+      triggerStreakFlames(gamificationResult.newStreak)
     }
 
     const feedback = {
@@ -259,13 +421,15 @@ export default function Quiz({
         ? currentQuestion.correctAnswer[0]
         : currentQuestion.correctAnswer,
       explanation: currentQuestion.explanation,
-      xpGained: gamificationResult.xpGained,
-      speedBonus: gamificationResult.speedBonus
+      xpGained: rarityMultipliedXp,
+      speedBonus: gamificationResult.speedBonus,
+      rarity: currentRarity
     }
 
-    setCurrentFeedback(feedback)
-    setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
+    // Phase 6: Use dramatic pause before showing feedback
+    setPendingFeedback(feedback)
+    setShowDramaticPause(true)
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration, currentRarity, triggerStreakFlames])
 
   // Handle Voice answer
   // Voice answers are evaluated semantically: user's response should cover expectedTopics
@@ -314,12 +478,16 @@ export default function Quiz({
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, isPartial)
 
+    // Phase 1: Apply rarity multiplier to XP
+    const rarityMultipliedXp = applyRarityMultiplier(gamificationResult.xpGained, currentRarity)
+
     // Play sound and haptic feedback
     playAnswerFeedback(isCorrect, isPartial)
 
     // Trigger celebration for correct/partial answers
     if (isCorrect || isPartial) {
-      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+      triggerCelebration(rarityMultipliedXp, gamificationResult.newStreak)
+      triggerStreakFlames(gamificationResult.newStreak)
     }
 
     const feedback = {
@@ -330,13 +498,15 @@ export default function Quiz({
       userAnswer: userTranscript,
       correctAnswer,
       explanation: currentQuestion.explanation,
-      xpGained: gamificationResult.xpGained,
-      speedBonus: gamificationResult.speedBonus
+      xpGained: rarityMultipliedXp,
+      speedBonus: gamificationResult.speedBonus,
+      rarity: currentRarity
     }
 
-    setCurrentFeedback(feedback)
-    setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
+    // Phase 6: Use dramatic pause before showing feedback
+    setPendingFeedback(feedback)
+    setShowDramaticPause(true)
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration, currentRarity, triggerStreakFlames])
 
   // Handle Yes/No answer
   // yes_no type expects a boolean answer (true/false)
@@ -348,12 +518,16 @@ export default function Quiz({
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, false)
 
+    // Phase 1: Apply rarity multiplier to XP
+    const rarityMultipliedXp = applyRarityMultiplier(gamificationResult.xpGained, currentRarity)
+
     // Play sound and haptic feedback
     playAnswerFeedback(isCorrect, false)
 
     // Trigger celebration for correct answers
     if (isCorrect) {
-      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+      triggerCelebration(rarityMultipliedXp, gamificationResult.newStreak)
+      triggerStreakFlames(gamificationResult.newStreak)
     }
 
     const feedback = {
@@ -364,13 +538,15 @@ export default function Quiz({
       userAnswer,
       correctAnswer: currentQuestion.correctAnswer,
       explanation: currentQuestion.explanation,
-      xpGained: gamificationResult.xpGained,
-      speedBonus: gamificationResult.speedBonus
+      xpGained: rarityMultipliedXp,
+      speedBonus: gamificationResult.speedBonus,
+      rarity: currentRarity
     }
 
-    setCurrentFeedback(feedback)
-    setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
+    // Phase 6: Use dramatic pause before showing feedback
+    setPendingFeedback(feedback)
+    setShowDramaticPause(true)
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration, currentRarity, triggerStreakFlames])
 
   // Handle Picture Match answer
   // picture_match type expects a slide index selection
@@ -382,12 +558,16 @@ export default function Quiz({
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, false)
 
+    // Phase 1: Apply rarity multiplier to XP
+    const rarityMultipliedXp = applyRarityMultiplier(gamificationResult.xpGained, currentRarity)
+
     // Play sound and haptic feedback
     playAnswerFeedback(isCorrect, false)
 
     // Trigger celebration for correct answers
     if (isCorrect) {
-      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+      triggerCelebration(rarityMultipliedXp, gamificationResult.newStreak)
+      triggerStreakFlames(gamificationResult.newStreak)
     }
 
     const feedback = {
@@ -398,13 +578,15 @@ export default function Quiz({
       userAnswer: selectedSlideIndex,
       correctAnswer: currentQuestion.correctSlideIndex,
       explanation: currentQuestion.explanation,
-      xpGained: gamificationResult.xpGained,
-      speedBonus: gamificationResult.speedBonus
+      xpGained: rarityMultipliedXp,
+      speedBonus: gamificationResult.speedBonus,
+      rarity: currentRarity
     }
 
-    setCurrentFeedback(feedback)
-    setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
+    // Phase 6: Use dramatic pause before showing feedback
+    setPendingFeedback(feedback)
+    setShowDramaticPause(true)
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration, currentRarity, triggerStreakFlames])
 
   // Handle Odd One Out answer
   // odd_one_out type expects the index of the item user selected
@@ -418,12 +600,16 @@ export default function Quiz({
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, false)
 
+    // Phase 1: Apply rarity multiplier to XP
+    const rarityMultipliedXp = applyRarityMultiplier(gamificationResult.xpGained, currentRarity)
+
     // Play sound and haptic feedback
     playAnswerFeedback(isCorrect, false)
 
     // Trigger celebration for correct answers
     if (isCorrect) {
-      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+      triggerCelebration(rarityMultipliedXp, gamificationResult.newStreak)
+      triggerStreakFlames(gamificationResult.newStreak)
     }
 
     const feedback = {
@@ -434,13 +620,15 @@ export default function Quiz({
       userAnswer: selectedIndex,
       correctAnswer: correctIndex,
       explanation: currentQuestion.explanation,
-      xpGained: gamificationResult.xpGained,
-      speedBonus: gamificationResult.speedBonus
+      xpGained: rarityMultipliedXp,
+      speedBonus: gamificationResult.speedBonus,
+      rarity: currentRarity
     }
 
-    setCurrentFeedback(feedback)
-    setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
+    // Phase 6: Use dramatic pause before showing feedback
+    setPendingFeedback(feedback)
+    setShowDramaticPause(true)
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration, currentRarity, triggerStreakFlames])
 
   // Handle Sort Groups answer
   // sort_groups type expects an object mapping group names to arrays of items
@@ -481,12 +669,16 @@ export default function Quiz({
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, isPartial)
 
+    // Phase 1: Apply rarity multiplier to XP
+    const rarityMultipliedXp = applyRarityMultiplier(gamificationResult.xpGained, currentRarity)
+
     // Play sound and haptic feedback
     playAnswerFeedback(isCorrect, isPartial)
 
     // Trigger celebration for correct/partial answers
     if (isCorrect || isPartial) {
-      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+      triggerCelebration(rarityMultipliedXp, gamificationResult.newStreak)
+      triggerStreakFlames(gamificationResult.newStreak)
     }
 
     const feedback = {
@@ -497,13 +689,15 @@ export default function Quiz({
       userAnswer: userSorting,
       correctAnswer: correctSorting,
       explanation: currentQuestion.explanation,
-      xpGained: gamificationResult.xpGained,
-      speedBonus: gamificationResult.speedBonus
+      xpGained: rarityMultipliedXp,
+      speedBonus: gamificationResult.speedBonus,
+      rarity: currentRarity
     }
 
-    setCurrentFeedback(feedback)
-    setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
+    // Phase 6: Use dramatic pause before showing feedback
+    setPendingFeedback(feedback)
+    setShowDramaticPause(true)
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration, currentRarity, triggerStreakFlames])
 
   // Handle Find Error answer
   // find_error type expects text input describing the error
@@ -520,12 +714,16 @@ export default function Quiz({
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(matchResult.isCorrect, matchResult.isPartial)
 
+    // Phase 1: Apply rarity multiplier to XP
+    const rarityMultipliedXp = applyRarityMultiplier(gamificationResult.xpGained, currentRarity)
+
     // Play sound and haptic feedback
     playAnswerFeedback(matchResult.isCorrect, matchResult.isPartial)
 
     // Trigger celebration for correct/partial answers
     if (matchResult.isCorrect || matchResult.isPartial) {
-      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+      triggerCelebration(rarityMultipliedXp, gamificationResult.newStreak)
+      triggerStreakFlames(gamificationResult.newStreak)
     }
 
     const feedback = {
@@ -538,13 +736,15 @@ export default function Quiz({
         ? currentQuestion.correctAnswer[0]
         : currentQuestion.correctAnswer,
       explanation: currentQuestion.explanation,
-      xpGained: gamificationResult.xpGained,
-      speedBonus: gamificationResult.speedBonus
+      xpGained: rarityMultipliedXp,
+      speedBonus: gamificationResult.speedBonus,
+      rarity: currentRarity
     }
 
-    setCurrentFeedback(feedback)
-    setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
+    // Phase 6: Use dramatic pause before showing feedback
+    setPendingFeedback(feedback)
+    setShowDramaticPause(true)
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration, currentRarity, triggerStreakFlames])
 
   // Handle Spot It answer
   // spot_it type expects {x, y} coordinates where user tapped on the image
@@ -574,12 +774,16 @@ export default function Quiz({
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, false)
 
+    // Phase 1: Apply rarity multiplier to XP
+    const rarityMultipliedXp = applyRarityMultiplier(gamificationResult.xpGained, currentRarity)
+
     // Play sound and haptic feedback
     playAnswerFeedback(isCorrect, false)
 
     // Trigger celebration for correct answers
     if (isCorrect) {
-      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+      triggerCelebration(rarityMultipliedXp, gamificationResult.newStreak)
+      triggerStreakFlames(gamificationResult.newStreak)
     }
 
     const feedback = {
@@ -590,13 +794,15 @@ export default function Quiz({
       userAnswer: coordinates,
       correctAnswer: targetArea,
       explanation: currentQuestion.explanation,
-      xpGained: gamificationResult.xpGained,
-      speedBonus: gamificationResult.speedBonus
+      xpGained: rarityMultipliedXp,
+      speedBonus: gamificationResult.speedBonus,
+      rarity: currentRarity
     }
 
-    setCurrentFeedback(feedback)
-    setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
+    // Phase 6: Use dramatic pause before showing feedback
+    setPendingFeedback(feedback)
+    setShowDramaticPause(true)
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration, currentRarity, triggerStreakFlames])
 
   // Handle Sequence answer
   // sequence type expects an array of indices representing the order
@@ -634,12 +840,16 @@ export default function Quiz({
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, isPartial)
 
+    // Phase 1: Apply rarity multiplier to XP
+    const rarityMultipliedXp = applyRarityMultiplier(gamificationResult.xpGained, currentRarity)
+
     // Play sound and haptic feedback
     playAnswerFeedback(isCorrect, isPartial)
 
     // Trigger celebration for correct/partial answers
     if (isCorrect || isPartial) {
-      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+      triggerCelebration(rarityMultipliedXp, gamificationResult.newStreak)
+      triggerStreakFlames(gamificationResult.newStreak)
     }
 
     const feedback = {
@@ -650,13 +860,15 @@ export default function Quiz({
       userAnswer: userSequence,
       correctAnswer: correctSequence,
       explanation: currentQuestion.explanation,
-      xpGained: gamificationResult.xpGained,
-      speedBonus: gamificationResult.speedBonus
+      xpGained: rarityMultipliedXp,
+      speedBonus: gamificationResult.speedBonus,
+      rarity: currentRarity
     }
 
-    setCurrentFeedback(feedback)
-    setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
+    // Phase 6: Use dramatic pause before showing feedback
+    setPendingFeedback(feedback)
+    setShowDramaticPause(true)
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration, currentRarity, triggerStreakFlames])
 
   // Handle Apply Concept answer
   // apply_concept type expects text input applying a concept to a new scenario
@@ -702,12 +914,16 @@ export default function Quiz({
     // Record answer with gamification
     const gamificationResult = gamification.recordAnswer(isCorrect, isPartial)
 
+    // Phase 1: Apply rarity multiplier to XP
+    const rarityMultipliedXp = applyRarityMultiplier(gamificationResult.xpGained, currentRarity)
+
     // Play sound and haptic feedback
     playAnswerFeedback(isCorrect, isPartial)
 
     // Trigger celebration for correct/partial answers
     if (isCorrect || isPartial) {
-      triggerCelebration(gamificationResult.xpGained, gamification.streak)
+      triggerCelebration(rarityMultipliedXp, gamificationResult.newStreak)
+      triggerStreakFlames(gamificationResult.newStreak)
     }
 
     const feedback = {
@@ -720,13 +936,15 @@ export default function Quiz({
       userAnswer,
       correctAnswer: Array.isArray(correctAnswer) ? correctAnswer[0] : correctAnswer,
       explanation: currentQuestion.explanation,
-      xpGained: gamificationResult.xpGained,
-      speedBonus: gamificationResult.speedBonus
+      xpGained: rarityMultipliedXp,
+      speedBonus: gamificationResult.speedBonus,
+      rarity: currentRarity
     }
 
-    setCurrentFeedback(feedback)
-    setState(QUIZ_STATE.SHOWING_FEEDBACK)
-  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration])
+    // Phase 6: Use dramatic pause before showing feedback
+    setPendingFeedback(feedback)
+    setShowDramaticPause(true)
+  }, [currentQuestion, gamification, playAnswerFeedback, triggerCelebration, currentRarity, triggerStreakFlames])
 
   // Handle continue after feedback
   const handleContinue = useCallback(() => {
@@ -764,10 +982,12 @@ export default function Quiz({
         questions,
         // Gamification data
         level,
-        ...gamificationResults
+        ...gamificationResults,
+        // Phase 2: Boss battle result
+        bossVictory: bossResult?.defeated || false
       })
     }
-  }, [currentFeedback, currentIndex, totalQuestions, answers, onComplete, gamification, level])
+  }, [currentFeedback, currentIndex, totalQuestions, answers, onComplete, gamification, level, bossResult])
 
   // Handle skip quiz
   const handleSkip = useCallback(() => {
@@ -788,9 +1008,43 @@ export default function Quiz({
     return null // Parent component handles completion UI
   }
 
+  // Determine if current question is the boss battle question
+  const isBossQuestion = currentIndex === totalQuestions - 1 && totalQuestions > 1
+
   return (
     <div className="w-full max-w-2xl mx-auto py-6 px-4 relative">
-      {/* Streak Celebration Overlay */}
+      {/* Phase 2: Boss Battle Full-Screen Overlays */}
+      {bossBattlePhase === 'intro' && (
+        <BossBattleIntro level={level} onComplete={handleBossIntroComplete} />
+      )}
+      <BossDefeated
+        level={level}
+        xpBonus={bossResult?.xpBonus || BOSS_BATTLE_CONFIG.rewards.victoryXpBonus}
+        show={bossBattlePhase === 'victory'}
+        onComplete={handleBossVictoryComplete}
+      />
+      <BossEscaped
+        level={level}
+        show={bossBattlePhase === 'escaped'}
+        onComplete={handleBossEscapedComplete}
+      />
+
+      {/* Phase 6: Dramatic Pause Overlay */}
+      <DramaticPause
+        show={showDramaticPause}
+        level={level}
+        onComplete={handleDramaticPauseComplete}
+      />
+
+      {/* Phase 6: Streak Flames Overlay */}
+      <StreakFlames
+        streak={gamification.streak}
+        intensity={streakFlameIntensity}
+        show={showStreakFlames}
+        position="both"
+      />
+
+      {/* Streak Celebration Overlay (legacy - keeps centered card at milestones) */}
       <StreakCelebration
         streak={gamification.streak}
         celebrationStyle={gamification.rules.celebrationStyle}
@@ -835,15 +1089,25 @@ export default function Quiz({
         </button>
       </div>
 
-      {/* Progress indicator */}
-      <QuizProgress
-        current={currentIndex + 1}
-        total={totalQuestions}
-        questionType={currentQuestion?.type || 'mcq'}
-      />
+      {/* Progress indicator with rarity badge */}
+      <div className="flex items-center justify-between gap-4 mb-4">
+        <QuizProgress
+          current={currentIndex + 1}
+          total={totalQuestions}
+          questionType={currentQuestion?.type || 'mcq'}
+        />
+        {/* Phase 1: Rarity Badge - only shows for non-common rarities */}
+        <QuestionRarityBadge
+          rarity={currentRarity}
+          variant="badge"
+          showMultiplier={true}
+          animate={state === QUIZ_STATE.ANSWERING}
+        />
+      </div>
 
-      {/* Question display */}
-      <div className="min-h-[300px]">
+      {/* Question display - wrapped in BossBattle for final question */}
+      <BossBattle level={level} isActive={isBossQuestion && bossBattlePhase === 'active'}>
+        <div className="min-h-[300px]">
         {/* Slide preview - shows diagram from learning content */}
         {currentSlideImage && (
           <div className="mb-4 flex justify-center">
@@ -1262,37 +1526,10 @@ export default function Quiz({
             />
           </div>
         )}
-      </div>
+        </div>
+      </BossBattle>
     </div>
   )
 }
 
-// Import ReviewQuiz for re-export
-import ReviewQuiz from './ReviewQuiz'
-
-// Export sub-components for individual use
-export {
-  QuizProgress,
-  MCQQuestion,
-  FillBlankQuestion,
-  VoiceQuestion,
-  YesNoQuestion,
-  PictureMatchQuestion,
-  OddOneOutQuestion,
-  SortGroupsQuestion,
-  FindErrorQuestion,
-  SpotItQuestion,
-  SequenceQuestion,
-  ApplyConceptQuestion,
-  QuizFeedback,
-  QuizPrompt,
-  QuizResults,
-  QuizSlidePreview,
-  AnimatedXP,
-  ComboIndicator,
-  StreakCelebration,
-  MicroCelebration,
-  QuizTimer,
-  useQuizGamification,
-  ReviewQuiz,
-}
+// Note: Sub-components are used internally only - no external re-exports needed

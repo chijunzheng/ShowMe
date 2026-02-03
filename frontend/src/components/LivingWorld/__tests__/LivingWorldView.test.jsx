@@ -251,8 +251,8 @@ describe('LivingWorldView', () => {
     })
   })
 
-  describe('info panel', () => {
-    it('displays WorldInfoPanel when world exists', () => {
+  describe('tier badge', () => {
+    it('displays tier badge when world exists', () => {
       const props = createDefaultProps({
         worldState: {
           imageUrl: 'https://example.com/world.png',
@@ -265,10 +265,10 @@ describe('LivingWorldView', () => {
 
       render(<LivingWorldView {...props} />)
 
-      expect(screen.getByTestId('world-info-panel')).toBeInTheDocument()
+      expect(screen.getByLabelText(/world tier/i)).toBeInTheDocument()
     })
 
-    it('passes tier to WorldInfoPanel', () => {
+    it('shows tier label in badge', () => {
       const props = createDefaultProps({
         worldState: {
           imageUrl: 'https://example.com/world.png',
@@ -281,11 +281,11 @@ describe('LivingWorldView', () => {
 
       render(<LivingWorldView {...props} />)
 
-      // Tier should be displayed in info panel
+      // Tier should be displayed in badge
       expect(screen.getByText(/thriving/i)).toBeInTheDocument()
     })
 
-    it('displays topics count in WorldInfoPanel', () => {
+    it('displays topics count in StatsBar', () => {
       const props = createDefaultProps({
         worldState: {
           imageUrl: 'https://example.com/world.png',
@@ -294,15 +294,16 @@ describe('LivingWorldView', () => {
         worldImageUrl: 'https://example.com/world.png',
         tier: 'growing',
         isLoading: false,
+        topicCount: 5,
       })
 
       render(<LivingWorldView {...props} />)
 
-      // Should show topic count
-      expect(screen.getByText(/5/)).toBeInTheDocument()
+      const topicsStat = screen.getByTestId('stat-topics')
+      expect(topicsStat).toHaveTextContent('5')
     })
 
-    it('does not show WorldInfoPanel when world does not exist', () => {
+    it('does not show tier badge when world does not exist', () => {
       const props = createDefaultProps({
         worldState: null,
         isLoading: false,
@@ -310,7 +311,7 @@ describe('LivingWorldView', () => {
 
       render(<LivingWorldView {...props} />)
 
-      expect(screen.queryByTestId('world-info-panel')).not.toBeInTheDocument()
+      expect(screen.queryByLabelText(/world tier/i)).not.toBeInTheDocument()
     })
   })
 

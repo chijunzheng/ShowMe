@@ -16,7 +16,6 @@ import useUserProgress from './hooks/useUserProgress'
 import BottomTabBar from './components/BottomTabBar'
 // Living World: Replace old WorldView with new LivingWorldView
 import { LivingWorldView } from './components/LivingWorld'
-import PieceUnlockCelebration from './components/PieceUnlockCelebration'
 import TierUpCelebration from './components/TierUpCelebration'
 // WB015: Quick mode XP toast
 import QuickXpToast from './components/QuickXpToast'
@@ -132,6 +131,11 @@ function App() {
     evolveWorld,
     initializeWorld,
     resetWorld: resetLivingWorld,
+    // Tree-specific state for MagicalTree visualization
+    treeLevel: livingWorldTreeLevel,
+    branches: livingWorldBranches,
+    topicCount: livingWorldTopicCount,
+    topicsLearned: livingWorldTopicsLearned,
   } = useLivingWorld()
 
   const [isWorldRegenerating, setIsWorldRegenerating] = useState(false)
@@ -187,10 +191,6 @@ function App() {
     showBadgeCelebration,
     handleToastDismiss,
     handleConfettiComplete,
-    unlockedPiece,
-    showPieceCelebration,
-    showPieceUnlock,
-    dismissPieceCelebration,
     showTierCelebration,
     tierUpgradeInfo,
     showTierUpgrade,
@@ -294,7 +294,7 @@ function App() {
     }
 
     loadWorldPieces()
-  }, [showPieceCelebration]) // Reload when piece celebration closes (means new piece was added)
+  }, []) // Load on mount only
 
   const generationProgressPercent = useMemo(() => {
     if (!generationProgress.stage) return 0
@@ -1801,8 +1801,6 @@ function App() {
     handleQuizComplete,
     handleQuizSkip,
     handleQuizPromptSkip,
-    handlePieceCelebrationClose,
-    handleViewWorldFromCelebration,
     handleTierCelebrationClose,
     handleTierViewWorld,
     handleQuizResultsContinue,
@@ -1817,8 +1815,6 @@ function App() {
     setQuizSlides,
     setQuizResults,
     setUiState,
-    showPieceUnlock,
-    dismissPieceCelebration,
     setWorldBadge,
     showTierUpgrade,
     dismissTierCelebration,
@@ -3043,6 +3039,12 @@ function App() {
             onRegenerateWorld={regenerateLivingWorld}
             isRegeneratingWorld={isWorldRegenerating}
             regenerationProgress={worldRegenProgress}
+            // Tree-specific props for MagicalTree visualization
+            treeLevel={livingWorldTreeLevel}
+            branches={livingWorldBranches}
+            topicCount={livingWorldTopicCount}
+            totalXP={livingWorldTopicCount * 100}
+            trophies={[]} // TODO: Wire up trophy tracking
             onStartLearning={() => {
               setActiveTopicId(null)
               setUiState(UI_STATE.HOME)
@@ -3162,15 +3164,6 @@ function App() {
           hasSidebar={topics.length > 0}
         />
       </div>
-
-      {/* WB018: Piece unlock celebration overlay */}
-      {showPieceCelebration && unlockedPiece && (
-        <PieceUnlockCelebration
-          piece={unlockedPiece}
-          onComplete={handlePieceCelebrationClose}
-          onViewWorld={handleViewWorldFromCelebration}
-        />
-      )}
 
       {/* UI008: Tier upgrade celebration overlay */}
       {showTierCelebration && tierUpgradeInfo && (

@@ -24,6 +24,18 @@ const MIN_ZOOM = 1
 const MAX_ZOOM = 3
 
 /**
+ * Normalize coordinate values to 0-1 range
+ * Supports normalized (0-1), percentage (0-100), or pixel-like (0-1000) inputs.
+ */
+function normalizeCoordinate(value) {
+  if (!Number.isFinite(value)) return 0.5
+  if (value >= 0 && value <= 1) return value
+  if (value > 1 && value <= 100) return value / 100
+  if (value > 100 && value <= 1000) return value / 1000
+  return Math.max(0, Math.min(1, value / 1000))
+}
+
+/**
  * Hotspot Component - Renders an interactive region marker
  * Supports tap (short press) and long-press for quick actions
  *
@@ -36,9 +48,21 @@ const MAX_ZOOM = 3
  * @param {Function} [props.onTap] - Callback when tapped
  * @param {Function} [props.onLongPress] - Callback when long-pressed
  * @param {number} [props.zoom=1] - Current zoom level for scaling
+ * @param {'panorama' | 'map'} [props.variant='panorama'] - Visual styling variant
  */
-function Hotspot({ x, y, topicName, glow, piece, onTap, onLongPress, zoom = 1 }) {
+function Hotspot({
+  x,
+  y,
+  topicName,
+  glow,
+  piece,
+  onTap,
+  onLongPress,
+  zoom = 1,
+  variant = 'panorama',
+}) {
   const hotspotRef = useRef(null)
+  const isMap = variant === 'map'
 
   const handleClick = useCallback(
     (e) => {
@@ -91,9 +115,9 @@ function Hotspot({ x, y, topicName, glow, piece, onTap, onLongPress, zoom = 1 })
     [piece, x, y, onTap]
   )
 
-  // Clamp coordinates to valid range
-  const clampedX = Math.max(0, Math.min(1, x))
-  const clampedY = Math.max(0, Math.min(1, y))
+  // Normalize coordinates to valid range
+  const clampedX = Math.max(0, Math.min(1, normalizeCoordinate(x)))
+  const clampedY = Math.max(0, Math.min(1, normalizeCoordinate(y)))
 
   // Sub-linear scaling: hotspots shrink when zoomed in, but not proportionally
   // This keeps them readable at high zoom without becoming giant at zoom=1
@@ -111,9 +135,9 @@ function Hotspot({ x, y, topicName, glow, piece, onTap, onLongPress, zoom = 1 })
         min-w-[44px] min-h-[44px] w-12 h-12
         flex items-center justify-center
         rounded-full
-        bg-white/20 dark:bg-white/10
+        ${isMap ? 'bg-emerald-500/20 border-emerald-200/80' : 'bg-white/20 dark:bg-white/10 border-white/50 dark:border-white/30'}
         backdrop-blur-sm
-        border-2 border-white/50 dark:border-white/30
+        border-2
         cursor-pointer
         transition-all duration-300
         hover:scale-110 hover:bg-white/30
@@ -128,9 +152,24 @@ function Hotspot({ x, y, topicName, glow, piece, onTap, onLongPress, zoom = 1 })
       onKeyDown={handleKeyDown}
       {...longPressHandlers}
     >
-      <span className="text-xs font-medium text-white dark:text-white/90 text-center px-1 truncate max-w-[80px]">
-        {topicName}
-      </span>
+      <div className="flex flex-col items-center gap-1">
+        {isMap && (
+          <div className="relative">
+            <div className="w-3 h-3 rounded-full bg-emerald-400 shadow-sm" />
+            <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-emerald-500 rotate-45 rounded-[2px]" />
+          </div>
+        )}
+        <span
+          className={`
+            text-[11px] font-semibold text-center px-1.5 py-0.5
+            rounded-full
+            ${isMap ? 'bg-white/80 text-emerald-800 shadow-sm' : 'text-white dark:text-white/90'}
+            truncate max-w-[90px]
+          `}
+        >
+          {topicName}
+        </span>
+      </div>
     </div>
   )
 }
@@ -166,6 +205,7 @@ function LoadingSkeleton() {
  * @param {Function} [props.onZoomChange] - Callback when zoom level changes: (zoom) => void
  * @param {Function} [props.onViewportChange] - Callback when viewport changes: ({ x, y, width, height }) => void
  * @param {React.Ref} [props.canvasRef] - Ref to access InteractiveCanvas methods
+ * @param {'panorama' | 'map'} [props.variant='panorama'] - Visual styling variant
  */
 function PanoramaViewer({
   worldImageUrl,
@@ -176,7 +216,9 @@ function PanoramaViewer({
   onZoomChange,
   onViewportChange,
   canvasRef: externalCanvasRef,
+  variant = 'panorama',
 }) {
+  const isMap = variant === 'map'
   // Track current zoom for hotspot scaling
   const [currentZoom, setCurrentZoom] = useState(1)
 
@@ -326,18 +368,74 @@ function PanoramaViewer({
       ref={containerRef}
       data-testid="panorama-container"
       role="region"
-      aria-label="World panorama viewer. Drag to pan, scroll to zoom."
+      aria-label={
+        isMap
+          ? 'World map view. Drag to pan, scroll to zoom.'
+          : 'World panorama viewer. Drag to pan, scroll to zoom.'
+      }
       className={`
         relative w-full aspect-video
         overflow-hidden
         bg-slate-100 dark:bg-slate-800
-        rounded-lg
+        rounded-xl
+        ${isMap ? 'ring-1 ring-emerald-200/70 dark:ring-emerald-400/20 shadow-lg' : 'rounded-lg'}
         select-none
         cursor-grab
         ${isDragging ? 'cursor-grabbing' : ''}
       `}
       onClick={handleClick}
     >
+      {/* Map overlays */}
+      {isMap && (
+        <>
+          <div
+            className="
+              absolute inset-0 pointer-events-none
+              bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.75)_0%,_rgba(255,255,255,0)_60%)]
+              opacity-70
+            "
+            aria-hidden="true"
+          />
+          <div
+            className="absolute inset-0 pointer-events-none opacity-30"
+            style={{
+              backgroundImage:
+                'linear-gradient(90deg, rgba(255,255,255,0.25) 1px, transparent 1px), linear-gradient(rgba(255,255,255,0.25) 1px, transparent 1px)',
+              backgroundSize: '28px 28px',
+            }}
+            aria-hidden="true"
+          />
+          <div
+            className="
+              absolute top-3 left-3
+              px-2.5 py-1
+              text-[11px] font-semibold uppercase tracking-[0.15em]
+              bg-white/70 dark:bg-slate-900/60
+              text-emerald-700 dark:text-emerald-200
+              rounded-full shadow-sm
+            "
+            aria-hidden="true"
+          >
+            World Map
+          </div>
+          <div
+            className="
+              absolute bottom-3 right-3
+              w-10 h-10
+              rounded-full
+              border border-emerald-200/80 dark:border-emerald-400/40
+              bg-white/70 dark:bg-slate-900/60
+              shadow-sm
+              flex items-center justify-center
+              text-[10px] font-bold text-emerald-700 dark:text-emerald-200
+            "
+            aria-hidden="true"
+          >
+            N
+          </div>
+        </>
+      )}
+
       {/* Loading Skeleton */}
       {showSkeleton && <LoadingSkeleton />}
 
@@ -406,6 +504,7 @@ function PanoramaViewer({
             onTap={onRegionTap}
             onLongPress={onHotspotLongPress}
             zoom={currentZoom}
+            variant={variant}
           />
         ))}
     </div>

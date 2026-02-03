@@ -104,3 +104,104 @@ const GAME_TYPE_LABELS = {
 export function getGameTypeLabel(type) {
   return GAME_TYPE_LABELS[type] || 'Challenge'
 }
+
+/**
+ * Level-specific encouraging messages for quiz feedback.
+ * Messages are tailored to difficulty level and outcome type.
+ * All messages are kid-friendly and encouraging.
+ */
+export const LEVEL_MESSAGES = {
+  simple: {
+    correct: [
+      'Great job!',
+      'You did it!',
+      'Awesome!',
+      'Super!',
+      'Way to go!',
+    ],
+    partial: [
+      'Almost!',
+      'So close!',
+      'Good try!',
+      'Nice effort!',
+      'Keep going!',
+    ],
+    incorrect: [
+      'Try again!',
+      'Keep trying!',
+      "You'll get it!",
+      'No worries!',
+      'Keep learning!',
+    ],
+  },
+  standard: {
+    correct: [
+      'Excellent work!',
+      'Well done!',
+      'Impressive!',
+      'Fantastic!',
+      'Great thinking!',
+    ],
+    partial: [
+      'Getting there!',
+      'Good progress!',
+      'Nice thinking!',
+      'Almost got it!',
+      'On the right track!',
+    ],
+    incorrect: [
+      'Good effort!',
+      'Keep exploring!',
+      'Learning moment!',
+      'Try once more!',
+      'Getting closer!',
+    ],
+  },
+  deep: {
+    correct: [
+      'Brilliant thinking!',
+      'Expert level!',
+      'Deep understanding!',
+      'Masterful!',
+      'Outstanding insight!',
+    ],
+    partial: [
+      'Thoughtful answer!',
+      'Great reasoning!',
+      'Complex thinking!',
+      'Solid approach!',
+      'Deep analysis!',
+    ],
+    incorrect: [
+      'Tough challenge!',
+      'Keep pondering!',
+      'Deep questions!',
+      'Great attempt!',
+      'Think deeper!',
+    ],
+  },
+}
+
+/**
+ * Get a random level-specific message for quiz feedback.
+ * Falls back to standard level and correct type for invalid inputs.
+ *
+ * @param {string} level - Quiz difficulty level ('simple' | 'standard' | 'deep')
+ * @param {string} type - Message type ('correct' | 'partial' | 'incorrect')
+ * @returns {string} Random message from the appropriate pool
+ */
+export function getLevelMessage(level, type) {
+  // Validate and fallback for level
+  const validLevel = (level && LEVEL_MESSAGES[level])
+    ? level
+    : 'standard'
+
+  // Validate and fallback for type
+  const validType = (type && LEVEL_MESSAGES[validLevel][type])
+    ? type
+    : 'correct'
+
+  const messages = LEVEL_MESSAGES[validLevel][validType]
+  const index = Math.floor(Math.random() * messages.length)
+  return messages[index]
+}

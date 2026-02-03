@@ -32,6 +32,17 @@ const POSITION_CLASSES = {
 }
 
 /**
+ * Normalize coordinate values to 0-1 range
+ */
+function normalizeCoordinate(value) {
+  if (!Number.isFinite(value)) return 0.5
+  if (value >= 0 && value <= 1) return value
+  if (value > 1 && value <= 100) return value / 100
+  if (value > 100 && value <= 1000) return value / 1000
+  return Math.max(0, Math.min(1, value / 1000))
+}
+
+/**
  * Minimap - Navigation minimap for the Living World panorama
  *
  * @param {Object} props - Component props
@@ -175,8 +186,8 @@ function Minimap({
         {/* Hotspot dots */}
         {hotspots.map((hotspot, index) => {
           // Clamp hotspot positions to valid range
-          const clampedX = Math.max(0, Math.min(1, hotspot.x))
-          const clampedY = Math.max(0, Math.min(1, hotspot.y))
+          const clampedX = Math.max(0, Math.min(1, normalizeCoordinate(hotspot.x)))
+          const clampedY = Math.max(0, Math.min(1, normalizeCoordinate(hotspot.y)))
 
           return (
             <div

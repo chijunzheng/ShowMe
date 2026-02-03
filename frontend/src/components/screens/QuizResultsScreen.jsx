@@ -44,8 +44,8 @@ export default function QuizResultsScreen({ results, onContinue }) {
           : 'text-orange-600 dark:text-orange-400'
       }`}>
         {passed
-          ? 'Great job! You earned a new piece!'
-          : 'Keep learning! Try again to unlock the piece.'}
+          ? 'Great job! Your world has evolved!'
+          : 'Keep learning! Try again to grow your world.'}
       </p>
 
       {/* Continue button */}

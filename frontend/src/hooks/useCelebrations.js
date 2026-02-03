@@ -5,7 +5,6 @@
  * Handles:
  * - Confetti display
  * - Achievement toasts
- * - Piece unlock celebrations
  * - Tier upgrade celebrations
  * - Evolution celebrations
  * - Connection scene reveals
@@ -18,10 +17,6 @@ export function useCelebrations() {
   // Confetti and badge toasts
   const [showConfetti, setShowConfetti] = useState(false)
   const [currentToastBadge, setCurrentToastBadge] = useState(null)
-
-  // Piece unlock celebration
-  const [unlockedPiece, setUnlockedPiece] = useState(null)
-  const [showPieceCelebration, setShowPieceCelebration] = useState(false)
 
   // Tier upgrade celebration
   const [showTierCelebration, setShowTierCelebration] = useState(false)
@@ -55,22 +50,6 @@ export function useCelebrations() {
    */
   const handleConfettiComplete = useCallback(() => {
     setShowConfetti(false)
-  }, [])
-
-  /**
-   * Show piece unlock celebration
-   */
-  const showPieceUnlock = useCallback((piece) => {
-    setUnlockedPiece(piece)
-    setShowPieceCelebration(true)
-  }, [])
-
-  /**
-   * Dismiss piece unlock celebration
-   */
-  const dismissPieceCelebration = useCallback(() => {
-    setShowPieceCelebration(false)
-    setUnlockedPiece(null)
   }, [])
 
   /**
@@ -131,12 +110,6 @@ export function useCelebrations() {
     showBadgeCelebration,
     handleToastDismiss,
     handleConfettiComplete,
-
-    // Piece unlock state
-    unlockedPiece,
-    showPieceCelebration,
-    showPieceUnlock,
-    dismissPieceCelebration,
 
     // Tier upgrade state
     showTierCelebration,

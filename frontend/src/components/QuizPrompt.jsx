@@ -59,8 +59,8 @@ export default function QuizPrompt({
         </h2>
         <p className="text-gray-600 dark:text-gray-300 max-w-sm">
           {topicName
-            ? `Take a quick quiz about "${topicName}" to unlock a piece for your World.`
-            : 'Take a quick quiz to reinforce what you learned and unlock a new piece for your World.'}
+            ? `Take a quick quiz about "${topicName}" to evolve your World!`
+            : 'Take a quick quiz to reinforce what you learned and evolve your World!'}
         </p>
       </div>
 
@@ -68,7 +68,7 @@ export default function QuizPrompt({
       <div className="flex items-center gap-2 px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-full">
         <span className="text-lg"></span>
         <span className="text-sm font-medium text-yellow-700 dark:text-yellow-300">
-          Pass to earn a World piece!
+          Pass to evolve your World!
         </span>
       </div>
 

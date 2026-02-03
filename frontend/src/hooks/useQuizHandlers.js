@@ -2,31 +2,13 @@
  * useQuizHandlers - Custom hook for quiz-related handlers
  * Extracts quiz flow logic from App.jsx to reduce complexity
  *
- * WB010: After quiz pass, generates world pieces and adds them to user's world
+ * After quiz pass, evolves the Living World with learned topics
  */
 import { useCallback, useRef } from 'react'
 import { UI_STATE } from '../constants/appConfig.js'
 import logger from '../utils/logger.js'
 import { getClientId } from '../utils/clientId'
 import { buildLivingWorldSummaryFromSlides } from '../utils/livingWorldSummary.js'
-import { determineZone, selectPieceIcon, generatePieceId } from '../utils/worldUtils.js'
-
-const POSITION_RANGE = {
-  minX: 8,
-  maxX: 92,
-  minY: 15,
-  maxY: 85,
-}
-
-function createPiecePosition() {
-  const rangeX = POSITION_RANGE.maxX - POSITION_RANGE.minX
-  const rangeY = POSITION_RANGE.maxY - POSITION_RANGE.minY
-
-  return {
-    x: Math.round(POSITION_RANGE.minX + Math.random() * rangeX),
-    y: Math.round(POSITION_RANGE.minY + Math.random() * rangeY),
-  }
-}
 
 /**
  * @param {Object} params - Hook parameters
@@ -40,14 +22,11 @@ function createPiecePosition() {
  * @param {Function} params.setQuizSlides - Setter for quiz slides (with images for visual questions)
  * @param {Function} params.setQuizResults - Setter for quiz results
  * @param {Function} params.setUiState - Setter for UI state
- * @param {Function} params.showPieceUnlock - Celebration hook: show piece unlock celebration
- * @param {Function} params.dismissPieceCelebration - Celebration hook: dismiss piece celebration
  * @param {Function} params.setWorldBadge - Setter for world badge count
  * @param {Function} params.showTierUpgrade - Celebration hook: show tier upgrade celebration
  * @param {Function} params.dismissTierCelebration - Celebration hook: dismiss tier celebration
  * @param {Function} params.setActiveTab - Setter for active tab
  * @param {Function} params.refreshWorldStats - Function to refresh world stats
- * @param {Function} [params.checkEvolutions] - Evolution hook: check for piece evolutions
  * @param {string} params.quizTopicId - Current quiz topic ID
  * @param {string} params.quizTopicName - Current quiz topic name
  * @param {Object|null} params.tierUpgradeInfo - Tier upgrade info if pending
@@ -65,87 +44,17 @@ export default function useQuizHandlers({
   setQuizSlides,
   setQuizResults,
   setUiState,
-  showPieceUnlock,
-  dismissPieceCelebration,
   setWorldBadge,
   showTierUpgrade,
   dismissTierCelebration,
   setActiveTab,
   refreshWorldStats,
-  checkEvolutions,
   quizTopicId,
   quizTopicName,
   tierUpgradeInfo,
-  evolveWorld, // Living World: Function to evolve world after quiz pass
+  evolveWorld,
 }) {
   const quizSummaryRef = useRef('')
-
-  const createWorldPiece = useCallback(async ({ topicId, topicName, summary }) => {
-    if (!topicId || !topicName) {
-      return { piece: null, error: 'Missing topic info for world piece' }
-    }
-
-    const zone = determineZone(topicName)
-    const icon = selectPieceIcon(topicName, zone)
-    const clientId = getClientId()
-    let generatedPiece = null
-
-    try {
-      const generateResponse = await fetch('/api/world/piece/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          topicName,
-          zone,
-          summary,
-        }),
-      })
-
-      if (generateResponse.ok) {
-        const generateData = await generateResponse.json()
-        generatedPiece = generateData.piece || null
-      } else {
-        const errorData = await generateResponse.json().catch(() => ({}))
-        logger.warn('WORLD', 'Piece image generation failed, using fallback', {
-          error: errorData?.error || `status_${generateResponse.status}`,
-        })
-      }
-    } catch (error) {
-      logger.warn('WORLD', 'Piece image generation error, using fallback', { error: error.message })
-    }
-
-    const piece = {
-      id: generatedPiece?.id || generatePieceId(),
-      topicId,
-      topicName,
-      name: topicName,
-      zone,
-      icon,
-      imageUrl: generatedPiece?.imageUrl || null,
-      prompt: generatedPiece?.prompt || null,
-      position: createPiecePosition(),
-    }
-
-    try {
-      const addResponse = await fetch('/api/world/piece', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientId,
-          piece,
-        }),
-      })
-
-      if (!addResponse.ok) {
-        const errorData = await addResponse.json().catch(() => ({}))
-        return { piece: null, error: errorData?.error || 'Failed to add piece to world' }
-      }
-
-      return { piece, error: null }
-    } catch (error) {
-      return { piece: null, error: error.message }
-    }
-  }, [determineZone, selectPieceIcon, generatePieceId])
 
   /**
    * WB018: Start quiz flow - fetch questions from API
@@ -278,20 +187,6 @@ export default function useQuizHandlers({
           logger.warn('QUIZ', 'evolveWorld function not available, skipping evolution')
         }
 
-        // World piece unlock flow
-        const pieceResult = await createWorldPiece({
-          topicId: effectiveTopicId,
-          topicName: effectiveTopicName,
-          summary: summaryFromSlides,
-        })
-
-        if (pieceResult?.piece) {
-          showPieceUnlock(pieceResult.piece)
-          checkEvolutions?.(pieceResult.piece)
-        } else if (pieceResult?.error) {
-          logger.warn('QUIZ', 'World piece unlock failed', { error: pieceResult.error })
-        }
-
         // Award XP via evaluate endpoint (handles additional tier upgrades)
         const questionsForEval = Array.isArray(results.questions) ? results.questions : []
         const answersForEval = Array.isArray(results.answers)
@@ -343,9 +238,6 @@ export default function useQuizHandlers({
     setWorldBadge,
     showTierUpgrade,
     evolveWorld,
-    createWorldPiece,
-    showPieceUnlock,
-    checkEvolutions,
     refreshWorldStats,
   ])
 
@@ -366,38 +258,6 @@ export default function useQuizHandlers({
     setQuizResults(null)
     setUiState(UI_STATE.HOME)
   }, [setQuizQuestions, setQuizResults, setUiState])
-
-  /**
-   * WB018: Handle piece celebration close
-   */
-  const handlePieceCelebrationClose = useCallback(() => {
-    dismissPieceCelebration()
-    // UI002: Refresh world stats after piece unlock
-    refreshWorldStats()
-    // UI008: Show tier celebration if pending after piece celebration
-    if (tierUpgradeInfo) {
-      showTierUpgrade(tierUpgradeInfo)
-    } else {
-      setUiState(UI_STATE.HOME)
-    }
-  }, [tierUpgradeInfo, refreshWorldStats, dismissPieceCelebration, showTierUpgrade, setUiState])
-
-  /**
-   * WB018: Handle view world from celebration
-   */
-  const handleViewWorldFromCelebration = useCallback(() => {
-    dismissPieceCelebration()
-    // UI002: Refresh world stats after piece unlock
-    refreshWorldStats()
-    // UI008: Show tier celebration if pending, then go to world
-    if (tierUpgradeInfo) {
-      showTierUpgrade(tierUpgradeInfo)
-    } else {
-      setActiveTab('world')
-      setWorldBadge(0) // Clear badge since they're viewing world
-      setUiState(UI_STATE.HOME)
-    }
-  }, [tierUpgradeInfo, refreshWorldStats, dismissPieceCelebration, showTierUpgrade, setActiveTab, setWorldBadge, setUiState])
 
   /**
    * UI008: Handle tier celebration close
@@ -431,8 +291,6 @@ export default function useQuizHandlers({
     handleQuizComplete,
     handleQuizSkip,
     handleQuizPromptSkip,
-    handlePieceCelebrationClose,
-    handleViewWorldFromCelebration,
     handleTierCelebrationClose,
     handleTierViewWorld,
     handleQuizResultsContinue,

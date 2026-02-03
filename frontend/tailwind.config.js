@@ -87,6 +87,11 @@ export default {
         'breathe': 'breathe 3s ease-in-out infinite',
         'fade-in': 'fadeIn 0.3s ease-out',
         'float': 'float 2s ease-in-out infinite',
+        // Tree seed animations
+        'seed-bob': 'seedBob 2.8s ease-in-out infinite',
+        'sprout-grow': 'sproutGrow 2.4s ease-in-out infinite',
+        'seed-glow': 'seedGlow 3.2s ease-in-out infinite',
+        'sparkle-drift': 'sparkleDrift 1.8s ease-in-out infinite',
         // POLISH-001: New animations for gamification
         'confetti-fall': 'confettiFall 3s ease-out forwards',
         'toast-enter': 'toastEnter 0.3s ease-out forwards',
@@ -125,6 +130,25 @@ export default {
         float: {
           '0%': { transform: 'translateY(0)', opacity: '1' },
           '100%': { transform: 'translateY(-40px)', opacity: '0' },
+        },
+        // Tree seed keyframes
+        seedBob: {
+          '0%, 100%': { transform: 'translateY(0) rotate(-1deg)' },
+          '50%': { transform: 'translateY(-6px) rotate(1deg)' },
+        },
+        sproutGrow: {
+          '0%': { transform: 'translateY(6px) scaleY(0.85)' },
+          '50%': { transform: 'translateY(0) scaleY(1.05)' },
+          '100%': { transform: 'translateY(2px) scaleY(1)' },
+        },
+        seedGlow: {
+          '0%, 100%': { opacity: '0.35', transform: 'scale(0.95)' },
+          '50%': { opacity: '0.7', transform: 'scale(1.05)' },
+        },
+        sparkleDrift: {
+          '0%': { transform: 'translateY(4px) scale(0.6)', opacity: '0' },
+          '40%': { opacity: '1' },
+          '100%': { transform: 'translateY(-12px) scale(1)', opacity: '0' },
         },
         // POLISH-001: Confetti falling animation (T001, T002)
         confettiFall: {
