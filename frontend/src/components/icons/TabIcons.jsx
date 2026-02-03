@@ -30,6 +30,18 @@ export function WorldIcon({ active = false, className = '' }) {
   )
 }
 
+export function TreeIcon({ active = false, className = '' }) {
+  return (
+    <span
+      className={`text-2xl transition-opacity ${active ? '' : 'opacity-50'} ${className}`}
+      role="img"
+      aria-label="Tree"
+    >
+      🌳
+    </span>
+  )
+}
+
 export function QuizIcon({ active = false, className = '' }) {
   return (
     <span

@@ -15,6 +15,7 @@
  * POST /api/world/reset - Reset user's world state
  * POST /api/world/piece - Add a new piece (after quiz pass)
  * POST /api/world/piece/generate - Generate a world piece (prompt + image)
+ * POST /api/world/piece/mint - Mint a world piece for a learned topic (prompt + image + save)
  * POST /api/world/piece/review - Record a review quiz completion (WB022)
  * POST /api/world/xp - Add XP (returns tier upgrade info)
  * POST /api/world/award-xp - Award XP for quiz completion (WB014)
@@ -287,6 +288,328 @@ router.post('/piece', async (req, res) => {
     })
   } catch (error) {
     logger.error('WORLD', 'Unexpected error adding world piece', { error: error.message })
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// World Piece Minting (stable collectibles)
+// ---------------------------------------------------------------------------
+
+const ZONE_BOUNDS = {
+  nature: { minX: 10, maxX: 35, minY: 25, maxY: 80 },
+  civilization: { minX: 38, maxX: 62, minY: 22, maxY: 82 },
+  arcane: { minX: 65, maxX: 90, minY: 25, maxY: 78 },
+}
+
+const POSITION_MIN_DISTANCE = 8
+const GOLDEN_RATIO = 0.618033988749895
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value))
+}
+
+function hashString(value) {
+  let hash = 0
+  const input = String(value || '')
+  for (let i = 0; i < input.length; i += 1) {
+    hash = ((hash << 5) - hash) + input.charCodeAt(i)
+    hash |= 0
+  }
+  return Math.abs(hash)
+}
+
+function fallbackZoneForTopic(topicName) {
+  const zones = ['nature', 'civilization', 'arcane']
+  const seed = hashString(topicName)
+  return zones[seed % zones.length] || 'nature'
+}
+
+function isTooClose(candidate, existingPositions, minDistance) {
+  return existingPositions.some((pos) => {
+    const dx = candidate.x - pos.x
+    const dy = candidate.y - pos.y
+    return Math.sqrt((dx * dx) + (dy * dy)) < minDistance
+  })
+}
+
+function assignPiecePosition(existingPieces, zone, topicName) {
+  const bounds = ZONE_BOUNDS[zone] || ZONE_BOUNDS.nature
+  const seed = hashString(`${topicName}-${zone}`)
+  const existingPositions = (existingPieces || [])
+    .map((piece) => piece?.position)
+    .filter((pos) => pos && Number.isFinite(pos.x) && Number.isFinite(pos.y))
+
+  let candidate = null
+
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    const xFactor = ((seed + attempt * 131) * GOLDEN_RATIO) % 1
+    const yFactor = ((seed + attempt * 59) * GOLDEN_RATIO * 1.27) % 1
+
+    const jitterX = ((seed + attempt * 17) % 9) - 4
+    const jitterY = ((seed + attempt * 23) % 9) - 4
+
+    const x = clamp(bounds.minX + xFactor * (bounds.maxX - bounds.minX) + jitterX, bounds.minX, bounds.maxX)
+    const y = clamp(bounds.minY + yFactor * (bounds.maxY - bounds.minY) + jitterY, bounds.minY, bounds.maxY)
+
+    candidate = {
+      x: Math.round(x),
+      y: Math.round(y),
+    }
+
+    if (!isTooClose(candidate, existingPositions, POSITION_MIN_DISTANCE)) {
+      return candidate
+    }
+  }
+
+  return candidate || {
+    x: Math.round((bounds.minX + bounds.maxX) / 2),
+    y: Math.round((bounds.minY + bounds.maxY) / 2),
+  }
+}
+
+/**
+ * POST /api/world/piece/mint
+ * Generate and store a stable world piece for a learned topic
+ *
+ * Request body:
+ * - clientId (required): string
+ * - topicId (required): string
+ * - topicName (required): string
+ * - summary (optional): string
+ *
+ * Response:
+ * - piece: WorldPiece
+ * - worldState: Updated world state
+ * - evolutionsApplied: Array (optional)
+ * - skipped: boolean (true if piece already existed)
+ */
+router.post('/piece/mint', async (req, res) => {
+  logger.time('API', 'world-piece-mint-request')
+
+  try {
+    const { clientId, topicId, topicName, summary = '' } = req.body
+
+    // Validate clientId
+    if (!clientId || typeof clientId !== 'string') {
+      logger.timeEnd('API', 'world-piece-mint-request')
+      return res.status(400).json({
+        error: 'Missing or invalid clientId',
+        field: 'clientId',
+      })
+    }
+
+    const { sanitized: sanitizedId, error: idError } = sanitizeId(clientId)
+    if (idError) {
+      logger.timeEnd('API', 'world-piece-mint-request')
+      return res.status(400).json({
+        error: idError,
+        field: 'clientId',
+      })
+    }
+
+    const { sanitized: sanitizedTopicId, error: topicIdError } = sanitizeQuery(topicId)
+    if (topicIdError) {
+      logger.timeEnd('API', 'world-piece-mint-request')
+      return res.status(400).json({
+        error: topicIdError,
+        field: 'topicId',
+      })
+    }
+
+    const { sanitized: sanitizedTopicName, error: topicError } = sanitizeQuery(topicName)
+    if (topicError) {
+      logger.timeEnd('API', 'world-piece-mint-request')
+      return res.status(400).json({
+        error: topicError,
+        field: 'topicName',
+      })
+    }
+
+    let sanitizedSummary = ''
+    if (summary && typeof summary === 'string') {
+      const { sanitized, error: summaryError } = sanitizeQuery(summary)
+      if (summaryError) {
+        logger.timeEnd('API', 'world-piece-mint-request')
+        return res.status(400).json({
+          error: summaryError,
+          field: 'summary',
+        })
+      }
+      sanitizedSummary = sanitized || ''
+    }
+
+    logger.info('WORLD', 'Minting world piece', {
+      clientId: sanitizedId,
+      topicId: sanitizedTopicId,
+      topicName: sanitizedTopicName,
+    })
+
+    const worldStateResult = await getWorldState(sanitizedId)
+    if (worldStateResult.error) {
+      logger.timeEnd('API', 'world-piece-mint-request')
+      return res.status(500).json({ error: worldStateResult.error })
+    }
+
+    const existingPieces = worldStateResult.worldState?.pieces || []
+    const normalizedName = sanitizedTopicName.toLowerCase()
+    const existingPiece = existingPieces.find((piece) => (
+      piece.topicId === sanitizedTopicId
+      || (typeof piece.topicName === 'string' && piece.topicName.toLowerCase() === normalizedName)
+    ))
+
+    if (existingPiece) {
+      logger.timeEnd('API', 'world-piece-mint-request')
+      return res.json({
+        piece: existingPiece,
+        worldState: worldStateResult.worldState,
+        skipped: true,
+      })
+    }
+
+    if (!isGeminiAvailable()) {
+      logger.timeEnd('API', 'world-piece-mint-request')
+      return res.status(503).json({
+        error: 'World piece generation service temporarily unavailable',
+      })
+    }
+
+    let zone = fallbackZoneForTopic(sanitizedTopicName)
+
+    try {
+      const zoneResult = await classifyTopicZone(sanitizedTopicName, sanitizedSummary)
+      const validZones = ['nature', 'civilization', 'arcane']
+      if (!zoneResult.error && validZones.includes(zoneResult.zone)) {
+        zone = zoneResult.zone
+      }
+    } catch (error) {
+      logger.warn('WORLD', 'Zone classification failed, using fallback', {
+        error: error.message,
+        topicName: sanitizedTopicName,
+        zone,
+      })
+    }
+
+    const promptResult = await generateWorldPiecePrompt(sanitizedTopicName, zone, sanitizedSummary)
+    if (promptResult.error) {
+      logger.timeEnd('API', 'world-piece-mint-request')
+
+      if (promptResult.error === 'RATE_LIMITED') {
+        return res.status(429)
+          .set('Retry-After', '60')
+          .json({
+            error: 'Rate limit exceeded. Please try again later.',
+            retryAfter: 60,
+          })
+      }
+
+      return res.status(500).json({
+        error: 'Failed to generate world piece prompt',
+      })
+    }
+
+    const imageResult = await generateWorldPieceImage(promptResult.prompt)
+    if (imageResult.error) {
+      logger.timeEnd('API', 'world-piece-mint-request')
+
+      if (imageResult.error === 'RATE_LIMITED') {
+        return res.status(429)
+          .set('Retry-After', '60')
+          .json({
+            error: 'Rate limit exceeded. Please try again later.',
+            retryAfter: 60,
+          })
+      }
+
+      if (imageResult.error === 'CONTENT_FILTERED') {
+        return res.status(400).json({
+          error: 'Image generation was filtered. Please try a different topic.',
+        })
+      }
+
+      return res.status(500).json({
+        error: 'Failed to generate world piece image',
+      })
+    }
+
+    const pieceId = `piece_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+    const position = assignPiecePosition(existingPieces, zone, sanitizedTopicName)
+
+    const piece = {
+      id: pieceId,
+      topicId: sanitizedTopicId,
+      topicName: sanitizedTopicName,
+      zone,
+      imageUrl: imageResult.imageUrl,
+      prompt: promptResult.prompt,
+      position,
+    }
+
+    const addResult = await addWorldPiece(sanitizedId, piece)
+    if (addResult.error) {
+      logger.timeEnd('API', 'world-piece-mint-request')
+      return res.status(500).json({ error: addResult.error })
+    }
+
+    let evolutionsApplied = []
+
+    try {
+      const allPieces = addResult.worldState?.pieces || []
+      const evolutionResult = await checkPieceEvolutions(
+        { id: pieceId, topicName: sanitizedTopicName },
+        allPieces
+      )
+
+      if (Array.isArray(evolutionResult.evolutions) && evolutionResult.evolutions.length > 0) {
+        for (const evolution of evolutionResult.evolutions) {
+          const evolveResult = await evolvePiece(
+            sanitizedId,
+            evolution.pieceId,
+            evolution.newTier,
+            evolution.newRelatedTopics
+          )
+
+          if (!evolveResult.error) {
+            evolutionsApplied.push({
+              pieceId: evolution.pieceId,
+              topicName: evolution.topicName,
+              oldTier: evolution.oldTier,
+              newTier: evolution.newTier,
+            })
+          }
+        }
+      }
+
+      if (evolutionResult.newPieceRelations) {
+        await evolvePiece(
+          sanitizedId,
+          pieceId,
+          evolutionResult.newPieceRelations.evolutionTier,
+          evolutionResult.newPieceRelations.relatedTopics
+        )
+      }
+    } catch (error) {
+      logger.warn('WORLD', 'Piece evolution check failed during mint', { error: error.message })
+    }
+
+    const refreshedState = await getWorldState(sanitizedId)
+    const refreshedPiece = refreshedState.worldState?.pieces?.find((p) => p.id === pieceId) || piece
+
+    logger.timeEnd('API', 'world-piece-mint-request')
+
+    return res.json({
+      piece: refreshedPiece,
+      worldState: refreshedState.worldState || addResult.worldState,
+      evolutionsApplied,
+      skipped: false,
+    })
+  } catch (error) {
+    logger.error('WORLD', 'Unexpected error minting world piece', {
+      error: error.message,
+      stack: error.stack,
+    })
+    logger.timeEnd('API', 'world-piece-mint-request')
+
     return res.status(500).json({ error: 'Internal server error' })
   }
 })

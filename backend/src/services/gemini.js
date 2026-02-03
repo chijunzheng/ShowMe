@@ -2117,8 +2117,8 @@ Additional style requirements for world piece:
 
   let lastError = null
 
-  // Try image generation with fallback models (same pattern as generateEducationalImage)
-  for (const model of [IMAGE_MODEL, ...IMAGE_MODEL_FALLBACKS]) {
+  // Use the primary image model only to keep collectible style consistent
+  for (const model of [IMAGE_MODEL]) {
     try {
       const response = await ai.models.generateContent({
         model,

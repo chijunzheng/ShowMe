@@ -40,7 +40,7 @@ export default function QuizPrompt({
       <div className="relative">
         <div className="w-24 h-24 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
           <span className="text-5xl" role="img" aria-label="Quiz">
-
+            🧠
           </span>
         </div>
         {/* Sparkle decorations */}
@@ -66,7 +66,7 @@ export default function QuizPrompt({
 
       {/* Reward preview */}
       <div className="flex items-center gap-2 px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-full">
-        <span className="text-lg"></span>
+        <span className="text-lg" role="img" aria-hidden="true">🏆</span>
         <span className="text-sm font-medium text-yellow-700 dark:text-yellow-300">
           Pass to evolve your World!
         </span>
@@ -116,7 +116,7 @@ export default function QuizPrompt({
 
       {/* Info text */}
       <p className="text-xs text-gray-400 dark:text-gray-500 text-center max-w-xs">
-        Quizzes are 3-5 short questions. You can retake them anytime from the topic menu.
+        Quizzes are 3-5 short questions. Use Quick Quiz in the topic menu anytime.
       </p>
     </div>
   )

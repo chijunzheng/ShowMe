@@ -168,9 +168,6 @@ export default function useQuizHandlers({
               changesApplied: evolutionResult.changesApplied
             })
 
-            // Increment world badge for notification
-            setWorldBadge(prev => prev + 1)
-
             // Check for tier upgrade
             if (evolutionResult.changesApplied?.tierChanged) {
               showTierUpgrade({
@@ -185,6 +182,35 @@ export default function useQuizHandlers({
           }
         } else {
           logger.warn('QUIZ', 'evolveWorld function not available, skipping evolution')
+        }
+
+        // Mint a stable world collectible for this topic (World tab overlay)
+        try {
+          const mintResponse = await fetch('/api/world/piece/mint', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              clientId,
+              topicId: effectiveTopicId,
+              topicName: effectiveTopicName,
+              summary: summaryFromSlides,
+            }),
+          })
+
+          if (mintResponse.ok) {
+            const mintData = await mintResponse.json()
+            if (!mintData?.skipped) {
+              setWorldBadge(prev => prev + 1)
+            }
+          } else {
+            const mintError = await mintResponse.json().catch(() => null)
+            logger.warn('QUIZ', 'World piece mint failed', {
+              status: mintResponse.status,
+              error: mintError?.error || 'UNKNOWN_ERROR',
+            })
+          }
+        } catch (error) {
+          logger.warn('QUIZ', 'World piece mint request failed', { error: error.message })
         }
 
         // Award XP via evaluate endpoint (handles additional tier upgrades)

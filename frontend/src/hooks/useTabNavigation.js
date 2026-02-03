@@ -5,13 +5,13 @@
  * Tabs:
  * - learn: Main learning/slideshow experience
  * - world: World Builder view with collected pieces
- * - quiz: Quiz tab for dedicated quiz experience
+ * - tree: Knowledge Tree view for topic connections
  */
 
 import { useState, useCallback } from 'react'
 
 export function useTabNavigation() {
-  // Active tab: 'learn' | 'world' | 'quiz'
+  // Active tab: 'learn' | 'world' | 'tree'
   const [activeTab, setActiveTab] = useState('learn')
 
   // World tab badge count (new pieces notification)

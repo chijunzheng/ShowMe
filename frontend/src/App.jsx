@@ -19,6 +19,7 @@ import { LivingWorldView } from './components/LivingWorld'
 import TierUpCelebration from './components/TierUpCelebration'
 // WB015: Quick mode XP toast
 import QuickXpToast from './components/QuickXpToast'
+import TreeTab from './components/TreeTab'
 import useWorldStats from './hooks/useWorldStats'
 import useQuizHandlers from './hooks/useQuizHandlers.js'
 import useSocraticHandlers from './hooks/useSocraticHandlers.js'
@@ -32,8 +33,8 @@ import usePocketScene from './hooks/usePocketScene'
 import useReviewSession from './hooks/useReviewSession'
 import { EvolutionCelebration } from './components/Celebrations'
 import ConnectionSceneReveal from './components/WorldView/ConnectionSceneReveal'
-// WB021: Quiz Tab for dedicated quiz experience
-import QuizTab from './components/QuizTab'
+// WB021: Quiz flow screens for dedicated quiz experience
+import { calculateTreeLevel } from './components/MagicalTree/treeUtils'
 
 // Import constants from centralized config
 import {
@@ -131,11 +132,6 @@ function App() {
     evolveWorld,
     initializeWorld,
     resetWorld: resetLivingWorld,
-    // Tree-specific state for MagicalTree visualization
-    treeLevel: livingWorldTreeLevel,
-    branches: livingWorldBranches,
-    topicCount: livingWorldTopicCount,
-    topicsLearned: livingWorldTopicsLearned,
   } = useLivingWorld()
 
   const [isWorldRegenerating, setIsWorldRegenerating] = useState(false)
@@ -164,6 +160,8 @@ function App() {
   const {
     tier: worldTier,
     xpProgress,
+    pieces: worldPieces,
+    totalXP: totalWorldXP,
     refresh: refreshWorldStats,
   } = useWorldStats(userClientId)
 
@@ -220,9 +218,7 @@ function App() {
   } = useTabNavigation()
 
   // WB021: Quiz tab specific state
-  const [quizTabState, setQuizTabState] = useState('home') // 'home' | 'active' | 'results'
-  const [selectedQuizMode, setSelectedQuizMode] = useState(null)
-  const [selectedQuizTopic, setSelectedQuizTopic] = useState(null)
+  const [pendingQuizTopicId, setPendingQuizTopicId] = useState(null)
 
   // Quiz flow state
   const [quizQuestions, setQuizQuestions] = useState([])
@@ -253,19 +249,14 @@ function App() {
   // WB019: handlePocketSceneGenerated now uses showSceneReveal from useCelebrations hook
   const handlePocketSceneGenerated = showSceneReveal
 
-  // WB020: World pieces state for review session (loaded from API)
-  const [worldPieces, setWorldPieces] = useState([])
-
   // WB020: Review session - tracks pieces that need spaced repetition review
   const {
     piecesNeedingReview,
-    reviewCount,
-    isReviewing,
-    currentReviewPiece,
     startReviewSession,
-    completeCurrentReview,
-    endReviewSession,
   } = useReviewSession(worldPieces)
+
+  const worldPieceCount = Array.isArray(worldPieces) ? worldPieces.length : 0
+  const worldTreeLevel = useMemo(() => calculateTreeLevel(worldPieceCount), [worldPieceCount])
 
   const resetLivingWorldState = useCallback(async () => {
     const result = await resetLivingWorld()
@@ -276,25 +267,6 @@ function App() {
     return true
   }, [resetLivingWorld])
 
-  // WB020: Load world pieces for review session on mount and after piece unlocks
-  useEffect(() => {
-    const loadWorldPieces = async () => {
-      const clientId = getStoredClientId()
-      if (!clientId) return
-
-      try {
-        const response = await fetch(`/api/world?clientId=${encodeURIComponent(clientId)}`)
-        if (response.ok) {
-          const data = await response.json()
-          setWorldPieces(data.worldState?.pieces || [])
-        }
-      } catch (err) {
-        logger.warn('WORLD', 'Failed to load world pieces for review', { error: err.message })
-      }
-    }
-
-    loadWorldPieces()
-  }, []) // Load on mount only
 
   const generationProgressPercent = useMemo(() => {
     if (!generationProgress.stage) return 0
@@ -1757,43 +1729,77 @@ function App() {
     handleQuestionRef,
   })
 
+  const requestTopicQuiz = useCallback((piece) => {
+    if (!piece) return
+
+    const topicName = piece.topicName || piece.name
+    const topicId = piece.topicId || piece.id
+    const matchingTopic = topics.find((topic) =>
+      topic.id === topicId || (topicName && topic.name === topicName)
+    )
+
+    if (!matchingTopic) {
+      showToast('Open this topic first to start a quiz')
+      setActiveTab('learn')
+      setUiState(UI_STATE.HOME)
+      return
+    }
+
+    setActiveTab('learn')
+    setActiveTopicId(matchingTopic.id)
+    setPendingQuizTopicId(matchingTopic.id)
+    setUiState(UI_STATE.QUIZ_PROMPT)
+  }, [topics, showToast, setActiveTab, setActiveTopicId, setUiState])
+
   // WB018: Tab navigation handler with badge clearing
   const handleTabChange = useCallback((tab) => {
-    if (tab === 'world') {
+    if (tab === 'world' || tab === 'tree') {
       // Clear world badge when user views world
       setWorldBadge(0)
-    }
-    if (tab === 'quiz') {
-      // Reset quiz tab state when navigating to Quiz tab
-      setQuizTabState('home')
     }
     setActiveTab(tab)
   }, [])
 
-  // WB021: Handle quiz start from Quiz tab
+  // Handle quick quiz start from topic menus/tree
   const handleQuizTabStartQuiz = useCallback(({ mode, topic }) => {
-    setSelectedQuizMode(mode)
-    setSelectedQuizTopic(topic)
-
-    // If topic is provided, start quiz for that topic
-    // If not, will need to pick random topic based on mode
     if (topic) {
-      // Use existing quiz generation logic
-      // Set up quiz slides from the topic's content
-      setQuizTopicId(topic.topicId || topic.id)
-      setQuizTopicName(topic.topicName || topic.name)
+      requestTopicQuiz(topic)
+      return
     }
 
-    // For now, just trigger quiz generation
-    // This will be expanded to handle different modes
-    setQuizTabState('active')
-  }, [])
+    if (mode) {
+      showToast('Pick a topic to start a quiz')
+    }
+  }, [requestTopicQuiz, showToast])
 
-  // WB021: Handle navigation from Quiz empty state to Learn tab
-  const handleNavigateToLearn = useCallback(() => {
+  const handleReviewTopic = useCallback((piece) => {
+    requestTopicQuiz(piece)
+  }, [requestTopicQuiz])
+
+  const handleQuizTopic = useCallback((piece) => {
+    requestTopicQuiz(piece)
+  }, [requestTopicQuiz])
+
+  const handleLearnTopicFromPiece = useCallback((piece) => {
+    if (!piece) return
+    const topicName = piece.topicName || piece.name
+    const topicId = piece.topicId || piece.id
+    const matchingTopic = topics.find((topic) =>
+      topic.id === topicId || (topicName && topic.name === topicName)
+    )
+
     setActiveTab('learn')
     setUiState(UI_STATE.HOME)
-  }, [])
+
+    if (matchingTopic) {
+      setActiveTopicId(matchingTopic.id)
+      return
+    }
+
+    if (topicName) {
+      setTextInput(topicName)
+    }
+  }, [topics, setActiveTab, setUiState, setActiveTopicId, setTextInput])
 
   // WB018: Quiz and celebration handlers
   const {
@@ -1826,6 +1832,14 @@ function App() {
     checkEvolutions,
     evolveWorld, // Living World: Direct function for world evolution
   })
+
+  useEffect(() => {
+    if (!pendingQuizTopicId) return
+    if (!activeTopic || activeTopic.id !== pendingQuizTopicId) return
+
+    setPendingQuizTopicId(null)
+    handleStartQuiz()
+  }, [pendingQuizTopicId, activeTopic, handleStartQuiz])
 
   /**
    * Analyzes audio frequency data to calculate overall audio level.
@@ -2917,6 +2931,7 @@ function App() {
             setActiveTab('learn')
           }}
           onDeleteTopic={handleDeleteTopic}
+          onQuickQuizTopic={(topic) => requestTopicQuiz(topic)}
           tier={worldTier}
           xpProgress={xpProgress}
           streakCount={userProgress?.streakCount || 0}
@@ -3039,11 +3054,10 @@ function App() {
             onRegenerateWorld={regenerateLivingWorld}
             isRegeneratingWorld={isWorldRegenerating}
             regenerationProgress={worldRegenProgress}
-            // Tree-specific props for MagicalTree visualization
-            treeLevel={livingWorldTreeLevel}
-            branches={livingWorldBranches}
-            topicCount={livingWorldTopicCount}
-            totalXP={livingWorldTopicCount * 100}
+            // Tree-specific props for stats display
+            treeLevel={worldTreeLevel}
+            topicCount={worldPieceCount}
+            totalXP={totalWorldXP}
             trophies={[]} // TODO: Wire up trophy tracking
             onStartLearning={() => {
               setActiveTopicId(null)
@@ -3056,14 +3070,44 @@ function App() {
             }}
             pieces={worldPieces}
             streak={{ current: userProgress?.streakCount || 0, todayCompleted: false }}
-            onPromptAction={(actionType) => {
-              if (actionType === 'learn') setActiveTab('learn')
-              else if (actionType === 'review' || actionType === 'quiz') setActiveTab('quiz')
+            onPromptAction={(actionType, payload) => {
+              if (actionType === 'learn') {
+                setActiveTab('learn')
+                return
+              }
+
+              if (actionType === 'review' || actionType === 'quiz' || actionType === 'quick_quiz') {
+                const payloadPiece = payload?.piece
+                const payloadPieces = Array.isArray(payload?.pieces) ? payload.pieces : []
+                const targetPiece = payloadPiece || payloadPieces[0] || piecesNeedingReview[0] || worldPieces[0]
+                if (targetPiece) {
+                  requestTopicQuiz(targetPiece)
+                } else {
+                  showToast('Pick a topic to start a quiz')
+                }
+                return
+              }
+
+              if (actionType === 'explore') {
+                setActiveTab('world')
+              }
             }}
             onFABAction={(actionId) => {
               if (actionId === 'learn') setActiveTab('learn')
-              else if (actionId === 'quick_quiz') setActiveTab('quiz')
+              else if (actionId === 'quick_quiz') {
+                const reviewPiece = piecesNeedingReview[0]
+                const fallbackPiece = worldPieces[0]
+                const targetPiece = reviewPiece || fallbackPiece
+                if (targetPiece) {
+                  requestTopicQuiz(targetPiece)
+                } else {
+                  showToast('Pick a topic to start a quiz')
+                }
+              }
             }}
+            onReviewPiece={handleReviewTopic}
+            onQuizPiece={handleQuizTopic}
+            onLearnTopic={handleLearnTopicFromPiece}
             onSelectSuggestedTopic={(topicName) => {
               // Auto-start learning about the suggested topic
               setActiveTab('learn')
@@ -3073,14 +3117,20 @@ function App() {
           />
         )}
 
-        {/* WB021: Quiz Tab - shown when Quiz tab is active */}
-        {activeTab === 'quiz' && (
+        {activeTab === 'tree' && (
           <div className="min-h-screen bg-cream-100 dark:bg-night-900 pt-4">
-            <QuizTab
+            <TreeTab
               worldPieces={worldPieces}
+              piecesNeedingReview={piecesNeedingReview}
+              totalXP={totalWorldXP}
+              streak={{ current: userProgress?.streakCount || 0, todayCompleted: false }}
               onStartQuiz={handleQuizTabStartQuiz}
-              onNavigateToLearn={handleNavigateToLearn}
-              streak={{ current: 0, todayCompleted: false }} // TODO: Add real streak state
+              onReviewTopic={handleReviewTopic}
+              onLearnTopic={handleLearnTopicFromPiece}
+              onSelectSuggestedTopic={(topicName) => {
+                setActiveTab('learn')
+                handleQuestion(topicName, { source: 'tree_suggestion' })
+              }}
             />
           </div>
         )}
@@ -3155,12 +3205,11 @@ function App() {
           onDismiss={hideToast}
         />
 
-        {/* WB018: Bottom Tab Bar for Learn/World/Quiz navigation */}
+        {/* WB018: Bottom Tab Bar for Learn/World/Tree navigation */}
         <BottomTabBar
           activeTab={activeTab}
           onTabChange={handleTabChange}
           worldBadge={worldBadge}
-          quizBadge={piecesNeedingReview?.length || 0}
           hasSidebar={topics.length > 0}
         />
       </div>

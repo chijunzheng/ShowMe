@@ -31,6 +31,7 @@ const TIER_CONFIG = {
  * @param {Function} props.onNewTopic - Callback when "+ New Topic" is clicked
  * @param {Function} props.onRenameTopic - Callback when topic is renamed, receives (topicId, newName)
  * @param {Function} props.onDeleteTopic - Callback when topic is deleted, receives topicId
+ * @param {Function} [props.onQuickQuizTopic] - Callback for quick quiz, receives topic object
  * @param {string} props.tier - Current tier (barren, sprouting, etc.)
  * @param {Object} props.xpProgress - XP progress { current, target }
  * @param {number} props.streakCount - Current streak days
@@ -42,6 +43,7 @@ function TopicSidebar({
   onNewTopic,
   onRenameTopic,
   onDeleteTopic,
+  onQuickQuizTopic,
   tier = 'barren',
   xpProgress = { current: 0, target: 250 },
   streakCount = 0,
@@ -209,6 +211,17 @@ function TopicSidebar({
       onDeleteTopic(topicId)
     }
   }, [onDeleteTopic])
+
+  /**
+   * Handle quick quiz click
+   */
+  const handleQuickQuizClick = useCallback((e, topic) => {
+    e.stopPropagation()
+    setMenuOpenForTopic(null)
+    if (onQuickQuizTopic) {
+      onQuickQuizTopic(topic)
+    }
+  }, [onQuickQuizTopic])
 
   /**
    * Close menu when clicking outside
@@ -487,6 +500,14 @@ function TopicSidebar({
                       }}
                       role="menu"
                     >
+                      <button
+                        onClick={(e) => handleQuickQuizClick(e, topic)}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                        role="menuitem"
+                      >
+                        <span className="text-base" role="img" aria-hidden="true">⚡️</span>
+                        Quick Quiz
+                      </button>
                       <button
                         onClick={(e) => handleRenameClick(e, topic)}
                         className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"

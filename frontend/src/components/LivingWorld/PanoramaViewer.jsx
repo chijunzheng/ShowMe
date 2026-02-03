@@ -56,6 +56,7 @@ function Hotspot({
   topicName,
   glow,
   piece,
+  status = 'fresh',
   onTap,
   onLongPress,
   zoom = 1,
@@ -63,6 +64,13 @@ function Hotspot({
 }) {
   const hotspotRef = useRef(null)
   const isMap = variant === 'map'
+  const showImage = !isMap && piece?.imageUrl
+
+  const statusRingClass = status === 'due'
+    ? 'ring-2 ring-rose-400/80 shadow-rose-400/40'
+    : status === 'fading'
+      ? 'ring-2 ring-amber-300/70 shadow-amber-300/30'
+      : ''
 
   const handleClick = useCallback(
     (e) => {
@@ -143,6 +151,7 @@ function Hotspot({
         hover:scale-110 hover:bg-white/30
         focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2
         ${glow ? 'animate-pulse shadow-lg shadow-indigo-500/50 ring-2 ring-indigo-400/50' : ''}
+        ${statusRingClass}
       `}
       style={{
         left: `${clampedX * 100}%`,
@@ -153,7 +162,16 @@ function Hotspot({
       {...longPressHandlers}
     >
       <div className="flex flex-col items-center gap-1">
-        {isMap && (
+        {showImage ? (
+          <div className="relative w-9 h-9 rounded-full overflow-hidden border border-white/60 shadow-md">
+            <img
+              src={piece.imageUrl}
+              alt={topicName}
+              className="w-full h-full object-cover"
+              draggable={false}
+            />
+          </div>
+        ) : isMap && (
           <div className="relative">
             <div className="w-3 h-3 rounded-full bg-emerald-400 shadow-sm" />
             <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-emerald-500 rotate-45 rounded-[2px]" />
@@ -201,7 +219,7 @@ function LoadingSkeleton() {
  * @param {boolean} [props.isLoading=false] - Whether to show loading state
  * @param {Function} [props.onRegionTap] - Callback when user taps a region: (x, y) => void
  * @param {Function} [props.onHotspotLongPress] - Callback when user long-presses a hotspot: ({ piece, position }) => void
- * @param {Array} [props.hotspots=[]] - Areas to highlight: [{ x, y, topicName, glow, piece }]
+ * @param {Array} [props.hotspots=[]] - Areas to highlight: [{ x, y, topicName, glow, piece, status }]
  * @param {Function} [props.onZoomChange] - Callback when zoom level changes: (zoom) => void
  * @param {Function} [props.onViewportChange] - Callback when viewport changes: ({ x, y, width, height }) => void
  * @param {React.Ref} [props.canvasRef] - Ref to access InteractiveCanvas methods
@@ -501,6 +519,7 @@ function PanoramaViewer({
             topicName={hotspot.topicName}
             glow={hotspot.glow}
             piece={hotspot.piece}
+            status={hotspot.status}
             onTap={onRegionTap}
             onLongPress={onHotspotLongPress}
             zoom={currentZoom}

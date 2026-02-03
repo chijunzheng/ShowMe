@@ -1,28 +1,27 @@
 /**
  * BottomTabBar Component (UI001)
  *
- * A fixed bottom navigation bar with three tabs: Learn, World, and Quiz.
+ * A fixed bottom navigation bar with three tabs: Learn, World, and Tree.
  * Replaces the topic sidebar navigation for mobile-first design.
  *
  * Features:
  * - Fixed to bottom of screen with safe area inset support
- * - Three tabs with icons: Learn (microphone), World (globe), Quiz (question)
+ * - Three tabs with icons: Learn (microphone), World (globe), Tree (tree)
  * - Active tab highlighting with colored fill and background
- * - Optional badges on World and Quiz tabs
+ * - Optional badge on World tab
  * - Dark mode support
  * - Keyboard accessible (Tab + Enter/Space)
  * - 44px+ touch targets for mobile accessibility
  *
  * @param {Object} props - Component props
- * @param {'learn' | 'world' | 'quiz'} props.activeTab - Currently active tab
+ * @param {'learn' | 'world' | 'tree'} props.activeTab - Currently active tab
  * @param {Function} props.onTabChange - Callback when tab is clicked, receives tab name
  * @param {number} [props.worldBadge] - Optional badge count for World tab (new pieces)
- * @param {number} [props.quizBadge] - Optional badge count for Quiz tab (topics to review)
  * @param {boolean} [props.hasSidebar] - Whether sidebar is visible (offsets bar on desktop)
  */
-import { LearnIcon, WorldIcon, QuizIcon } from './icons/TabIcons'
+import { LearnIcon, WorldIcon, TreeIcon } from './icons/TabIcons'
 
-function BottomTabBar({ activeTab = 'learn', onTabChange, worldBadge = 0, quizBadge = 0, hasSidebar = false }) {
+function BottomTabBar({ activeTab = 'learn', onTabChange, worldBadge = 0, hasSidebar = false }) {
   /**
    * Handle tab click/keyboard activation
    */
@@ -45,7 +44,7 @@ function BottomTabBar({ activeTab = 'learn', onTabChange, worldBadge = 0, quizBa
   const tabs = [
     { id: 'learn', label: 'Learn', Icon: LearnIcon, badge: 0 },
     { id: 'world', label: 'World', Icon: WorldIcon, badge: worldBadge },
-    { id: 'quiz', label: 'Quiz', Icon: QuizIcon, badge: quizBadge },
+    { id: 'tree', label: 'Tree', Icon: TreeIcon, badge: 0 },
   ]
 
   return (

@@ -26,7 +26,7 @@ import WorldTransition from './WorldTransition'
 import ConnectionLine from './ConnectionLine'
 import DiscoveryPopover from './DiscoveryPopover'
 import Minimap from './Minimap'
-import { MagicalTree, TreeSeed } from '../MagicalTree'
+import { TreeSeed } from '../MagicalTree'
 import { StatsBar, TrophyShowcase } from '../Dashboard'
 import SmartPrompt from '../WorldView/SmartPrompt'
 import WorldFAB from '../WorldView/WorldFAB'
@@ -34,48 +34,8 @@ import SuggestionPanel from '../WorldView/SuggestionPanel'
 import QuickActionBar from '../WorldView/QuickActionBar'
 import useSuggestions from '../../hooks/useSuggestions'
 
-/**
- * Simple map icon component
- */
-function MapIcon({ className }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
-      <line x1="8" y1="2" x2="8" y2="18" />
-      <line x1="16" y1="6" x2="16" y2="22" />
-    </svg>
-  )
-}
-
-/**
- * Simple tree icon component
- */
-function TreeIcon({ className }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M12 22v-7" />
-      <path d="M9 22h6" />
-      <path d="M12 15C6 15 4 10 4 6c4 0 8 3 8 9" />
-      <path d="M12 15c6 0 8-5 8-9-4 0-8 3-8 9" />
-    </svg>
-  )
-}
+const REVIEW_THRESHOLD_DAYS = 7
+const REVIEW_SLEEPY_DAYS = 14
 
 /**
  * Loading skeleton component
@@ -242,16 +202,18 @@ function ErrorState({ message, onRetry }) {
  * @param {Function} [props.onWorldInitialized] - Callback after world is created
  * @param {Function} [props.onViewHistory] - Callback to view history
  * @param {Function} [props.onStartLearning] - Callback to start learning
- * @param {Array} [props.pieces] - World pieces for SmartPrompt
+ * @param {Array} [props.pieces] - World pieces for collectibles and SmartPrompt
  * @param {Object} [props.streak] - Streak data for SmartPrompt
  * @param {Function} [props.onPromptAction] - Callback for SmartPrompt actions
  * @param {Function} [props.onFABAction] - Callback for FAB actions
  * @param {Function} [props.onSelectSuggestedTopic] - Callback when a suggested topic is selected
+ * @param {Function} [props.onReviewPiece] - Callback to review a specific piece
+ * @param {Function} [props.onQuizPiece] - Callback to quiz a specific piece
+ * @param {Function} [props.onLearnTopic] - Callback to learn a specific topic
  * @param {Function} [props.onRegenerateWorld] - Callback to regenerate the living world
  * @param {boolean} [props.isRegeneratingWorld] - Whether a regeneration is in progress
  * @param {Object} [props.regenerationProgress] - Progress { current, total } for regeneration
  * @param {string} [props.treeLevel] - Tree level: seed, sprout, sapling, young, mature, magical
- * @param {Object} [props.branches] - Topics grouped by zone { nature, civilization, arcane }
  * @param {number} [props.topicCount] - Total number of topics learned
  * @param {number} [props.totalXP] - Total XP earned (defaults to topicCount * 100)
  * @param {Array} [props.trophies] - Array of earned trophies
@@ -274,12 +236,14 @@ function LivingWorldView({
   onPromptAction,
   onFABAction,
   onSelectSuggestedTopic,
+  onReviewPiece,
+  onQuizPiece,
+  onLearnTopic,
   onRegenerateWorld,
   isRegeneratingWorld = false,
   regenerationProgress = { current: 0, total: 0 },
   // Tree-specific props
   treeLevel = 'seed',
-  branches = { nature: [], civilization: [], arcane: [] },
   topicCount = 0,
   totalXP = null,
   trophies = [],
@@ -288,8 +252,8 @@ function LivingWorldView({
   // State for SuggestionPanel
   const [isSuggestionPanelOpen, setIsSuggestionPanelOpen] = useState(false)
 
-  // View mode toggle: 'tree' or 'panorama'
-  const [viewMode, setViewMode] = useState('panorama')
+  // Selected piece for detail actions
+  const [selectedPiece, setSelectedPiece] = useState(null)
 
   // State for QuickActionBar (shown on long-press of hotspot)
   const [actionBarData, setActionBarData] = useState(null)
@@ -336,14 +300,54 @@ function LivingWorldView({
     return Math.max(0, Math.min(1, value / 1000))
   }, [])
 
+  const getDaysSinceReview = useCallback((piece) => {
+    const dateStr = piece?.lastReviewedAt || piece?.unlockedAt
+    if (!dateStr) return 0
+    const reviewDate = new Date(dateStr)
+    if (Number.isNaN(reviewDate.getTime())) return 0
+    const diffMs = Date.now() - reviewDate.getTime()
+    return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)))
+  }, [])
+
+  const getReviewStatus = useCallback((piece) => {
+    const days = getDaysSinceReview(piece)
+    if (days > REVIEW_SLEEPY_DAYS) return 'due'
+    if (days > REVIEW_THRESHOLD_DAYS) return 'fading'
+    return 'fresh'
+  }, [getDaysSinceReview])
+
+  const collectibleHotspots = useMemo(() => {
+    if (!Array.isArray(pieces) || pieces.length === 0) return []
+
+    const goldenRatio = 0.618033988749895
+
+    return pieces.map((piece, index) => {
+      const fallbackX = ((index * goldenRatio) % 1) * 70 + 15
+      const fallbackY = ((index * goldenRatio * 1.5) % 1) * 50 + 25
+      const position = piece?.position || {}
+      const status = getReviewStatus(piece)
+
+      return {
+        x: Number.isFinite(position.x) ? position.x : fallbackX,
+        y: Number.isFinite(position.y) ? position.y : fallbackY,
+        topicName: piece.topicName || piece.name || `Topic ${index + 1}`,
+        piece,
+        status,
+        glow: status === 'due',
+      }
+    })
+  }, [pieces, getReviewStatus])
+
+  const displayHotspots = collectibleHotspots.length > 0 ? collectibleHotspots : hotspots
+
   const normalizedHotspots = useMemo(() => {
-    if (!Array.isArray(hotspots)) return []
-    return hotspots.map((hotspot) => ({
+    if (!Array.isArray(displayHotspots)) return []
+    return displayHotspots.map((hotspot) => ({
       ...hotspot,
       x: normalizeCoordinate(hotspot.x),
       y: normalizeCoordinate(hotspot.y),
     }))
-  }, [hotspots, normalizeCoordinate])
+  }, [displayHotspots, normalizeCoordinate])
 
   /**
    * Track container size for ConnectionLine component
@@ -391,8 +395,14 @@ function LivingWorldView({
   /**
    * Handle region tap on panorama
    */
-  const handleRegionTap = useCallback((x, y) => {
-    onHotspotClick?.(x, y)
+  const handleRegionTap = useCallback((payload, y) => {
+    if (payload && typeof payload === 'object') {
+      setSelectedPiece(payload)
+      onHotspotClick?.(payload)
+      return
+    }
+
+    onHotspotClick?.(payload, y)
   }, [onHotspotClick])
 
   /**
@@ -443,17 +453,39 @@ function LivingWorldView({
     if (actionBarData?.piece) {
       // Map actions to appropriate callbacks
       if (actionId === 'review') {
-        onHotspotClick?.(actionBarData.piece)
+        onReviewPiece?.(actionBarData.piece)
       } else if (actionId === 'quiz') {
-        onFABAction?.('quiz', actionBarData.piece)
+        onQuizPiece?.(actionBarData.piece)
       } else if (actionId === 'related') {
-        onFABAction?.('related', actionBarData.piece)
+        setSelectedPiece(actionBarData.piece)
       } else if (actionId === 'suggestions') {
         setIsSuggestionPanelOpen(true)
       }
     }
     setActionBarData(null)
-  }, [actionBarData, onHotspotClick, onFABAction])
+  }, [actionBarData, onReviewPiece, onQuizPiece])
+
+  const handleCloseSelectedPiece = useCallback(() => {
+    setSelectedPiece(null)
+  }, [])
+
+  const handleReviewSelectedPiece = useCallback(() => {
+    if (!selectedPiece) return
+    onReviewPiece?.(selectedPiece)
+    setSelectedPiece(null)
+  }, [onReviewPiece, selectedPiece])
+
+  const handleQuizSelectedPiece = useCallback(() => {
+    if (!selectedPiece) return
+    onQuizPiece?.(selectedPiece)
+    setSelectedPiece(null)
+  }, [onQuizPiece, selectedPiece])
+
+  const handleLearnSelectedPiece = useCallback(() => {
+    if (!selectedPiece) return
+    onLearnTopic?.(selectedPiece)
+    setSelectedPiece(null)
+  }, [onLearnTopic, selectedPiece])
 
   /**
    * Close QuickActionBar
@@ -504,21 +536,6 @@ function LivingWorldView({
   }, [onSelectSuggestedTopic])
 
   /**
-   * Toggle between tree and panorama view
-   */
-  const handleToggleViewMode = useCallback(() => {
-    setViewMode((prev) => (prev === 'tree' ? 'panorama' : 'tree'))
-  }, [])
-
-  /**
-   * Handle leaf click in tree view
-   */
-  const handleLeafClick = useCallback((topic) => {
-    // When a leaf is clicked, trigger the same action as hotspot click
-    onHotspotClick?.(topic)
-  }, [onHotspotClick])
-
-  /**
    * Generate connections between adjacent learned topics
    * Creates a simple linear chain connecting sequential hotspots
    */
@@ -534,11 +551,18 @@ function LivingWorldView({
     }))
   }, [])
 
-  // Extract topics learned from world state
-  const topicsLearned = Array.isArray(worldState?.topicsLearned) ? worldState.topicsLearned : []
-  const totalTopics = typeof worldState?.totalTopics === 'number'
-    ? worldState.totalTopics
-    : topicsLearned.length
+  // Extract topics learned from pieces when available, otherwise fall back to world state
+  const topicsLearned = pieces.length > 0
+    ? pieces.map((piece) => piece.topicName || piece.name).filter(Boolean)
+    : Array.isArray(worldState?.topicsLearned)
+      ? worldState.topicsLearned
+      : []
+
+  const totalTopics = pieces.length > 0
+    ? pieces.length
+    : typeof worldState?.totalTopics === 'number'
+      ? worldState.totalTopics
+      : topicsLearned.length
 
   const tierLabels = {
     barren: 'Barren',
@@ -602,7 +626,7 @@ function LivingWorldView({
         <div ref={containerRef} className="relative space-y-4">
           {/* Stats Bar */}
           <StatsBar
-            streak={streak}
+            streak={typeof streak === 'number' ? streak : streak?.current || 0}
             totalXP={totalXP ?? topicCount * 100}
             topicsLearned={topicCount}
             treeLevel={treeLevel}
@@ -614,149 +638,154 @@ function LivingWorldView({
             <TrophyShowcase trophies={trophies} />
           )}
 
-          {/* View Mode Toggle */}
-          {worldImageUrl && (
-            <div className="flex justify-end">
-              <button
-                onClick={handleToggleViewMode}
-                className="
-                  flex items-center gap-2 px-3 py-1.5
-                  text-sm font-medium
-                  bg-white/80 dark:bg-slate-800/80
-                  border border-slate-200 dark:border-slate-700
-                  rounded-lg shadow-sm
-                  hover:bg-white dark:hover:bg-slate-800
-                  transition-colors
-                "
-                aria-label={`Switch to ${viewMode === 'tree' ? 'panorama' : 'tree'} view`}
-              >
-                {viewMode === 'tree' ? (
-                  <>
-                    <MapIcon className="w-4 h-4" />
-                    <span>Map View</span>
-                  </>
-                ) : (
-                  <>
-                    <TreeIcon className="w-4 h-4" />
-                    <span>Tree View</span>
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-
-          {/* Tree View */}
-          {viewMode === 'tree' && (
-            <div className="relative">
-              <MagicalTree
-                level={treeLevel}
-                branches={branches}
-                onLeafClick={handleLeafClick}
-                isAnimating={isEvolving}
-              />
-            </div>
-          )}
-
           {/* Panorama View */}
-          {viewMode === 'panorama' && (
-            <>
-              {/* Evolution Transition */}
-              {isEvolving ? (
-                <WorldTransition
-                  oldImageUrl={previousImageRef.current}
-                  newImageUrl={worldImageUrl}
-                  isTransitioning={true}
-                  onTransitionComplete={handleTransitionComplete}
-                  showText={true}
-                />
-              ) : (
-                /* Normal Panorama View */
-                <PanoramaViewer
-                  worldImageUrl={worldImageUrl}
-                  isLoading={false}
-                  hotspots={hotspots}
-                  onRegionTap={handleRegionTap}
-                  onHotspotLongPress={handleHotspotLongPress}
-                  onZoomChange={handleZoomChange}
-                  onViewportChange={handleViewportChange}
-                  canvasRef={canvasRef}
-                />
-              )}
-
-              {/* Connection Lines between related topics */}
-              {containerSize.width > 0 && normalizedHotspots && normalizedHotspots.length > 1 && (
-                <ConnectionLine
-                  connections={generateConnections(normalizedHotspots)}
-                  containerWidth={containerSize.width}
-                  containerHeight={containerSize.height}
-                  zoom={currentZoom}
-                  animated={true}
-                />
-              )}
-
-              {/* Navigation Minimap - visible when zoomed in */}
-              <Minimap
-                worldImageUrl={worldImageUrl}
-                hotspots={normalizedHotspots}
-                viewportRect={viewportRect}
-                onNavigate={handleMinimapNavigate}
-                isVisible={currentZoom > 1.2}
-                position="bottom-left"
+          <>
+            {/* Evolution Transition */}
+            {isEvolving ? (
+              <WorldTransition
+                oldImageUrl={previousImageRef.current}
+                newImageUrl={worldImageUrl}
+                isTransitioning={true}
+                onTransitionComplete={handleTransitionComplete}
+                showText={true}
               />
+            ) : (
+              /* Normal Panorama View */
+              <PanoramaViewer
+                worldImageUrl={worldImageUrl}
+                isLoading={false}
+                hotspots={displayHotspots}
+                onRegionTap={handleRegionTap}
+                onHotspotLongPress={handleHotspotLongPress}
+                onZoomChange={handleZoomChange}
+                onViewportChange={handleViewportChange}
+                canvasRef={canvasRef}
+              />
+            )}
 
-              {/* Tier Badge */}
-              <div className="absolute top-3 left-3 z-10">
-                <div
-                  className="
-                    flex items-center gap-2
-                    px-3 py-1.5
-                    rounded-full
-                    bg-emerald-50/90 dark:bg-emerald-900/40
-                    text-emerald-800 dark:text-emerald-100
-                    border border-emerald-200/70 dark:border-emerald-700/60
-                    shadow-sm
-                    text-sm font-semibold
-                  "
-                  aria-label={`${tierLabel} world tier`}
-                >
-                  <span className="text-base" aria-hidden="true">{tierIcon}</span>
-                  <span className="capitalize">{tierLabel}</span>
+            {/* Connection Lines between related topics */}
+            {containerSize.width > 0 && normalizedHotspots && normalizedHotspots.length > 1 && (
+              <ConnectionLine
+                connections={generateConnections(normalizedHotspots)}
+                containerWidth={containerSize.width}
+                containerHeight={containerSize.height}
+                zoom={currentZoom}
+                animated={true}
+              />
+            )}
+
+            {/* Navigation Minimap - visible when zoomed in */}
+            <Minimap
+              worldImageUrl={worldImageUrl}
+              hotspots={normalizedHotspots}
+              viewportRect={viewportRect}
+              onNavigate={handleMinimapNavigate}
+              isVisible={currentZoom > 1.2}
+              position="bottom-left"
+            />
+
+            {/* Tier Badge */}
+            <div className="absolute top-3 left-3 z-10">
+              <div
+                className="
+                  flex items-center gap-2
+                  px-3 py-1.5
+                  rounded-full
+                  bg-emerald-50/90 dark:bg-emerald-900/40
+                  text-emerald-800 dark:text-emerald-100
+                  border border-emerald-200/70 dark:border-emerald-700/60
+                  shadow-sm
+                  text-sm font-semibold
+                "
+                aria-label={`${tierLabel} world tier`}
+              >
+                <span className="text-base" aria-hidden="true">{tierIcon}</span>
+                <span className="capitalize">{tierLabel}</span>
+              </div>
+            </div>
+
+            {/* Smart Prompt - context-aware action suggestion */}
+            {pieces.length > 0 && (
+              <div className="absolute bottom-16 left-3 right-3 z-10">
+                <SmartPrompt
+                  pieces={pieces}
+                  streak={streak}
+                  tier={tier}
+                  totalPieces={totalTopics}
+                  onAction={onPromptAction}
+                />
+              </div>
+            )}
+
+            {/* Quick Action Bar - shown on long-press of hotspot */}
+            {actionBarData && (
+              <QuickActionBar
+                piece={actionBarData.piece}
+                position={actionBarData.position}
+                onAction={handleQuickAction}
+                onClose={handleCloseActionBar}
+              />
+            )}
+
+            {selectedPiece && (
+              <div className="absolute bottom-3 left-3 right-3 z-20">
+                <div className="bg-white/95 dark:bg-slate-900/95 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-4 backdrop-blur">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                        {selectedPiece.zone || 'Topic'}
+                      </div>
+                      <h4 className="text-lg font-semibold text-slate-800 dark:text-slate-100 truncate">
+                        {selectedPiece.topicName || selectedPiece.name}
+                      </h4>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                        {getReviewStatus(selectedPiece) === 'due'
+                          ? 'Review overdue'
+                          : `Reviewed ${getDaysSinceReview(selectedPiece)} days ago`}
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleCloseSelectedPiece}
+                      className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      aria-label="Close topic details"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-3 gap-2">
+                    <button
+                      onClick={handleReviewSelectedPiece}
+                      className="px-3 py-2 rounded-lg bg-amber-50 text-amber-700 text-xs font-semibold"
+                    >
+                      Review
+                    </button>
+                    <button
+                      onClick={handleQuizSelectedPiece}
+                      className="px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-semibold"
+                    >
+                      Quiz
+                    </button>
+                    <button
+                      onClick={handleLearnSelectedPiece}
+                      className="px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold"
+                    >
+                      Learn
+                    </button>
+                  </div>
                 </div>
               </div>
+            )}
 
-              {/* Smart Prompt - context-aware action suggestion */}
-              {pieces.length > 0 && (
-                <div className="absolute bottom-16 left-3 right-3 z-10">
-                  <SmartPrompt
-                    pieces={pieces}
-                    streak={streak}
-                    tier={tier}
-                    totalPieces={totalTopics}
-                    onAction={onPromptAction}
-                  />
-                </div>
-              )}
-
-              {/* Quick Action Bar - shown on long-press of hotspot */}
-              {actionBarData && (
-                <QuickActionBar
-                  piece={actionBarData.piece}
-                  position={actionBarData.position}
-                  onAction={handleQuickAction}
-                  onClose={handleCloseActionBar}
-                />
-              )}
-
-              {/* Discovery Popover - suggests related topics */}
-              <DiscoveryPopover
-                isOpen={discoveryPopover.isOpen}
-                position={discoveryPopover.position}
-                suggestions={discoveryPopover.suggestions}
-                onSelectTopic={handleSelectDiscoveryTopic}
-                onClose={() => setDiscoveryPopover((prev) => ({ ...prev, isOpen: false }))}
-              />
-            </>
-          )}
+            {/* Discovery Popover - suggests related topics */}
+            <DiscoveryPopover
+              isOpen={discoveryPopover.isOpen}
+              position={discoveryPopover.position}
+              suggestions={discoveryPopover.suggestions}
+              onSelectTopic={handleSelectDiscoveryTopic}
+              onClose={() => setDiscoveryPopover((prev) => ({ ...prev, isOpen: false }))}
+            />
+          </>
 
           {/* Floating Action Button - shown in both views */}
           <div className="fixed bottom-20 right-4 z-20">
