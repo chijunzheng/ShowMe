@@ -2979,6 +2979,232 @@ Generate the quiz questions now:`
   }
 }
 
+/**
+ * Generate a "What If?" counterfactual scenario from lesson content
+ * Creates an engaging hypothetical scenario that requires understanding
+ * the material to reason through consequences.
+ *
+ * @param {Object} params
+ * @param {Array} params.slides - The slides from the lesson
+ * @param {string} params.topicName - The topic being explored
+ * @param {string} params.explanationLevel - 'simple' | 'standard' | 'deep'
+ * @param {string} params.language - 'en' or 'zh'
+ * @returns {Object} { scenario, imagePrompt, thinkAboutHints, expectedConsequences, bonusFact, error }
+ */
+export async function generateWhatIfScenario({ slides, topicName, explanationLevel, language }) {
+  if (!isGeminiAvailable()) {
+    return { error: 'API_NOT_AVAILABLE' }
+  }
+
+  try {
+    // Build slide context summary
+    const slideContext = slides
+      .map((slide, i) => `Slide ${i + 1}: ${slide.script || slide.subtitle || ''}`)
+      .join('\n')
+
+    // Language-specific prompt
+    const languageNote = language === 'zh'
+      ? 'Generate all content in Simplified Chinese (简体中文).'
+      : 'Generate all content in English.'
+
+    const levelGuidance = {
+      simple: 'Keep the scenario simple and concrete. Use everyday language.',
+      standard: 'Balance accessibility with depth. Include key scientific concepts.',
+      deep: 'Create a sophisticated scenario that requires deep conceptual understanding.'
+    }
+
+    const prompt = `You are creating an engaging "What If?" scenario for a learning experience.
+
+Topic: ${topicName}
+Level: ${explanationLevel}
+${languageNote}
+
+Lesson content:
+${slideContext}
+
+Create a counterfactual "What If?" scenario that:
+1. Changes one key aspect of the topic in an interesting way
+2. Requires understanding the lesson to reason through
+3. Has 3-4 clear consequences that follow from the change
+4. Is thought-provoking but not overwhelming
+
+${levelGuidance[explanationLevel] || levelGuidance.standard}
+
+Respond with ONLY valid JSON (no markdown, no code blocks):
+{
+  "scenario": "What if [interesting counterfactual]?",
+  "imagePrompt": "Description for generating a dramatic visual of this scenario",
+  "thinkAboutHints": [
+    "Hint 1 to guide reasoning",
+    "Hint 2 to guide reasoning"
+  ],
+  "expectedConsequences": [
+    {"concept": "first_concept", "consequence": "What would happen"},
+    {"concept": "second_concept", "consequence": "Another effect"},
+    {"concept": "third_concept", "consequence": "Additional outcome"}
+  ],
+  "bonusFact": "Mind-expanding fact related to the scenario"
+}`
+
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+    })
+
+    const text = response.text || ''
+    const extracted = extractJSON(text)
+
+    if (!extracted) {
+      console.error('[Gemini] What If generation failed to extract JSON from:', text.substring(0, 200))
+      return { error: 'PARSE_ERROR' }
+    }
+
+    // Validate response structure
+    if (!extracted.scenario || typeof extracted.scenario !== 'string') {
+      return { error: 'INVALID_RESPONSE' }
+    }
+
+    if (!Array.isArray(extracted.expectedConsequences) || extracted.expectedConsequences.length === 0) {
+      return { error: 'INVALID_RESPONSE' }
+    }
+
+    return {
+      scenario: extracted.scenario,
+      imagePrompt: extracted.imagePrompt || `Visual representation of: ${extracted.scenario}`,
+      thinkAboutHints: Array.isArray(extracted.thinkAboutHints) ? extracted.thinkAboutHints : [],
+      expectedConsequences: extracted.expectedConsequences,
+      bonusFact: extracted.bonusFact || '',
+      error: null
+    }
+  } catch (error) {
+    console.error('[Gemini] What If generation error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { error: 'RATE_LIMITED' }
+    }
+    if (error.message?.includes('JSON')) {
+      return { error: 'PARSE_ERROR' }
+    }
+
+    return { error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
+ * Evaluate user's prediction against expected consequences (non-judgmental)
+ * Matches user's reasoning to expected outcomes and provides encouragement
+ *
+ * @param {Object} params
+ * @param {string} params.userPrediction - User's transcribed prediction
+ * @param {Array} params.expectedConsequences - Expected outcomes from generation
+ * @param {string} params.language - 'en' or 'zh'
+ * @returns {Object} { matchedPredictions, missedConsequences, xpEarned, error }
+ */
+export async function evaluateWhatIfPrediction({ userPrediction, expectedConsequences, language }) {
+  if (!isGeminiAvailable()) {
+    return { error: 'API_NOT_AVAILABLE' }
+  }
+
+  try {
+    const languageNote = language === 'zh'
+      ? 'Respond in Simplified Chinese (简体中文).'
+      : 'Respond in English.'
+
+    const prompt = `You are evaluating a student's prediction in a "What If?" learning scenario.
+
+Expected consequences:
+${expectedConsequences.map((c, i) => `${i + 1}. ${c.concept}: ${c.consequence}`).join('\n')}
+
+Student's prediction:
+"${userPrediction}"
+
+Your task is to:
+1. Identify which expected consequences the student mentioned (semantic matching, not exact words)
+2. Provide encouraging, non-judgmental feedback for each match
+3. List consequences they didn't mention (as learning opportunities, not failures)
+
+IMPORTANT: Every prediction is valuable. Even if they missed everything, award at least 10 XP for thinking.
+
+Scoring:
+- 3+ matches: 50 XP - "Amazing scientific thinking!"
+- 2 matches: 35 XP - "Great predictions!"
+- 1 match: 20 XP - "Good start! Here's more..."
+- 0 matches: 10 XP - "Interesting ideas! Let's see..."
+
+${languageNote}
+
+Respond with ONLY valid JSON (no markdown, no code blocks):
+{
+  "matchedPredictions": [
+    {
+      "concept": "concept_name",
+      "userPhrase": "phrase they used that matched",
+      "feedback": "Yes! [encouraging validation]"
+    }
+  ],
+  "missedConsequences": [
+    {
+      "concept": "concept_name",
+      "reveal": "Educational reveal of this consequence"
+    }
+  ],
+  "xpEarned": 50
+}`
+
+    const response = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: prompt,
+    })
+
+    const text = response.text || ''
+    const extracted = extractJSON(text)
+
+    if (!extracted) {
+      console.error('[Gemini] What If evaluation failed to extract JSON from:', text.substring(0, 200))
+      return { error: 'PARSE_ERROR' }
+    }
+
+    // Ensure arrays exist
+    const matchedPredictions = Array.isArray(extracted.matchedPredictions)
+      ? extracted.matchedPredictions
+      : []
+
+    const missedConsequences = Array.isArray(extracted.missedConsequences)
+      ? extracted.missedConsequences
+      : []
+
+    // Calculate XP based on matches (ensure always positive)
+    let xpEarned = 10 // Minimum baseline
+    const matchCount = matchedPredictions.length
+
+    if (matchCount >= 3) {
+      xpEarned = 50
+    } else if (matchCount === 2) {
+      xpEarned = 35
+    } else if (matchCount === 1) {
+      xpEarned = 20
+    }
+
+    return {
+      matchedPredictions,
+      missedConsequences,
+      xpEarned,
+      error: null
+    }
+  } catch (error) {
+    console.error('[Gemini] What If evaluation error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { error: 'RATE_LIMITED' }
+    }
+    if (error.message?.includes('JSON')) {
+      return { error: 'PARSE_ERROR' }
+    }
+
+    return { error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
 export default {
   isGeminiAvailable,
   generateScript,
@@ -3002,4 +3228,7 @@ export default {
   generateWorldPieceImage,
   generateLivingWorldEvolutionPlan,
   generateLivingWorldImage,
+  generateWhatIfScenario,
+  evaluateWhatIfPrediction,
+  detectLanguage,
 }

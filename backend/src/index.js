@@ -158,6 +158,7 @@ import userRoutes from './routes/user.js'
 import quizRoutes from './routes/quiz.js'
 import worldRoutes from './routes/world.js'
 import randomTopicRoutes from './routes/randomTopic.js'
+import learnRoutes from './routes/learn.js'
 
 app.use('/api/generate', generateRoutes)
 app.use('/api/classify', classifyRoutes)
@@ -172,6 +173,7 @@ app.use('/api/user', userRoutes)
 app.use('/api/quiz', quizRoutes)
 app.use('/api/world', worldRoutes)
 app.use('/api/random-topic', randomTopicRoutes)
+app.use('/api/learn', learnRoutes)
 
 // Serve frontend static files in production
 if (process.env.NODE_ENV === 'production') {

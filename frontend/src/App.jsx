@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import Toast from './components/Toast'
 import TopicSidebar from './components/TopicSidebar'
-import { HomeScreen, ListeningScreen, GeneratingScreen, ErrorScreen, QuizResultsScreen, LoadingTopicScreen, SlideshowScreen, SocraticScreen, QuizPromptScreen, QuizActiveScreen, QuizCompletionScreen } from './components/screens'
+import { HomeScreen, ListeningScreen, GeneratingScreen, ErrorScreen, QuizResultsScreen, LoadingTopicScreen, SlideshowScreen, SocraticScreen, QuizPromptScreen, ModeSelectorScreen, QuizActiveScreen, QuizCompletionScreen } from './components/screens'
+import { MysteryLab, WonderLab, StoryStudio } from './components/LearnModes'
 import RaiseHandButton from './components/RaiseHandButton'
 import { useWebSocket, PROGRESS_TYPES } from './hooks/useWebSocket'
 import useSlideAudio from './hooks/useSlideAudio.js'
@@ -219,6 +220,9 @@ function App() {
 
   // WB021: Quiz tab specific state
   const [pendingQuizTopicId, setPendingQuizTopicId] = useState(null)
+
+  // Learning Modes state - track which mode is active ('mystery', 'whatif', 'story', or null)
+  const [selectedLearningMode, setSelectedLearningMode] = useState(null)
 
   // Quiz flow state
   const [quizQuestions, setQuizQuestions] = useState([])
@@ -1704,8 +1708,8 @@ function App() {
 
         // WB018: Branch based on learn mode
         if (learnMode === 'full') {
-          // Full mode: Show quiz prompt to encourage knowledge retention
-          setUiState(UI_STATE.QUIZ_PROMPT)
+          // Full mode: Show mode selector (Mystery Lab, Wonder Lab, Story Studio)
+          setUiState(UI_STATE.MODE_SELECTOR)
         } else {
           // Quick mode: End after slideshow and award quick XP (WB015)
           awardQuickXP()
@@ -1729,6 +1733,42 @@ function App() {
     handleQuestionRef,
   })
 
+  // Learning Modes: Handle mode selection (Mystery Lab, Wonder Lab, Story Studio)
+  const handleModeSelect = useCallback((mode) => {
+    logger.info('LEARN_MODE', 'Mode selected', { mode, topicName: activeTopic?.name })
+
+    // Set the selected mode and navigate to LEARN_MODE state
+    setSelectedLearningMode(mode)
+    setUiState(UI_STATE.LEARN_MODE)
+
+    // Show placeholder toast for unimplemented modes
+    if (mode === 'story') {
+      showToast(`${mode} mode coming soon!`, 'info')
+    }
+  }, [activeTopic, showToast, setUiState])
+
+  // Learning Modes: Handle learning mode completion
+  const handleLearningModeComplete = useCallback((result) => {
+    logger.info('LEARN_MODE', 'Learning mode completed', {
+      mode: selectedLearningMode,
+      completed: result?.completed,
+      xpEarned: result?.xpEarned
+    })
+
+    // Reset learning mode state
+    setSelectedLearningMode(null)
+    setUiState(UI_STATE.HOME)
+  }, [selectedLearningMode, setUiState])
+
+  // Learning Modes: Handle learning mode exit
+  const handleLearningModeExit = useCallback(() => {
+    logger.info('LEARN_MODE', 'Learning mode exited', { mode: selectedLearningMode })
+
+    // Reset learning mode state
+    setSelectedLearningMode(null)
+    setUiState(UI_STATE.HOME)
+  }, [selectedLearningMode, setUiState])
+
   const requestTopicQuiz = useCallback((piece) => {
     if (!piece) return
 
@@ -1748,7 +1788,7 @@ function App() {
     setActiveTab('learn')
     setActiveTopicId(matchingTopic.id)
     setPendingQuizTopicId(matchingTopic.id)
-    setUiState(UI_STATE.QUIZ_PROMPT)
+    setUiState(UI_STATE.MODE_SELECTOR)
   }, [topics, showToast, setActiveTab, setActiveTopicId, setUiState])
 
   // WB018: Tab navigation handler with badge clearing
@@ -3006,7 +3046,55 @@ function App() {
           />
         )}
 
-        {/* WB018: Quiz prompt screen - shown after slideshow in Full mode */}
+        {/* Mode Selector: Choose learning mode (Mystery Lab, Wonder Lab, Story Studio) */}
+        {uiState === UI_STATE.MODE_SELECTOR && activeTab === 'learn' && (
+          <ModeSelectorScreen
+            slides={visibleSlides}
+            topicName={activeTopic?.name || ''}
+            explanationLevel={activeTopic?.explanationLevel || 'standard'}
+            onModeSelect={handleModeSelect}
+            onSkip={handleQuizPromptSkip}
+          />
+        )}
+
+        {/* Learning Mode Screen - Mystery Lab, Wonder Lab, Story Studio */}
+        {uiState === UI_STATE.LEARN_MODE && activeTab === 'learn' && selectedLearningMode === 'mystery' && (
+          <div className="fixed inset-0 z-50">
+            <MysteryLab
+              slides={visibleSlides}
+              topicName={activeTopic?.name || ''}
+              explanationLevel={activeTopic?.explanationLevel || 'standard'}
+              onComplete={handleLearningModeComplete}
+              onExit={handleLearningModeExit}
+            />
+          </div>
+        )}
+
+        {uiState === UI_STATE.LEARN_MODE && activeTab === 'learn' && selectedLearningMode === 'whatif' && (
+          <div className="fixed inset-0 z-50">
+            <WonderLab
+              slides={visibleSlides}
+              topicName={activeTopic?.name || ''}
+              explanationLevel={activeTopic?.explanationLevel || 'standard'}
+              onComplete={handleLearningModeComplete}
+              onExit={handleLearningModeExit}
+            />
+          </div>
+        )}
+
+        {/* Story Studio - Create illustrated stories using learned concepts */}
+        {uiState === UI_STATE.LEARN_MODE && activeTab === 'learn' && selectedLearningMode === 'story' && (
+          <div className="fixed inset-0 z-50">
+            <StoryStudio
+              slides={visibleSlides}
+              topicName={activeTopic?.name || ''}
+              onComplete={handleLearningModeComplete}
+              onBack={handleLearningModeExit}
+            />
+          </div>
+        )}
+
+        {/* WB018: Quiz prompt screen - shown after slideshow in Full mode (DEPRECATED - use MODE_SELECTOR) */}
         {uiState === UI_STATE.QUIZ_PROMPT && activeTab === 'learn' && (
           <QuizPromptScreen
             topicName={activeTopic?.name}
