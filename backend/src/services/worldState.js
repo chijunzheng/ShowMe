@@ -125,7 +125,14 @@ export const XP_REWARDS = {
   QUICK_MODE: 5,           // Quick answer (no quiz)
   STREAK_BONUS: 5,         // Per day of streak
   REVIEW_PASS: 10,         // XP for passing a review quiz (66%+)
-  REVIEW_PERFECT: 15       // XP for perfect review score (100%)
+  REVIEW_PERFECT: 15,      // XP for perfect review score (100%)
+  // Learning Mode Rewards
+  MYSTERY_LAB_BASE: 15,    // Solved mystery
+  MYSTERY_LAB_PERFECT: 30, // Solved without hints
+  WONDER_LAB_BASE: 20,     // Completed what-if exploration
+  WONDER_LAB_DEEP: 35,     // Deep thinking bonus
+  STORY_STUDIO_BASE: 25,   // Created story
+  STORY_STUDIO_CREATIVE: 40 // Used all concepts
 }
 
 /**

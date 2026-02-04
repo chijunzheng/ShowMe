@@ -77,7 +77,6 @@ export default function usePocketScene() {
   const generateScene = useCallback(async (pocketId, pieces, category, zone) => {
     // Prevent duplicate generation requests
     if (generatingPocketsRef.current.has(pocketId)) {
-      console.log('[usePocketScene] Scene generation already in progress for pocket:', pocketId)
       return null
     }
 

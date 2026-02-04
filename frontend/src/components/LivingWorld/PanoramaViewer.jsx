@@ -61,10 +61,12 @@ function Hotspot({
   onLongPress,
   zoom = 1,
   variant = 'panorama',
+  mode = 'explore',
 }) {
   const hotspotRef = useRef(null)
   const isMap = variant === 'map'
-  const showImage = !isMap && piece?.imageUrl
+  const isCinematic = mode === 'cinematic'
+  const showImage = !isMap && piece?.imageUrl && !isCinematic
 
   const statusRingClass = status === 'due'
     ? 'ring-2 ring-rose-400/80 shadow-rose-400/40'
@@ -139,12 +141,17 @@ function Hotspot({
       tabIndex={0}
       aria-label={`Explore ${topicName}. Long-press for quick actions.`}
       className={`
+        group
         absolute transform -translate-x-1/2 -translate-y-1/2
         min-w-[44px] min-h-[44px] w-12 h-12
         flex items-center justify-center
         rounded-full
-        ${isMap ? 'bg-emerald-500/20 border-emerald-200/80' : 'bg-white/20 dark:bg-white/10 border-white/50 dark:border-white/30'}
-        backdrop-blur-sm
+        ${isMap
+          ? 'bg-emerald-500/20 border-emerald-200/80'
+          : isCinematic
+            ? 'bg-white/5 border-white/20 shadow-[0_0_24px_rgba(255,255,255,0.25)]'
+            : 'bg-white/20 dark:bg-white/10 border-white/50 dark:border-white/30'}
+        ${isCinematic ? 'backdrop-blur-[2px]' : 'backdrop-blur-sm'}
         border-2
         cursor-pointer
         transition-all duration-300
@@ -171,17 +178,28 @@ function Hotspot({
               draggable={false}
             />
           </div>
-        ) : isMap && (
+        ) : isMap ? (
           <div className="relative">
             <div className="w-3 h-3 rounded-full bg-emerald-400 shadow-sm" />
             <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-emerald-500 rotate-45 rounded-[2px]" />
           </div>
+        ) : (
+          <div
+            className={`
+              w-3 h-3 rounded-full
+              ${isCinematic ? 'bg-white/90 shadow-[0_0_14px_rgba(255,255,255,0.75)]' : 'bg-white/70 shadow-[0_0_10px_rgba(255,255,255,0.5)]'}
+            `}
+          />
         )}
         <span
           className={`
             text-[11px] font-semibold text-center px-1.5 py-0.5
             rounded-full
-            ${isMap ? 'bg-white/80 text-emerald-800 shadow-sm' : 'text-white dark:text-white/90'}
+            ${isMap
+              ? 'bg-white/80 text-emerald-800 shadow-sm'
+              : isCinematic
+                ? 'bg-white/80 text-slate-900 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-200'
+                : 'text-white dark:text-white/90'}
             truncate max-w-[90px]
           `}
         >
@@ -224,6 +242,7 @@ function LoadingSkeleton() {
  * @param {Function} [props.onViewportChange] - Callback when viewport changes: ({ x, y, width, height }) => void
  * @param {React.Ref} [props.canvasRef] - Ref to access InteractiveCanvas methods
  * @param {'panorama' | 'map'} [props.variant='panorama'] - Visual styling variant
+ * @param {'explore' | 'cinematic'} [props.hotspotMode='explore'] - Hotspot visual density mode
  */
 function PanoramaViewer({
   worldImageUrl,
@@ -235,6 +254,7 @@ function PanoramaViewer({
   onViewportChange,
   canvasRef: externalCanvasRef,
   variant = 'panorama',
+  hotspotMode = 'explore',
 }) {
   const isMap = variant === 'map'
   // Track current zoom for hotspot scaling
@@ -524,6 +544,7 @@ function PanoramaViewer({
             onLongPress={onHotspotLongPress}
             zoom={currentZoom}
             variant={variant}
+            mode={hotspotMode}
           />
         ))}
     </div>

@@ -10,10 +10,8 @@ export const UI_STATE = {
   GENERATING: 'generating',
   SLIDESHOW: 'slideshow',
   SOCRATIC: 'socratic',
-  QUIZ_PROMPT: 'quiz_prompt',
-  QUIZ: 'quiz',
-  QUIZ_COMPLETING: 'quiz_completing',
-  QUIZ_RESULTS: 'quiz_results',
+  MODE_SELECTOR: 'mode_selector', // Choose between Mystery Lab, Wonder Lab, Story Studio
+  LEARN_MODE: 'learn_mode', // Active learning mode (mystery/whatif/story)
   ERROR: 'error',
 }
 

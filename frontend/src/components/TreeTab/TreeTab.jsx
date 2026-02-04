@@ -14,30 +14,8 @@ import { calculateTreeLevel } from '../MagicalTree/treeUtils'
 import { StatsBar } from '../Dashboard'
 import RecommendationCard from './RecommendationCard'
 import useSuggestions from '../../hooks/useSuggestions'
-
-const REVIEW_THRESHOLD_DAYS = 7
-
-const ZONE_ICONS = {
-  nature: '🌿',
-  civilization: '🏛️',
-  arcane: '✨',
-}
-
-function getDaysSinceReview(piece) {
-  const dateStr = piece?.lastReviewedAt || piece?.unlockedAt
-  if (!dateStr) return 0
-  const reviewDate = new Date(dateStr)
-  if (Number.isNaN(reviewDate.getTime())) return 0
-  const diffMs = Date.now() - reviewDate.getTime()
-  return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)))
-}
-
-function getReviewStatus(piece) {
-  const days = getDaysSinceReview(piece)
-  if (days > 14) return 'due'
-  if (days > REVIEW_THRESHOLD_DAYS) return 'fading'
-  return 'fresh'
-}
+import { getDaysSinceReview, getReviewStatus, REVIEW_STATUS } from '../../utils/reviewUtils'
+import { ZONE_ICONS } from '../../constants/world'
 
 export default function TreeTab({
   worldPieces = [],
@@ -225,7 +203,7 @@ export default function TreeTab({
                   {selectedTopic.name}
                 </h4>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  {getReviewStatus(selectedTopic.piece) === 'due'
+                  {getReviewStatus(selectedTopic.piece) === REVIEW_STATUS.DUE
                     ? 'Review overdue'
                     : `Reviewed ${getDaysSinceReview(selectedTopic.piece)} days ago`}
                 </p>

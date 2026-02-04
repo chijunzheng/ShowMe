@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import Toast from './components/Toast'
 import TopicSidebar from './components/TopicSidebar'
-import { HomeScreen, ListeningScreen, GeneratingScreen, ErrorScreen, QuizResultsScreen, LoadingTopicScreen, SlideshowScreen, SocraticScreen, QuizPromptScreen, ModeSelectorScreen, QuizActiveScreen, QuizCompletionScreen } from './components/screens'
+import { HomeScreen, ListeningScreen, GeneratingScreen, ErrorScreen, LoadingTopicScreen, SlideshowScreen, SocraticScreen, ModeSelectorScreen } from './components/screens'
 import { MysteryLab, WonderLab, StoryStudio } from './components/LearnModes'
 import RaiseHandButton from './components/RaiseHandButton'
 import { useWebSocket, PROGRESS_TYPES } from './hooks/useWebSocket'
@@ -20,9 +20,8 @@ import { LivingWorldView } from './components/LivingWorld'
 import TierUpCelebration from './components/TierUpCelebration'
 // WB015: Quick mode XP toast
 import QuickXpToast from './components/QuickXpToast'
-import TreeTab from './components/TreeTab'
+import { ProgressTab } from './components/ProgressTab'
 import useWorldStats from './hooks/useWorldStats'
-import useQuizHandlers from './hooks/useQuizHandlers.js'
 import useSocraticHandlers from './hooks/useSocraticHandlers.js'
 import useSlideshowControl from './hooks/useSlideshowControl.js'
 import useCelebrations from './hooks/useCelebrations.js'
@@ -218,19 +217,9 @@ function App() {
     setLearnMode,
   } = useTabNavigation()
 
-  // WB021: Quiz tab specific state
-  const [pendingQuizTopicId, setPendingQuizTopicId] = useState(null)
-
   // Learning Modes state - track which mode is active ('mystery', 'whatif', 'story', or null)
   const [selectedLearningMode, setSelectedLearningMode] = useState(null)
 
-  // Quiz flow state
-  const [quizQuestions, setQuizQuestions] = useState([])
-  const [quizTopicId, setQuizTopicId] = useState(null)
-  const [quizTopicName, setQuizTopicName] = useState('')
-  const [isLoadingQuiz, setIsLoadingQuiz] = useState(false)
-  const [quizResults, setQuizResults] = useState(null)
-  const [quizSlides, setQuizSlides] = useState([]) // Slides with images for visual quiz questions
   // Regeneration state (celebration state now managed by useCelebrations hook)
   const [isRegenerating, setIsRegenerating] = useState(false)
   const regeneratingTopicIdRef = useRef(null)
@@ -1747,18 +1736,85 @@ function App() {
     }
   }, [activeTopic, showToast, setUiState])
 
-  // Learning Modes: Handle learning mode completion
-  const handleLearningModeComplete = useCallback((result) => {
+  // Learning Modes: Handle learning mode completion with XP and world evolution
+  const handleLearningModeComplete = useCallback(async (result) => {
     logger.info('LEARN_MODE', 'Learning mode completed', {
       mode: selectedLearningMode,
       completed: result?.completed,
       xpEarned: result?.xpEarned
     })
 
-    // Reset learning mode state
+    const topicName = activeTopic?.name || ''
+    const topicId = activeTopic?.id || topicName
+
+    // Show XP earned toast
+    if (result?.xpEarned > 0) {
+      showQuickXp(result.xpEarned)
+    }
+
+    // Evolve Living World on successful completion
+    if (result?.completed && topicName && evolveWorld) {
+      try {
+        const summary = visibleSlidesRef.current
+          ?.filter(s => s.type !== 'header' && s.type !== 'suggestions')
+          .map(s => s.subtitle || s.script || '')
+          .filter(Boolean)
+          .join(' ')
+          .slice(0, 500) || ''
+
+        const evolutionResult = await evolveWorld(topicName, summary)
+
+        if (evolutionResult?.success) {
+          logger.info('LEARN_MODE', 'Living World evolved', { topicName })
+
+          // Check for tier upgrade celebration
+          if (evolutionResult.changesApplied?.tierChanged) {
+            showTierUpgrade({
+              from: evolutionResult.changesApplied.previousTier,
+              to: evolutionResult.changesApplied.newTier
+            })
+          }
+        }
+
+        // Mint world piece
+        const clientId = getClientId()
+        const mintResponse = await fetch('/api/world/piece/mint', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clientId,
+            topicId: String(topicId),
+            topicName: String(topicName),
+            summary: summary.slice(0, 480),
+          }),
+        })
+
+        if (mintResponse.ok) {
+          const mintData = await mintResponse.json()
+          if (!mintData?.skipped) {
+            setWorldBadge(prev => prev + 1)
+          }
+        }
+      } catch (error) {
+        logger.error('LEARN_MODE', 'World evolution failed', { error: error.message })
+      }
+    }
+
+    // Refresh world stats and reset state
+    refreshWorldStats()
     setSelectedLearningMode(null)
     setUiState(UI_STATE.HOME)
-  }, [selectedLearningMode, setUiState])
+  }, [
+    selectedLearningMode,
+    activeTopic,
+    visibleSlidesRef,
+    evolveWorld,
+    showQuickXp,
+    showTierUpgrade,
+    setWorldBadge,
+    refreshWorldStats,
+    setUiState
+  ])
 
   // Learning Modes: Handle learning mode exit
   const handleLearningModeExit = useCallback(() => {
@@ -1768,6 +1824,56 @@ function App() {
     setSelectedLearningMode(null)
     setUiState(UI_STATE.HOME)
   }, [selectedLearningMode, setUiState])
+
+  /**
+   * Launch a learning mode for a specific topic (from Progress Tab, World, or Tree)
+   * This allows launching modes for previously-learned topics without requiring
+   * a slideshow to be currently active.
+   *
+   * @param {string} topicName - Name of the topic
+   * @param {string} mode - 'mystery' | 'whatif' | 'story'
+   * @param {Object} topicData - { slides, level } from stored topic
+   */
+  const handleLaunchLearningMode = useCallback((topicName, mode, topicData) => {
+    logger.info('LEARN_MODE', 'Launch learning mode for topic', { topicName, mode })
+
+    // Validate inputs
+    if (!topicName || !mode) {
+      logger.warn('LEARN_MODE', 'Invalid inputs for launch', { topicName, mode })
+      showToast('Unable to start learning mode', 'error')
+      return
+    }
+
+    // Find the topic in our topics list
+    const matchingTopic = topics.find((topic) => topic.name === topicName)
+
+    if (matchingTopic) {
+      // Topic exists - set it active and launch mode
+      setActiveTopicId(matchingTopic.id)
+    } else if (topicData?.slides?.length > 0) {
+      // Topic not in list but has slides - can still work with slides
+      logger.info('LEARN_MODE', 'Topic not found, using provided slides', { topicName })
+    } else {
+      // No topic and no slides - can't proceed
+      showToast('Topic slides not available', 'error')
+      return
+    }
+
+    // Set the mode and transition to LEARN_MODE
+    setSelectedLearningMode(mode)
+    setActiveTab('learn')
+    setUiState(UI_STATE.LEARN_MODE)
+  }, [topics, showToast, setActiveTopicId, setActiveTab, setUiState])
+
+  /**
+   * Convenience handler for quick practice from Progress Tab
+   * Picks a random mode for the given topic
+   */
+  const handleQuickPractice = useCallback((topicName, topicData) => {
+    const modes = ['mystery', 'whatif', 'story']
+    const randomMode = modes[Math.floor(Math.random() * modes.length)]
+    handleLaunchLearningMode(topicName, randomMode, topicData)
+  }, [handleLaunchLearningMode])
 
   const requestTopicQuiz = useCallback((piece) => {
     if (!piece) return
@@ -1793,8 +1899,8 @@ function App() {
 
   // WB018: Tab navigation handler with badge clearing
   const handleTabChange = useCallback((tab) => {
-    if (tab === 'world' || tab === 'tree') {
-      // Clear world badge when user views world
+    if (tab === 'progress') {
+      // Clear world badge when user views progress
       setWorldBadge(0)
     }
     setActiveTab(tab)
@@ -1841,45 +1947,18 @@ function App() {
     }
   }, [topics, setActiveTab, setUiState, setActiveTopicId, setTextInput])
 
-  // WB018: Quiz and celebration handlers
-  const {
-    handleStartQuiz,
-    handleQuizComplete,
-    handleQuizSkip,
-    handleQuizPromptSkip,
-    handleTierCelebrationClose,
-    handleTierViewWorld,
-    handleQuizResultsContinue,
-  } = useQuizHandlers({
-    activeTopic,
-    wsClientId,
-    visibleSlidesRef,
-    setIsLoadingQuiz,
-    setQuizTopicId,
-    setQuizTopicName,
-    setQuizQuestions,
-    setQuizSlides,
-    setQuizResults,
-    setUiState,
-    setWorldBadge,
-    showTierUpgrade,
-    dismissTierCelebration,
-    setActiveTab,
-    refreshWorldStats,
-    quizTopicId,
-    quizTopicName,
-    tierUpgradeInfo,
-    checkEvolutions,
-    evolveWorld, // Living World: Direct function for world evolution
-  })
+  // UI008: Tier celebration handlers
+  const handleTierCelebrationClose = useCallback(() => {
+    dismissTierCelebration()
+    setUiState(UI_STATE.HOME)
+  }, [dismissTierCelebration, setUiState])
 
-  useEffect(() => {
-    if (!pendingQuizTopicId) return
-    if (!activeTopic || activeTopic.id !== pendingQuizTopicId) return
-
-    setPendingQuizTopicId(null)
-    handleStartQuiz()
-  }, [pendingQuizTopicId, activeTopic, handleStartQuiz])
+  const handleTierViewWorld = useCallback(() => {
+    dismissTierCelebration()
+    setActiveTab('progress')
+    setWorldBadge(0) // Clear badge since they're viewing progress
+    setUiState(UI_STATE.HOME)
+  }, [dismissTierCelebration, setActiveTab, setWorldBadge, setUiState])
 
   /**
    * Analyzes audio frequency data to calculate overall audio level.
@@ -3053,7 +3132,7 @@ function App() {
             topicName={activeTopic?.name || ''}
             explanationLevel={activeTopic?.explanationLevel || 'standard'}
             onModeSelect={handleModeSelect}
-            onSkip={handleQuizPromptSkip}
+            onSkip={handleLearningModeExit}
           />
         )}
 
@@ -3094,130 +3173,47 @@ function App() {
           </div>
         )}
 
-        {/* WB018: Quiz prompt screen - shown after slideshow in Full mode (DEPRECATED - use MODE_SELECTOR) */}
-        {uiState === UI_STATE.QUIZ_PROMPT && activeTab === 'learn' && (
-          <QuizPromptScreen
-            topicName={activeTopic?.name}
-            onStart={handleStartQuiz}
-            onSkip={handleQuizPromptSkip}
-            isLoading={isLoadingQuiz}
-          />
-        )}
-
-        {/* WB018: Quiz screen - active quiz questions */}
-        {uiState === UI_STATE.QUIZ && activeTab === 'learn' && quizQuestions.length > 0 && (
-          <QuizActiveScreen
-            questions={quizQuestions}
-            slides={quizSlides}
-            onComplete={handleQuizComplete}
-            onSkip={handleQuizSkip}
-            hasSidebar={topics.length > 0}
-          />
-        )}
-
-        {/* WB018: Quiz completion loading screen */}
-        {uiState === UI_STATE.QUIZ_COMPLETING && activeTab === 'learn' && (
-          <QuizCompletionScreen />
-        )}
-
-        {/* WB018: Quiz results screen */}
-        {uiState === UI_STATE.QUIZ_RESULTS && activeTab === 'learn' && quizResults && (
-          <QuizResultsScreen
-            results={quizResults}
-            onContinue={handleQuizResultsContinue}
-          />
-        )}
-
-        {/* Living World - shown when World tab is active */}
-        {activeTab === 'world' && (
-          <LivingWorldView
-            worldState={livingWorldState}
-            worldImageUrl={livingWorldImageUrl}
-            isLoading={livingWorldIsLoading}
-            isEvolving={livingWorldIsEvolving}
-            tier={livingWorldTier}
-            hotspots={livingWorldHotspots}
-            error={livingWorldError}
-            onInitializeWorld={initializeWorld}
-            onRegenerateWorld={regenerateLivingWorld}
-            isRegeneratingWorld={isWorldRegenerating}
-            regenerationProgress={worldRegenProgress}
-            // Tree-specific props for stats display
-            treeLevel={worldTreeLevel}
-            topicCount={worldPieceCount}
-            totalXP={totalWorldXP}
-            trophies={[]} // TODO: Wire up trophy tracking
-            onStartLearning={() => {
-              setActiveTopicId(null)
-              setUiState(UI_STATE.HOME)
-              setActiveTab('learn')
-            }}
-            onHotspotClick={(hotspot) => {
-              // Show topic info when hotspot clicked
-              logger.debug('WORLD', 'Hotspot clicked', { topicName: hotspot?.topicName })
-            }}
-            pieces={worldPieces}
-            streak={{ current: userProgress?.streakCount || 0, todayCompleted: false }}
-            onPromptAction={(actionType, payload) => {
-              if (actionType === 'learn') {
-                setActiveTab('learn')
-                return
-              }
-
-              if (actionType === 'review' || actionType === 'quiz' || actionType === 'quick_quiz') {
-                const payloadPiece = payload?.piece
-                const payloadPieces = Array.isArray(payload?.pieces) ? payload.pieces : []
-                const targetPiece = payloadPiece || payloadPieces[0] || piecesNeedingReview[0] || worldPieces[0]
-                if (targetPiece) {
-                  requestTopicQuiz(targetPiece)
-                } else {
-                  showToast('Pick a topic to start a quiz')
-                }
-                return
-              }
-
-              if (actionType === 'explore') {
-                setActiveTab('world')
-              }
-            }}
-            onFABAction={(actionId) => {
-              if (actionId === 'learn') setActiveTab('learn')
-              else if (actionId === 'quick_quiz') {
-                const reviewPiece = piecesNeedingReview[0]
-                const fallbackPiece = worldPieces[0]
-                const targetPiece = reviewPiece || fallbackPiece
-                if (targetPiece) {
-                  requestTopicQuiz(targetPiece)
-                } else {
-                  showToast('Pick a topic to start a quiz')
-                }
-              }
-            }}
-            onReviewPiece={handleReviewTopic}
-            onQuizPiece={handleQuizTopic}
-            onLearnTopic={handleLearnTopicFromPiece}
-            onSelectSuggestedTopic={(topicName) => {
-              // Auto-start learning about the suggested topic
-              setActiveTab('learn')
-              // Trigger generation pipeline with the suggested topic
-              handleQuestion(topicName, { source: 'world_suggestion' })
-            }}
-          />
-        )}
-
-        {activeTab === 'tree' && (
+        {/* Progress Tab - consolidates World and Tree views */}
+        {activeTab === 'progress' && (
           <div className="min-h-screen bg-cream-100 dark:bg-night-900 pt-4">
-            <TreeTab
-              worldPieces={worldPieces}
-              piecesNeedingReview={piecesNeedingReview}
+            <ProgressTab
+              worldState={livingWorldState}
+              pieces={worldPieces}
+              onReviewSlideshow={handleReviewTopic}
+              onLaunchMode={handleLaunchLearningMode}
+              onQuickQuiz={(topicName) => {
+                const piece = worldPieces.find(p => (p.topicName || p.name) === topicName)
+                if (piece) requestTopicQuiz(piece)
+              }}
+              onLearnTopic={handleLearnTopicFromPiece}
+              onAskQuestion={() => {
+                setActiveTab('learn')
+                setUiState(UI_STATE.HOME)
+              }}
               totalXP={totalWorldXP}
               streak={{ current: userProgress?.streakCount || 0, todayCompleted: false }}
-              onStartQuiz={handleQuizTabStartQuiz}
-              onReviewTopic={handleReviewTopic}
-              onLearnTopic={handleLearnTopicFromPiece}
+              tier={livingWorldTier}
+              treeLevel={worldTreeLevel}
               onSelectSuggestedTopic={(topicName) => {
                 setActiveTab('learn')
-                handleQuestion(topicName, { source: 'tree_suggestion' })
+                handleQuestion(topicName, { source: 'progress_suggestion' })
+              }}
+              worldViewProps={{
+                isLoading: livingWorldIsLoading,
+                isEvolving: livingWorldIsEvolving,
+                hotspots: livingWorldHotspots,
+                error: livingWorldError,
+                onInitializeWorld: initializeWorld,
+                onRegenerateWorld: regenerateLivingWorld,
+                isRegeneratingWorld: isWorldRegenerating,
+                regenerationProgress: worldRegenProgress,
+                onReviewPiece: handleReviewTopic,
+                onQuizPiece: handleQuizTopic,
+                onLearnTopic: handleLearnTopicFromPiece,
+                onSelectSuggestedTopic: (topicName) => {
+                  setActiveTab('learn')
+                  handleQuestion(topicName, { source: 'world_suggestion' })
+                },
               }}
             />
           </div>
@@ -3331,7 +3327,7 @@ function App() {
           pieceCount={pendingSceneReveal.pieceCount || 3}
           onViewPocket={() => {
             dismissSceneReveal()
-            setActiveTab('world')
+            setActiveTab('progress')
           }}
           onContinue={dismissSceneReveal}
         />

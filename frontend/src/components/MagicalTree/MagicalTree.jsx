@@ -240,14 +240,6 @@ export default function MagicalTree({
     ]
   }, [safeBranches])
 
-  /**
-   * Handle seed click to start learning
-   */
-  const handleStartLearning = useCallback(() => {
-    // This would typically navigate to the learning interface
-    // For now, just a placeholder
-  }, [])
-
   return (
     <div
       data-testid="magical-tree"
@@ -262,7 +254,7 @@ export default function MagicalTree({
     >
       {/* Seed state */}
       {config.showSeed && (
-        <TreeSeed onStartLearning={handleStartLearning} />
+        <TreeSeed />
       )}
 
       {/* Sprout state */}

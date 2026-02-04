@@ -389,6 +389,7 @@ router.post('/piece/mint', async (req, res) => {
 
   try {
     const { clientId, topicId, topicName, summary = '' } = req.body
+    const SUMMARY_MAX_LENGTH = 500
 
     // Validate clientId
     if (!clientId || typeof clientId !== 'string') {
@@ -408,7 +409,12 @@ router.post('/piece/mint', async (req, res) => {
       })
     }
 
-    const { sanitized: sanitizedTopicId, error: topicIdError } = sanitizeQuery(topicId)
+    const rawTopicId = typeof topicId === 'string'
+      ? topicId
+      : topicId !== undefined && topicId !== null
+        ? String(topicId)
+        : topicId
+    const { sanitized: sanitizedTopicId, error: topicIdError } = sanitizeQuery(rawTopicId)
     if (topicIdError) {
       logger.timeEnd('API', 'world-piece-mint-request')
       return res.status(400).json({
@@ -417,7 +423,12 @@ router.post('/piece/mint', async (req, res) => {
       })
     }
 
-    const { sanitized: sanitizedTopicName, error: topicError } = sanitizeQuery(topicName)
+    const rawTopicName = typeof topicName === 'string'
+      ? topicName
+      : topicName !== undefined && topicName !== null
+        ? String(topicName)
+        : topicName
+    const { sanitized: sanitizedTopicName, error: topicError } = sanitizeQuery(rawTopicName)
     if (topicError) {
       logger.timeEnd('API', 'world-piece-mint-request')
       return res.status(400).json({
@@ -428,7 +439,11 @@ router.post('/piece/mint', async (req, res) => {
 
     let sanitizedSummary = ''
     if (summary && typeof summary === 'string') {
-      const { sanitized, error: summaryError } = sanitizeQuery(summary)
+      const trimmedSummary = summary.trim()
+      const cappedSummary = trimmedSummary.length > SUMMARY_MAX_LENGTH
+        ? trimmedSummary.slice(0, SUMMARY_MAX_LENGTH)
+        : trimmedSummary
+      const { sanitized, error: summaryError } = sanitizeQuery(cappedSummary)
       if (summaryError) {
         logger.timeEnd('API', 'world-piece-mint-request')
         return res.status(400).json({
@@ -2211,8 +2226,6 @@ router.post('/living/evolve', async (req, res) => {
       hydratedState = baseState
     }
 
-    const preEvolveState = hydratedState ? structuredClone(hydratedState) : null
-
     // Ensure we have a base image to evolve from when possible
     if (hydratedState && !hydratedState.worldImageUrl) {
       const basePrompt = buildBaseWorldPrompt()
@@ -2236,6 +2249,47 @@ router.post('/living/evolve', async (req, res) => {
     const existingElements = getLivingWorldElements(hydratedState)
     const referenceImageUrl = hydratedState?.worldImageUrl || null
 
+    const applyFallbackEvolution = async (reason, details = {}) => {
+      const evolutionResult = await evolveWorld(sanitizedId, topicName, summary, {
+        elementAdded: null,
+        placementHint: null,
+        model: null,
+      })
+
+      const updatedStateResult = getEvolutionWorldState(sanitizedId)
+      const nextState = updatedStateResult.worldState || hydratedState || createInitialWorldState(sanitizedId)
+
+      if (!nextState.worldImageUrl && referenceImageUrl) {
+        nextState.worldImageUrl = referenceImageUrl
+      }
+
+      setEvolutionWorldState(sanitizedId, nextState)
+      await saveLivingWorldState(sanitizedId, nextState)
+
+      logger.warn('API', '[World] Living world evolution fallback', {
+        clientId: sanitizedId,
+        topicName,
+        reason,
+        ...details,
+      })
+
+      logger.timeEnd('API', 'world-living-evolve-request')
+
+      return res.json({
+        worldState: nextState,
+        worldImageUrl: nextState.worldImageUrl || null,
+        changesApplied: {
+          ...evolutionResult.changesApplied,
+          imageUpdated: false,
+          fallback: true,
+          reason,
+        },
+        tier: evolutionResult.tier,
+        tierUpgrade: evolutionResult.tierUpgrade,
+        success: true,
+      })
+    }
+
     logger.info('API', '[World] Evolving living world', {
       clientId: sanitizedId,
       topicName,
@@ -2244,20 +2298,7 @@ router.post('/living/evolve', async (req, res) => {
 
     // Generate an evolved panorama image, preserving the previous world
     if (!isGeminiAvailable()) {
-      logger.warn('API', '[World] Gemini API not available for living world evolve')
-
-      // Keep world state consistent with the image by rolling back the in-memory update.
-      if (preEvolveState) {
-        setEvolutionWorldState(sanitizedId, preEvolveState)
-        await saveLivingWorldState(sanitizedId, preEvolveState)
-      } else {
-        resetEvolutionWorldState(sanitizedId)
-      }
-
-      logger.timeEnd('API', 'world-living-evolve-request')
-      return res.status(503).json({
-        error: 'World generation service temporarily unavailable',
-      })
+      return applyFallbackEvolution('GEMINI_UNAVAILABLE')
     }
 
     const normalizedTopicName = typeof topicName === 'string' ? topicName.trim() : ''
@@ -2292,6 +2333,7 @@ router.post('/living/evolve', async (req, res) => {
 
     // Use Gemini image model as the ONLY source of truth for topic -> world element.
     let plan
+    let planError = null
     try {
       plan = await generateLivingWorldEvolutionPlan({
         topicName,
@@ -2301,14 +2343,7 @@ router.post('/living/evolve', async (req, res) => {
         styleDescriptor: hydratedState?.styleDescriptor || null,
       })
     } catch (error) {
-      logger.error('API', '[World] Failed to generate Living World evolution plan', {
-        error: error.message,
-        clientId: sanitizedId,
-      })
-      logger.timeEnd('API', 'world-living-evolve-request')
-      return res.status(500).json({
-        error: 'Failed to plan world evolution',
-      })
+      planError = error.message || 'UNKNOWN_ERROR'
     }
 
     if (plan?.error === 'RATE_LIMITED') {
@@ -2321,17 +2356,14 @@ router.post('/living/evolve', async (req, res) => {
         })
     }
 
+    if (!planError && plan?.error) {
+      planError = plan.error
+    }
+
     const elementToAdd = typeof plan?.elementToAdd === 'string' ? plan.elementToAdd.trim() : ''
     if (!elementToAdd) {
-      logger.warn('API', '[World] Evolution plan returned no element', {
-        clientId: sanitizedId,
-        topicName,
-        planError: plan?.error || null,
-      })
-      logger.timeEnd('API', 'world-living-evolve-request')
-      return res.status(500).json({
-        error: 'Failed to plan world evolution',
-      })
+      const reason = planError || 'EMPTY_PLAN'
+      return applyFallbackEvolution('PLAN_FAILED', { planError: reason })
     }
 
     const placementHint = typeof plan?.placementHint === 'string' ? plan.placementHint.trim() : null
@@ -2370,20 +2402,10 @@ router.post('/living/evolve', async (req, res) => {
     })
 
     if (evolvedImage.error) {
-      logger.error('API', '[World] Living world image evolution failed', {
+      logger.warn('API', '[World] Living world image evolution failed, keeping previous image', {
         error: evolvedImage.error,
         clientId: sanitizedId,
       })
-
-      // Keep world state consistent with the image by rolling back the in-memory update
-      if (preEvolveState) {
-        setEvolutionWorldState(sanitizedId, preEvolveState)
-        await saveLivingWorldState(sanitizedId, preEvolveState)
-      } else {
-        resetEvolutionWorldState(sanitizedId)
-      }
-
-      logger.timeEnd('API', 'world-living-evolve-request')
 
       if (evolvedImage.error === 'RATE_LIMITED') {
         return res.status(429)
@@ -2394,8 +2416,26 @@ router.post('/living/evolve', async (req, res) => {
           })
       }
 
-      return res.status(500).json({
-        error: 'Failed to generate evolved world image'
+      if (updatedState.worldState && !updatedState.worldState.worldImageUrl && referenceImageUrl) {
+        updatedState.worldState.worldImageUrl = referenceImageUrl
+      }
+
+      setEvolutionWorldState(sanitizedId, updatedState.worldState)
+      await saveLivingWorldState(sanitizedId, updatedState.worldState)
+
+      logger.timeEnd('API', 'world-living-evolve-request')
+
+      return res.json({
+        worldState: updatedState.worldState,
+        worldImageUrl: updatedState.worldState?.worldImageUrl || null,
+        changesApplied: {
+          ...evolutionResult.changesApplied,
+          imageUpdated: false,
+          imageError: evolvedImage.error,
+        },
+        tier: evolutionResult.tier,
+        tierUpgrade: evolutionResult.tierUpgrade,
+        success: true,
       })
     }
 

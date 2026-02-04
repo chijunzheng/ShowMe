@@ -53,3 +53,15 @@ export function QuizIcon({ active = false, className = '' }) {
     </span>
   )
 }
+
+export function ProgressIcon({ active = false, className = '' }) {
+  return (
+    <span
+      className={`text-2xl transition-opacity ${active ? '' : 'opacity-50'} ${className}`}
+      role="img"
+      aria-label="Progress"
+    >
+      📊
+    </span>
+  )
+}
