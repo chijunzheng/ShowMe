@@ -1600,24 +1600,56 @@ export async function generateRandomTopic({ excludeTopics = [] } = {}) {
         .filter((topic) => typeof topic === 'string')
         .map((topic) => topic.trim())
         .filter((topic) => topic.length > 0)
-        .slice(0, 8)
+        .slice(0, 20)
       : []
     const excludeSet = new Set(cleanedExclude.map((topic) => topic.toLowerCase()))
 
-    const promptBase = `Generate ONE random educational topic that would make an interesting visual slideshow.
+    // Expanded category pool with subtopics for constrained random selection
+    const TOPIC_CATEGORIES = [
+      { name: 'Biology', subtopics: ['cells', 'ecosystems', 'evolution', 'anatomy', 'genetics', 'microbes', 'symbiosis'] },
+      { name: 'Physics', subtopics: ['gravity', 'light', 'electricity', 'magnetism', 'sound', 'waves', 'energy', 'friction'] },
+      { name: 'Chemistry', subtopics: ['elements', 'reactions', 'molecules', 'states of matter', 'acids', 'crystals'] },
+      { name: 'Space', subtopics: ['planets', 'stars', 'galaxies', 'black holes', 'astronauts', 'moons', 'comets', 'nebulae'] },
+      { name: 'Earth Science', subtopics: ['volcanoes', 'earthquakes', 'weather', 'oceans', 'rocks', 'caves', 'glaciers', 'fossils'] },
+      { name: 'Animals', subtopics: ['mammals', 'birds', 'insects', 'ocean life', 'dinosaurs', 'reptiles', 'amphibians', 'migration'] },
+      { name: 'Plants', subtopics: ['trees', 'flowers', 'photosynthesis', 'seeds', 'rainforests', 'deserts', 'carnivorous plants'] },
+      { name: 'Human Body', subtopics: ['brain', 'heart', 'bones', 'senses', 'digestion', 'muscles', 'immune system', 'sleep'] },
+      { name: 'Technology', subtopics: ['computers', 'internet', 'robots', 'inventions', 'AI', 'smartphones', 'satellites'] },
+      { name: 'History', subtopics: ['ancient civilizations', 'inventions', 'explorers', 'famous buildings', 'archaeology'] },
+      { name: 'Math', subtopics: ['numbers', 'patterns', 'shapes', 'puzzles', 'infinity', 'probability', 'geometry'] },
+      { name: 'Engineering', subtopics: ['bridges', 'buildings', 'machines', 'vehicles', 'dams', 'tunnels', 'skyscrapers'] },
+      { name: 'Food Science', subtopics: ['cooking', 'nutrition', 'preservation', 'fermentation', 'baking', 'spices'] },
+      { name: 'Psychology', subtopics: ['memory', 'dreams', 'emotions', 'learning', 'perception', 'habits', 'creativity'] },
+      { name: 'Music', subtopics: ['instruments', 'sound waves', 'composers', 'rhythm', 'singing', 'genres'] },
+      { name: 'Art', subtopics: ['colors', 'famous artists', 'techniques', 'optical illusions', 'sculpture', 'photography'] },
+      { name: 'Sports Science', subtopics: ['muscles', 'training', 'equipment', 'records', 'aerodynamics', 'nutrition'] },
+      { name: 'Weather', subtopics: ['storms', 'clouds', 'seasons', 'climate', 'rainbows', 'tornadoes', 'hurricanes', 'snow'] },
+      { name: 'Ocean', subtopics: ['deep sea', 'coral reefs', 'waves', 'marine animals', 'tides', 'shipwrecks', 'bioluminescence'] },
+      { name: 'Aviation', subtopics: ['planes', 'helicopters', 'airports', 'flight physics', 'drones', 'hot air balloons'] },
+      { name: 'Medicine', subtopics: ['vaccines', 'surgery', 'diseases', 'healing', 'medicine history', 'x-rays'] },
+      { name: 'Geography', subtopics: ['mountains', 'rivers', 'deserts', 'islands', 'waterfalls', 'canyons', 'poles'] },
+      { name: 'Ecology', subtopics: ['food chains', 'habitats', 'endangered species', 'recycling', 'pollution', 'conservation'] },
+      { name: 'Materials', subtopics: ['metals', 'plastics', 'glass', 'wood', 'fabrics', 'rubber', 'concrete'] },
+    ]
+
+    // Pick random category and subtopic for constrained generation
+    const category = TOPIC_CATEGORIES[Math.floor(Math.random() * TOPIC_CATEGORIES.length)]
+    const subtopic = category.subtopics[Math.floor(Math.random() * category.subtopics.length)]
+
+    const promptBase = `Generate ONE educational question about ${category.name}, specifically related to ${subtopic}.
 
 Requirements:
 - Topic should spark curiosity and be visually explainable
 - Phrase it as a question (e.g., "Why do cats purr?" or "How do volcanoes form?")
 - Keep it concise (under 10 words)
 - Avoid controversial, political, or sensitive topics
-- Mix of categories: science, nature, technology, history, animals, space, human body, etc.
+- Focus on the ${subtopic} aspect of ${category.name}
 ${cleanedExclude.length > 0 ? `- Avoid repeating or closely mirroring these recent topics: ${cleanedExclude.map((topic) => `"${topic}"`).join(', ')}` : ''}
 
 Return ONLY valid JSON (no markdown):
 {
   "topic": "the question",
-  "category": "short category name",
+  "category": "${category.name}",
   "emoji": "one relevant emoji"
 }
 

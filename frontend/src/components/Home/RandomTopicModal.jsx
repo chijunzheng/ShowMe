@@ -15,7 +15,7 @@ import { LEVEL_CONFIG, EXPLANATION_LEVEL } from '../../constants/appConfig.js'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
 const RECENT_TOPICS_STORAGE_KEY = 'showme_random_topic_history'
-const MAX_RECENT_TOPICS = 8
+const MAX_RECENT_TOPICS = 20
 
 function normalizeTopicList(list) {
   if (!Array.isArray(list)) return []

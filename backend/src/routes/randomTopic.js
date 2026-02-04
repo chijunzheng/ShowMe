@@ -48,7 +48,7 @@ router.get('/', async (req, res) => {
       .filter((topic) => typeof topic === 'string')
       .map((topic) => topic.trim())
       .filter((topic) => topic.length > 0 && topic.length <= 80)
-      .slice(0, 8)
+      .slice(0, 20)
 
     // Check if Gemini is available
     if (!isGeminiAvailable()) {
