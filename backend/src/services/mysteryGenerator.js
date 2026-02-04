@@ -12,7 +12,33 @@ import { extractJSON } from '../utils/json.js'
 import logger from '../utils/logger.js'
 
 const TEXT_MODEL = 'gemini-3-flash-preview'
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+
+// Keep client init lazy so the backend can boot without an API key.
+let aiClient = null
+let aiClientKey = null
+
+function getAIClient() {
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey || apiKey === 'your_gemini_api_key_here') {
+    return null
+  }
+
+  // Avoid recreating the client unless the key changed (useful for tests).
+  if (aiClient && aiClientKey === apiKey) {
+    return aiClient
+  }
+
+  try {
+    aiClient = new GoogleGenAI({ apiKey })
+    aiClientKey = apiKey
+    return aiClient
+  } catch (error) {
+    logger.error('MYSTERY', 'Failed to initialize Gemini client', { error: error.message })
+    aiClient = null
+    aiClientKey = null
+    return null
+  }
+}
 
 /**
  * Generate a detective mystery from slide content
@@ -24,6 +50,11 @@ const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
  */
 export async function generateMystery({ slides, topicName, explanationLevel }) {
   try {
+    const ai = getAIClient()
+    if (!ai) {
+      return { error: 'API_NOT_AVAILABLE' }
+    }
+
     // Detect language from topic name
     const language = detectLanguage(topicName)
     const isZh = language === 'zh'
@@ -104,10 +135,11 @@ Return JSON format:
       language
     })
 
-    const model = genAI.getGenerativeModel({ model: TEXT_MODEL })
-    const result = await model.generateContent(prompt)
-    const response = result.response
-    const text = response.text()
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+    })
+    const text = response.text || ''
 
     // Extract and parse JSON
     const jsonData = extractJSON(text)
@@ -118,7 +150,16 @@ Return JSON format:
       return { error: 'PARSE_ERROR' }
     }
 
-    const mystery = JSON.parse(jsonData)
+    let mystery
+    try {
+      mystery = JSON.parse(jsonData)
+    } catch (parseError) {
+      logger.error('MYSTERY', 'Failed to parse JSON from response', {
+        error: parseError.message,
+        responseText: text.substring(0, 500)
+      })
+      return { error: 'PARSE_ERROR' }
+    }
 
     // Sanitize and validate imagePrompt (prevent overly long prompts)
     if (mystery.imagePrompt) {
@@ -166,8 +207,15 @@ Return JSON format:
       return { error: 'RATE_LIMITED' }
     }
 
-    // Check for API availability
-    if (error.message?.includes('503') || error.message?.includes('unavailable')) {
+    // Check for API availability / auth issues
+    if (
+      error.message?.includes('401') ||
+      error.message?.includes('403') ||
+      error.message?.toLowerCase()?.includes('api key') ||
+      error.message?.toLowerCase()?.includes('permission') ||
+      error.message?.includes('503') ||
+      error.message?.toLowerCase()?.includes('unavailable')
+    ) {
       return { error: 'API_NOT_AVAILABLE' }
     }
 
@@ -184,6 +232,11 @@ Return JSON format:
  */
 export async function evaluateMysteryTheory({ userTheory, expectedConcepts }) {
   try {
+    const ai = getAIClient()
+    if (!ai) {
+      return { error: 'API_NOT_AVAILABLE' }
+    }
+
     // Use Gemini to perform semantic matching of concepts
     const prompt = `You are evaluating a child's answer to a detective mystery puzzle.
 
@@ -214,10 +267,11 @@ Return ONLY the JSON, no other text.`
       expectedCount: expectedConcepts.length
     })
 
-    const model = genAI.getGenerativeModel({ model: TEXT_MODEL })
-    const result = await model.generateContent(prompt)
-    const response = result.response
-    const text = response.text()
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+    })
+    const text = response.text || ''
 
     // Extract and parse JSON
     const jsonData = extractJSON(text)
@@ -228,7 +282,16 @@ Return ONLY the JSON, no other text.`
       return { error: 'PARSE_ERROR' }
     }
 
-    const evaluation = JSON.parse(jsonData)
+    let evaluation
+    try {
+      evaluation = JSON.parse(jsonData)
+    } catch (parseError) {
+      logger.error('MYSTERY', 'Failed to parse JSON from evaluation response', {
+        error: parseError.message,
+        responseText: text.substring(0, 500)
+      })
+      return { error: 'PARSE_ERROR' }
+    }
 
     // Calculate match rate
     const matchedCount = evaluation.matchedConcepts?.length || 0
@@ -276,8 +339,15 @@ Return ONLY the JSON, no other text.`
       return { error: 'RATE_LIMITED' }
     }
 
-    // Check for API availability
-    if (error.message?.includes('503') || error.message?.includes('unavailable')) {
+    // Check for API availability / auth issues
+    if (
+      error.message?.includes('401') ||
+      error.message?.includes('403') ||
+      error.message?.toLowerCase()?.includes('api key') ||
+      error.message?.toLowerCase()?.includes('permission') ||
+      error.message?.includes('503') ||
+      error.message?.toLowerCase()?.includes('unavailable')
+    ) {
       return { error: 'API_NOT_AVAILABLE' }
     }
 

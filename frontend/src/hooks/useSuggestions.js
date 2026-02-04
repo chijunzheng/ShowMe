@@ -51,7 +51,7 @@ function countZones(pieces) {
 
   pieces.forEach(piece => {
     const zone = piece.zone?.toLowerCase()
-    if (zone && counts.hasOwnProperty(zone)) {
+    if (zone && Object.prototype.hasOwnProperty.call(counts, zone)) {
       counts[zone] += 1
     }
   })

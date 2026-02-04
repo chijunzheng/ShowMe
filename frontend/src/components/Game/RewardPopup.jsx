@@ -64,15 +64,13 @@ export default function RewardPopup({ rewards, onClose }) {
   const [confetti, setConfetti] = useState([])
   const contentRef = useRef(null)
 
-  // Early return for null/undefined rewards
-  if (!rewards) {
-    return null
-  }
-
-  const { xp = 0, items = [] } = rewards
+  const hasRewards = Boolean(rewards)
+  const xp = rewards?.xp ?? 0
+  const items = Array.isArray(rewards?.items) ? rewards.items : []
 
   // Animate XP counter
   useEffect(() => {
+    if (!hasRewards) return
     if (xp <= 0) {
       setDisplayedXp(xp)
       return
@@ -95,15 +93,17 @@ export default function RewardPopup({ rewards, onClose }) {
     }, stepDuration)
 
     return () => clearInterval(interval)
-  }, [xp])
+  }, [hasRewards, xp])
 
   // Generate confetti on mount
   useEffect(() => {
+    if (!hasRewards) return
     setConfetti(generateConfetti())
-  }, [])
+  }, [hasRewards])
 
   // Handle escape key
   useEffect(() => {
+    if (!hasRewards) return
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         onClose?.()
@@ -112,7 +112,7 @@ export default function RewardPopup({ rewards, onClose }) {
 
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  }, [hasRewards, onClose])
 
   // Handle backdrop click
   const handleBackdropClick = useCallback((e) => {
@@ -125,6 +125,11 @@ export default function RewardPopup({ rewards, onClose }) {
   const handleContentClick = useCallback((e) => {
     e.stopPropagation()
   }, [])
+
+  // Early return for null/undefined rewards (keep hooks order stable)
+  if (!hasRewards) {
+    return null
+  }
 
   return (
     <div

@@ -80,6 +80,7 @@ export default function useQuestionHandler({
   interruptActiveAudio,
   recordQuestionAsked,
   setSlideshowFinished,
+  onTopicCreated,
 }) {
   // Ref to store the handleQuestion function for external access
   const handleQuestionRef = useRef(null)
@@ -638,6 +639,16 @@ export default function useQuestionHandler({
 
         // Add the new topic
         setTopics((prev) => pruneSlideCache([newTopic, ...prev], newTopic.id))
+
+        // Notify parent about new topic creation (for Knowledge Graph integration)
+        if (onTopicCreated) {
+          onTopicCreated({
+            id: newTopic.id,
+            name: newTopic.name,
+            concepts: generateData.concepts || [],
+            slides: newTopic.slides,
+          })
+        }
 
         // Set the new topic as active and show its header slide
         setActiveTopicId(newTopic.id)

@@ -1,6 +1,7 @@
 /**
  * Custom hook for slideshow control
  * Consolidates navigation, playback, and auto-advance logic
+ * Includes chapter-based segment computation for the Knowledge Constellation feature
  */
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { UI_STATE, SLIDE_TIMING } from '../constants/appConfig.js'
@@ -21,13 +22,14 @@ export default function useSlideshowControl({
   isSlideNarrationPlaying,
   isSlideNarrationReady,
   getSlideDuration,
+  activeTopic,
 }) {
   // Navigation state
   const [currentIndex, setCurrentIndex] = useState(0)
   const [currentChildIndex, setCurrentChildIndex] = useState(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [slideshowFinished, setSlideshowFinished] = useState(false)
-  const [isFollowUpDrawerOpen, setIsFollowUpDrawerOpen] = useState(false)
+  const [isChapterPickerOpen, setIsChapterPickerOpen] = useState(false)
 
   // Refs
   const wasManualNavRef = useRef(false)
@@ -58,9 +60,31 @@ export default function useSlideshowControl({
 
   const parentSlide = visibleSlides[currentIndex] || null
 
-  // Close follow-up drawer when slide changes
+  // Chapter-based segments: each parent + its children = one segment
+  const segments = useMemo(() => {
+    return visibleSlides.map((parent) => {
+      const children = allTopicSlides.filter((s) => s.parentId === parent.id)
+      const label =
+        parent.type === 'header'
+          ? parent.topicName || activeTopic?.name || 'Overview'
+          : parent.subtitle || 'Slide'
+      return {
+        id: parent.id,
+        label,
+        slides: [parent, ...children],
+        depth: 0,
+      }
+    })
+  }, [visibleSlides, allTopicSlides, activeTopic])
+
+  // Segment position derived from current navigation state
+  const currentSegmentIndex = currentIndex
+  const currentSlideInSegment =
+    currentChildIndex === null ? 0 : currentChildIndex + 1
+
+  // Close chapter picker when slide changes
   useEffect(() => {
-    setIsFollowUpDrawerOpen(false)
+    setIsChapterPickerOpen(false)
   }, [currentIndex, activeChildSlides.length])
 
   /**
@@ -147,6 +171,9 @@ export default function useSlideshowControl({
     setCurrentIndex(index)
     setCurrentChildIndex(null)
   }, [visibleSlides.length])
+
+  // Segment index maps 1:1 to parent slide index since each parent = one segment
+  const goToSegment = goToSlide
 
   // Keyboard navigation
   useEffect(() => {
@@ -320,17 +347,22 @@ export default function useSlideshowControl({
     currentChildIndex,
     isPlaying,
     slideshowFinished,
-    isFollowUpDrawerOpen,
+    isChapterPickerOpen,
     activeChildSlides,
     displayedSlide,
     parentSlide,
+
+    // Chapter segments
+    segments,
+    currentSegmentIndex,
+    currentSlideInSegment,
 
     // State setters
     setCurrentIndex,
     setCurrentChildIndex,
     setIsPlaying,
     setSlideshowFinished,
-    setIsFollowUpDrawerOpen,
+    setIsChapterPickerOpen,
 
     // Navigation
     goToNextSlide,
@@ -338,6 +370,7 @@ export default function useSlideshowControl({
     goToChildNext,
     goToChildPrev,
     goToSlide,
+    goToSegment,
     togglePlayPause,
 
     // Slideshow completion

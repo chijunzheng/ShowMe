@@ -9,14 +9,15 @@ import useSlideAudio from './hooks/useSlideAudio.js'
 import useVoiceAgent from './hooks/useVoiceAgent.js'
 import useQuestionHandler from './hooks/useQuestionHandler.js'
 import logger from './utils/logger'
+import { getClientId } from './utils/clientId'
 import { playMicOnSound, playRecordingCompleteSound, playAchievementSound } from './utils/soundEffects'
 import AchievementToast from './components/AchievementToast'
 import Confetti from './components/Confetti'
 import useUserProgress from './hooks/useUserProgress'
 // WB018: World Builder gamification imports
 import BottomTabBar from './components/BottomTabBar'
-// Living World: Replace old WorldView with new LivingWorldView
-import { LivingWorldView } from './components/LivingWorld'
+// Category utilities (migrated from MagicalTree)
+import { calculateTreeLevel, getZoneForCategory } from './utils/categoryUtils'
 import TierUpCelebration from './components/TierUpCelebration'
 // WB015: Quick mode XP toast
 import QuickXpToast from './components/QuickXpToast'
@@ -26,7 +27,7 @@ import useSocraticHandlers from './hooks/useSocraticHandlers.js'
 import useSlideshowControl from './hooks/useSlideshowControl.js'
 import useCelebrations from './hooks/useCelebrations.js'
 import useTabNavigation from './hooks/useTabNavigation.js'
-import useLivingWorld from './hooks/useLivingWorld'
+import useKnowledgeGraph from './hooks/useKnowledgeGraph'
 // WB020: Evolution and pocket scene gamification
 import useEvolution from './hooks/useEvolution'
 import usePocketScene from './hooks/usePocketScene'
@@ -34,7 +35,6 @@ import useReviewSession from './hooks/useReviewSession'
 import { EvolutionCelebration } from './components/Celebrations'
 import ConnectionSceneReveal from './components/WorldView/ConnectionSceneReveal'
 // WB021: Quiz flow screens for dedicated quiz experience
-import { calculateTreeLevel } from './components/MagicalTree/treeUtils'
 
 // Import constants from centralized config
 import {
@@ -97,7 +97,7 @@ function App() {
   const [selectedLevel, setSelectedLevel] = useState(EXPLANATION_LEVEL.STANDARD)
   // Show text input fallback on home screen
   const [showTextFallback, setShowTextFallback] = useState(false)
-  // Note: currentIndex, currentChildIndex, isFollowUpDrawerOpen, isPlaying are managed by useSlideshowControl
+  // Note: currentIndex, currentChildIndex, isChapterPickerOpen, isPlaying are managed by useSlideshowControl
   const [liveTranscription, setLiveTranscription] = useState('')
   const [lastTranscription, setLastTranscription] = useState('')
   const [textInput, setTextInput] = useState('')
@@ -119,20 +119,34 @@ function App() {
   const stillWorkingTimerRef = useRef(null)
   const currentQueryRef = useRef(null) // Track current query for fun fact refresh
 
-  // Living World: Hook for world state and evolution
-  // Lifted to App level so evolveWorld is available regardless of which tab is active
+  // Legacy Living World: Stub values for backward compatibility during migration
+  // TODO: Remove these stubs and all worldViewProps after full migration
+  const livingWorldState = null
+  const livingWorldIsLoading = false
+  const livingWorldIsEvolving = false
+  const livingWorldTier = 'barren'
+  const livingWorldHotspots = []
+  const livingWorldError = null
+  const evolveWorld = useCallback(async () => null, [])
+  const initializeWorld = useCallback(async () => null, [])
+  const resetLivingWorld = useCallback(async () => ({ success: true }), [])
+
+  // Knowledge Graph: New data model for topics as constellation nodes
   const {
-    worldState: livingWorldState,
-    worldImageUrl: livingWorldImageUrl,
-    isLoading: livingWorldIsLoading,
-    isEvolving: livingWorldIsEvolving,
-    tier: livingWorldTier,
-    hotspots: livingWorldHotspots,
-    error: livingWorldError,
-    evolveWorld,
-    initializeWorld,
-    resetWorld: resetLivingWorld,
-  } = useLivingWorld()
+    graph: knowledgeGraph,
+    nodes: graphNodes,
+    edges: graphEdges,
+    clusters: graphClusters,
+    gaps: graphGaps,
+    explorerRank,
+    isLoading: graphIsLoading,
+    addTopic: addTopicToGraph,
+    updateMastery: updateGraphMastery,
+    addFollowUp: addGraphFollowUp,
+    getNode: getGraphNode,
+    getNodeByName: getGraphNodeByName,
+    topicCount: graphTopicCount,
+  } = useKnowledgeGraph()
 
   const [isWorldRegenerating, setIsWorldRegenerating] = useState(false)
   const [worldRegenProgress, setWorldRegenProgress] = useState({ current: 0, total: 0 })
@@ -219,6 +233,10 @@ function App() {
 
   // Learning Modes state - track which mode is active ('mystery', 'whatif', 'story', or null)
   const [selectedLearningMode, setSelectedLearningMode] = useState(null)
+  // Tracks where a learning mode was launched from so Exit/Complete can route back.
+  // - after_slideshow: user picked a mode from the Mode Selector after finishing a slideshow
+  // - from_progress: user launched a mode from the Progress tab (Quick Practice / Topic sheet)
+  const [learnModeOrigin, setLearnModeOrigin] = useState(null) // 'after_slideshow' | 'from_progress' | null
 
   // Regeneration state (celebration state now managed by useCelebrations hook)
   const [isRegenerating, setIsRegenerating] = useState(false)
@@ -247,9 +265,6 @@ function App() {
     piecesNeedingReview,
     startReviewSession,
   } = useReviewSession(worldPieces)
-
-  const worldPieceCount = Array.isArray(worldPieces) ? worldPieces.length : 0
-  const worldTreeLevel = useMemo(() => calculateTreeLevel(worldPieceCount), [worldPieceCount])
 
   const resetLivingWorldState = useCallback(async () => {
     const result = await resetLivingWorld()
@@ -319,6 +334,79 @@ function App() {
   }, [topics, activeTopicId])
   const activeTopicRef = useRef(activeTopic)
 
+  /**
+   * Progress tab topics: local `topics` are the canonical list (watched/learned),
+   * and `/api/world` pieces are optional metadata enrichment (zone/review/etc).
+   *
+   * This prevents Progress from appearing empty when no world pieces exist yet.
+   */
+  const progressPieces = useMemo(() => {
+    const localTopics = Array.isArray(topics) ? topics : []
+    const worldPieceList = Array.isArray(worldPieces) ? worldPieces : []
+
+    const piecesByTopicId = new Map()
+    const piecesByName = new Map()
+
+    for (const piece of worldPieceList) {
+      const rawTopicId = piece?.topicId ?? piece?.id
+      if (rawTopicId) {
+        piecesByTopicId.set(String(rawTopicId), piece)
+      }
+
+      const rawName = typeof piece?.topicName === 'string'
+        ? piece.topicName
+        : typeof piece?.name === 'string'
+          ? piece.name
+          : ''
+      const normalizedName = rawName.trim().toLowerCase()
+      if (normalizedName) {
+        piecesByName.set(normalizedName, piece)
+      }
+    }
+
+    return localTopics
+      .filter((topic) => topic && typeof topic === 'object' && typeof topic.id === 'string' && typeof topic.name === 'string')
+      .map((topic) => {
+        const topicId = String(topic.id)
+        const topicName = String(topic.name)
+        const normalizedName = topicName.trim().toLowerCase()
+
+        const matchedPiece = piecesByTopicId.get(topicId) || (normalizedName ? piecesByName.get(normalizedName) : null)
+
+        const createdAtMs = typeof topic.createdAt === 'number' ? topic.createdAt : null
+        const lastAccessedAtMs = typeof topic.lastAccessedAt === 'number' ? topic.lastAccessedAt : null
+        const unlockedAtIso = new Date(createdAtMs ?? lastAccessedAtMs ?? Date.now()).toISOString()
+
+        const versionIndex = topic.currentVersionIndex ?? 0
+        const currentVersion = Array.isArray(topic.versions) ? topic.versions[versionIndex] : null
+        const topicSlides = Array.isArray(topic.slides)
+          ? topic.slides
+          : Array.isArray(currentVersion?.slides)
+            ? currentVersion.slides
+            : []
+
+        const explanationLevel = topic.explanationLevel || currentVersion?.explanationLevel || 'standard'
+
+        return {
+          // Normalized "piece-like" shape expected by ProgressTab components
+          topicId,
+          topicName,
+          zone: matchedPiece?.zone || getZoneForCategory(topic.category),
+          unlockedAt: matchedPiece?.unlockedAt || unlockedAtIso,
+          lastReviewedAt: matchedPiece?.lastReviewedAt || null,
+          relatedTopics: Array.isArray(matchedPiece?.relatedTopics) ? matchedPiece.relatedTopics : [],
+          slides: topicSlides,
+          level: explanationLevel,
+        }
+      })
+  }, [topics, worldPieces])
+
+  // Use explorerRank title from Knowledge Graph, fallback to calculated tree level
+  const progressTreeLevel = useMemo(
+    () => explorerRank?.title || calculateTreeLevel(progressPieces.length),
+    [explorerRank?.title, progressPieces.length]
+  )
+
   // CORE032: Slides split into top-level (visible) and child slides for 2D navigation
   const allTopicSlides = useMemo(() => buildTopicSlides(activeTopic), [activeTopic])
   const visibleSlides = useMemo(() => allTopicSlides.filter(s => !s.parentId), [allTopicSlides])
@@ -330,7 +418,7 @@ function App() {
     visibleSlidesRef.current = visibleSlides
   }, [activeTopic, visibleSlides])
 
-  // Note: activeChildSlides, displayedSlide, parentSlide come from useSlideshowControl hook (after slideAudio hook)
+  // Note: activeChildSlides, displayedSlide come from useSlideshowControl hook (after slideAudio hook)
 
   // Wrapper for pruneSlideCache helper with local MAX_CACHED_TOPICS
   const pruneSlideCache = useCallback((topicList, keepTopicId) => {
@@ -720,6 +808,7 @@ function App() {
     isSlideNarrationPlaying,
     isSlideNarrationReady,
     getSlideDuration,
+    activeTopic,
   })
 
   // Destructure slideshow control values
@@ -728,22 +817,24 @@ function App() {
     currentChildIndex,
     isPlaying,
     slideshowFinished,
-    isFollowUpDrawerOpen,
+    isChapterPickerOpen,
     activeChildSlides,
     displayedSlide,
-    parentSlide,
+    segments,
+    currentSegmentIndex,
+    currentSlideInSegment,
     setCurrentIndex,
     setCurrentChildIndex,
     setIsPlaying,
     setSlideshowFinished,
-    setIsFollowUpDrawerOpen,
+    setIsChapterPickerOpen,
     goToNextSlide,
     goToPrevSlide,
     goToChildNext,
     goToChildPrev,
+    goToSegment,
     togglePlayPause,
     triggerSlideshowFinished,
-    resetSlideshowFinished,
     wasManualNavRef,
     pauseAfterCurrentSlideRef,
     hasFinishedSlideshowRef,
@@ -1698,6 +1789,7 @@ function App() {
         // WB018: Branch based on learn mode
         if (learnMode === 'full') {
           // Full mode: Show mode selector (Mystery Lab, Wonder Lab, Story Studio)
+          setLearnModeOrigin('after_slideshow')
           setUiState(UI_STATE.MODE_SELECTOR)
         } else {
           // Quick mode: End after slideshow and award quick XP (WB015)
@@ -1727,6 +1819,8 @@ function App() {
     logger.info('LEARN_MODE', 'Mode selected', { mode, topicName: activeTopic?.name })
 
     // Set the selected mode and navigate to LEARN_MODE state
+    // Preserve origin if Mode Selector was opened from Progress (e.g. "Quick Quiz").
+    setLearnModeOrigin((prev) => prev || 'after_slideshow')
     setSelectedLearningMode(mode)
     setUiState(UI_STATE.LEARN_MODE)
 
@@ -1738,8 +1832,11 @@ function App() {
 
   // Learning Modes: Handle learning mode completion with XP and world evolution
   const handleLearningModeComplete = useCallback(async (result) => {
+    const origin = learnModeOrigin
+
     logger.info('LEARN_MODE', 'Learning mode completed', {
       mode: selectedLearningMode,
+      origin,
       completed: result?.completed,
       xpEarned: result?.xpEarned
     })
@@ -1750,6 +1847,27 @@ function App() {
     // Show XP earned toast
     if (result?.xpEarned > 0) {
       showQuickXp(result.xpEarned)
+    }
+
+    // Update mastery in Knowledge Graph based on quiz performance
+    if (result?.completed && topicId) {
+      // Calculate mastery score from result (default to 0.7 for completion without score)
+      const masteryScore = typeof result?.score === 'number'
+        ? result.score
+        : (result?.correctCount && result?.totalCount)
+          ? result.correctCount / result.totalCount
+          : 0.7
+
+      // Find node by topic name and update mastery
+      const graphNode = getGraphNodeByName(topicName)
+      if (graphNode) {
+        updateGraphMastery(graphNode.id, masteryScore)
+        logger.info('GRAPH', 'Updated mastery in knowledge graph', {
+          topicName,
+          masteryScore,
+          nodeId: graphNode.id
+        })
+      }
     }
 
     // Evolve Living World on successful completion
@@ -1803,9 +1921,24 @@ function App() {
     // Refresh world stats and reset state
     refreshWorldStats()
     setSelectedLearningMode(null)
+    setLearnModeOrigin(null)
+
+    if (origin === 'after_slideshow') {
+      setActiveTab('learn')
+      setUiState(UI_STATE.MODE_SELECTOR)
+      return
+    }
+
+    if (origin === 'from_progress') {
+      setActiveTab('progress')
+      setUiState(UI_STATE.HOME)
+      return
+    }
+
     setUiState(UI_STATE.HOME)
   }, [
     selectedLearningMode,
+    learnModeOrigin,
     activeTopic,
     visibleSlidesRef,
     evolveWorld,
@@ -1813,17 +1946,53 @@ function App() {
     showTierUpgrade,
     setWorldBadge,
     refreshWorldStats,
-    setUiState
+    setActiveTab,
+    setUiState,
+    getGraphNodeByName,
+    updateGraphMastery,
   ])
 
   // Learning Modes: Handle learning mode exit
   const handleLearningModeExit = useCallback(() => {
-    logger.info('LEARN_MODE', 'Learning mode exited', { mode: selectedLearningMode })
+    const origin = learnModeOrigin
+    logger.info('LEARN_MODE', 'Learning mode exited', { mode: selectedLearningMode, origin })
 
     // Reset learning mode state
     setSelectedLearningMode(null)
+    setLearnModeOrigin(null)
+
+    if (origin === 'after_slideshow') {
+      setActiveTab('learn')
+      setUiState(UI_STATE.MODE_SELECTOR)
+      return
+    }
+
+    if (origin === 'from_progress') {
+      setActiveTab('progress')
+      setUiState(UI_STATE.HOME)
+      return
+    }
+
     setUiState(UI_STATE.HOME)
-  }, [selectedLearningMode, setUiState])
+  }, [selectedLearningMode, learnModeOrigin, setActiveTab, setUiState])
+
+  // Mode Selector: Skip for now (should not route back to itself).
+  const handleModeSelectorSkip = useCallback(() => {
+    const origin = learnModeOrigin
+    logger.info('LEARN_MODE', 'Mode selector skipped', { origin, topicName: activeTopic?.name })
+
+    setSelectedLearningMode(null)
+    setLearnModeOrigin(null)
+
+    if (origin === 'from_progress') {
+      setActiveTab('progress')
+      setUiState(UI_STATE.HOME)
+      return
+    }
+
+    setActiveTab('learn')
+    setUiState(UI_STATE.HOME)
+  }, [learnModeOrigin, activeTopic, setActiveTab, setUiState])
 
   /**
    * Launch a learning mode for a specific topic (from Progress Tab, World, or Tree)
@@ -1834,7 +2003,7 @@ function App() {
    * @param {string} mode - 'mystery' | 'whatif' | 'story'
    * @param {Object} topicData - { slides, level } from stored topic
    */
-  const handleLaunchLearningMode = useCallback((topicName, mode, topicData) => {
+  const handleLaunchLearningMode = useCallback(async (topicName, mode, topicData) => {
     logger.info('LEARN_MODE', 'Launch learning mode for topic', { topicName, mode })
 
     // Validate inputs
@@ -1845,9 +2014,46 @@ function App() {
     }
 
     // Find the topic in our topics list
-    const matchingTopic = topics.find((topic) => topic.name === topicName)
+    const normalizedName = String(topicName).trim().toLowerCase()
+    const matchingTopic = topics.find((topic) =>
+      String(topic?.name || '').trim().toLowerCase() === normalizedName
+    )
 
     if (matchingTopic) {
+      // Ensure slides are ready BEFORE entering the learning mode.
+      // Mystery/Wonder will call their APIs immediately on mount.
+      const hasSlidesInMemory = Array.isArray(matchingTopic.slides) && matchingTopic.slides.length > 0
+      if (!hasSlidesInMemory) {
+        const versionIndex = matchingTopic.currentVersionIndex ?? 0
+        const currentVersionId = matchingTopic.versions?.[versionIndex]?.id
+        const cachedSlides = loadSlidesForTopic(matchingTopic)
+        const hydratedSlides = cachedSlides || await fetchSlidesFromServer(matchingTopic.id, currentVersionId, versionIndex)
+
+        if (!hydratedSlides || hydratedSlides.length === 0) {
+          showToast('Topic slides not available', 'error')
+          return
+        }
+
+        const now = Date.now()
+        setTopics((prev) => {
+          const updated = prev.map((topic) => {
+            if (topic.id !== matchingTopic.id) return topic
+            const updatedVersions = Array.isArray(topic.versions)
+              ? topic.versions.map((v, idx) => (
+                  idx === versionIndex ? { ...v, slides: hydratedSlides } : v
+                ))
+              : topic.versions
+            return {
+              ...topic,
+              slides: hydratedSlides,
+              versions: updatedVersions,
+              lastAccessedAt: now,
+            }
+          })
+          return pruneSlideCache(updated, matchingTopic.id)
+        })
+      }
+
       // Topic exists - set it active and launch mode
       setActiveTopicId(matchingTopic.id)
     } else if (topicData?.slides?.length > 0) {
@@ -1860,10 +2066,11 @@ function App() {
     }
 
     // Set the mode and transition to LEARN_MODE
+    setLearnModeOrigin('from_progress')
     setSelectedLearningMode(mode)
     setActiveTab('learn')
     setUiState(UI_STATE.LEARN_MODE)
-  }, [topics, showToast, setActiveTopicId, setActiveTab, setUiState])
+  }, [topics, showToast, setActiveTopicId, setActiveTab, setUiState, fetchSlidesFromServer, pruneSlideCache])
 
   /**
    * Convenience handler for quick practice from Progress Tab
@@ -1881,7 +2088,7 @@ function App() {
     const topicName = piece.topicName || piece.name
     const topicId = piece.topicId || piece.id
     const matchingTopic = topics.find((topic) =>
-      topic.id === topicId || (topicName && topic.name === topicName)
+      topic.id === topicId || (topicName && String(topic.name).trim().toLowerCase() === String(topicName).trim().toLowerCase())
     )
 
     if (!matchingTopic) {
@@ -1893,7 +2100,8 @@ function App() {
 
     setActiveTab('learn')
     setActiveTopicId(matchingTopic.id)
-    setPendingQuizTopicId(matchingTopic.id)
+    setLearnModeOrigin('from_progress')
+    // Quiz UI is not a dedicated state; this routes to the Mode Selector for practice modes.
     setUiState(UI_STATE.MODE_SELECTOR)
   }, [topics, showToast, setActiveTab, setActiveTopicId, setUiState])
 
@@ -2514,6 +2722,26 @@ function App() {
     resumeSlideAudioAfterHandLower,
   ])
 
+  /**
+   * Callback when a new topic is created in useQuestionHandler.
+   * Adds the topic to the Knowledge Graph for constellation visualization.
+   */
+  const handleTopicCreated = useCallback(async (topicData) => {
+    if (!topicData?.name) return
+
+    try {
+      await addTopicToGraph({
+        id: topicData.id,
+        name: topicData.name,
+        concepts: topicData.concepts || [],
+        slides: topicData.slides || [],
+      })
+      logger.info('GRAPH', 'Added topic to knowledge graph', { topicName: topicData.name })
+    } catch (error) {
+      logger.warn('GRAPH', 'Failed to add topic to knowledge graph', { error: error.message })
+    }
+  }, [addTopicToGraph])
+
   // Use the question handler hook
   const { handleQuestion, handleQuestionRef: questionHandlerRef } = useQuestionHandler({
     // State setters
@@ -2572,6 +2800,7 @@ function App() {
     interruptActiveAudio,
     recordQuestionAsked,
     setSlideshowFinished,
+    onTopicCreated: handleTopicCreated,
   })
 
   /**
@@ -2691,6 +2920,46 @@ function App() {
       setUiState(UI_STATE.SLIDESHOW)
     }
   }, [uiState, topics, pruneSlideCache, fetchSlidesFromServer, requestSlideAudio, setActiveTab])
+
+  /**
+   * Progress: open a topic's slideshow by name (used by TopicActionSheet "Review Slideshow")
+   */
+  const handleReviewSlideshowFromProgress = useCallback((topicName) => {
+    const normalized = String(topicName || '').trim().toLowerCase()
+    if (!normalized) return
+
+    const matchingTopic = topics.find((topic) =>
+      String(topic?.name || '').trim().toLowerCase() === normalized
+    )
+
+    if (!matchingTopic) {
+      showToast('Topic not found')
+      return
+    }
+
+    void handleNavigateToTopic(matchingTopic.id)
+  }, [topics, showToast, handleNavigateToTopic])
+
+  /**
+   * Progress: start "quick quiz" flow (currently routes to Mode Selector for practice modes)
+   */
+  const handleQuickQuizFromProgress = useCallback((topicName) => {
+    const normalized = String(topicName || '').trim().toLowerCase()
+    if (!normalized) return
+
+    const matchingTopic = topics.find((topic) =>
+      String(topic?.name || '').trim().toLowerCase() === normalized
+    )
+
+    if (!matchingTopic) {
+      showToast('Open this topic first to start a quiz')
+      setActiveTab('learn')
+      setUiState(UI_STATE.HOME)
+      return
+    }
+
+    requestTopicQuiz({ topicId: matchingTopic.id, topicName: matchingTopic.name })
+  }, [topics, requestTopicQuiz, showToast, setActiveTab, setUiState])
 
   /**
    * Handle topic deletion from sidebar
@@ -3132,7 +3401,7 @@ function App() {
             topicName={activeTopic?.name || ''}
             explanationLevel={activeTopic?.explanationLevel || 'standard'}
             onModeSelect={handleModeSelect}
-            onSkip={handleLearningModeExit}
+            onSkip={handleModeSelectorSkip}
           />
         )}
 
@@ -3177,14 +3446,10 @@ function App() {
         {activeTab === 'progress' && (
           <div className="min-h-screen bg-cream-100 dark:bg-night-900 pt-4">
             <ProgressTab
-              worldState={livingWorldState}
-              pieces={worldPieces}
-              onReviewSlideshow={handleReviewTopic}
+              topics={progressPieces}
+              onReviewSlideshow={handleReviewSlideshowFromProgress}
               onLaunchMode={handleLaunchLearningMode}
-              onQuickQuiz={(topicName) => {
-                const piece = worldPieces.find(p => (p.topicName || p.name) === topicName)
-                if (piece) requestTopicQuiz(piece)
-              }}
+              onQuickQuiz={handleQuickQuizFromProgress}
               onLearnTopic={handleLearnTopicFromPiece}
               onAskQuestion={() => {
                 setActiveTab('learn')
@@ -3192,29 +3457,18 @@ function App() {
               }}
               totalXP={totalWorldXP}
               streak={{ current: userProgress?.streakCount || 0, todayCompleted: false }}
-              tier={livingWorldTier}
-              treeLevel={worldTreeLevel}
+              treeLevel={progressTreeLevel}
+              explorerRank={explorerRank}
               onSelectSuggestedTopic={(topicName) => {
                 setActiveTab('learn')
                 handleQuestion(topicName, { source: 'progress_suggestion' })
               }}
-              worldViewProps={{
-                isLoading: livingWorldIsLoading,
-                isEvolving: livingWorldIsEvolving,
-                hotspots: livingWorldHotspots,
-                error: livingWorldError,
-                onInitializeWorld: initializeWorld,
-                onRegenerateWorld: regenerateLivingWorld,
-                isRegeneratingWorld: isWorldRegenerating,
-                regenerationProgress: worldRegenProgress,
-                onReviewPiece: handleReviewTopic,
-                onQuizPiece: handleQuizTopic,
-                onLearnTopic: handleLearnTopicFromPiece,
-                onSelectSuggestedTopic: (topicName) => {
-                  setActiveTab('learn')
-                  handleQuestion(topicName, { source: 'world_suggestion' })
-                },
-              }}
+              graph={knowledgeGraph}
+              graphNodes={graphNodes}
+              graphEdges={graphEdges}
+              graphClusters={graphClusters}
+              graphGaps={graphGaps}
+              graphIsLoading={graphIsLoading}
             />
           </div>
         )}
@@ -3230,19 +3484,13 @@ function App() {
         {uiState === UI_STATE.SLIDESHOW && activeTab === 'learn' && visibleSlides.length > 0 && !isLoadingTopicAudio && (
           <SlideshowScreen
             displayedSlide={displayedSlide}
-            parentSlide={parentSlide}
             visibleSlides={visibleSlides}
-            allTopicSlides={allTopicSlides}
             activeChildSlides={activeChildSlides}
             currentIndex={currentIndex}
             currentChildIndex={currentChildIndex}
             isPreparingFollowUp={isPreparingFollowUp}
             highlightPosition={highlightPosition}
             handleSuggestionClick={handleSuggestionClick}
-            setCurrentIndex={setCurrentIndex}
-            setCurrentChildIndex={setCurrentChildIndex}
-            isFollowUpDrawerOpen={isFollowUpDrawerOpen}
-            setIsFollowUpDrawerOpen={setIsFollowUpDrawerOpen}
             wasManualNavRef={wasManualNavRef}
             getSlideDuration={getSlideDuration}
             isSlideNarrationPlaying={isSlideNarrationPlaying}
@@ -3259,6 +3507,12 @@ function App() {
             handleRegenerate={handleRegenerate}
             handleVersionSwitch={handleVersionSwitch}
             isRegenerating={isRegenerating}
+            segments={segments}
+            currentSegmentIndex={currentSegmentIndex}
+            currentSlideInSegment={currentSlideInSegment}
+            goToSegment={goToSegment}
+            isChapterPickerOpen={isChapterPickerOpen}
+            setIsChapterPickerOpen={setIsChapterPickerOpen}
           />
         )}
         </main>

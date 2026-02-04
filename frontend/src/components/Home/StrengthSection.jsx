@@ -22,8 +22,6 @@
  * T004: Start Review button triggers onStartReview
  */
 
-import { useMemo } from 'react'
-
 /**
  * Get display icon for a piece
  * Uses the piece's icon if available, otherwise falls back to category-based icon
@@ -83,9 +81,7 @@ export default function StrengthSection({
   }
 
   // Get first 5 pieces for icon display
-  const displayPieces = useMemo(() => {
-    return piecesNeedingReview.slice(0, 5)
-  }, [piecesNeedingReview])
+  const displayPieces = piecesNeedingReview.slice(0, 5)
 
   // Check if there are more pieces than displayed
   const hasMore = piecesNeedingReview.length > 5

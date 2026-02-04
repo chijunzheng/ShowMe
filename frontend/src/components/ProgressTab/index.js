@@ -6,7 +6,6 @@
  */
 
 export { default as ProgressTab } from './ProgressTab'
-export { default as MiniWorldPreview } from './MiniWorldPreview'
 export { default as TopicActionSheet } from './TopicActionSheet'
 export { default as QuickPractice } from './QuickPractice'
 export { default as DueForReview } from './DueForReview'

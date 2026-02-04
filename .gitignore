@@ -38,3 +38,10 @@ test-results/
 .venv/
 __pycache__/
 *.pyc
+
+# agent 
+.claude
+.codex
+.playwright-mcp
+.pytest_cache
+.reports

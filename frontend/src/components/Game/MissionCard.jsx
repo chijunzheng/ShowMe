@@ -29,23 +29,8 @@ function formatNumber(num) {
 export default function MissionCard({ mission, onClaim }) {
   const [isClaiming, setIsClaiming] = useState(false)
 
-  // Early return for null/undefined mission
-  if (!mission) {
-    return null
-  }
-
-  const {
-    title,
-    description,
-    progress = 0,
-    target = 1,
-    xpReward = 0,
-    isComplete = false,
-    isClaimed = false,
-  } = mission
-
-  // Calculate progress percentage safely
-  const progressPercent = target > 0 ? (progress / target) * 100 : 0
+  const isComplete = Boolean(mission?.isComplete)
+  const isClaimed = Boolean(mission?.isClaimed)
 
   // Handle claim button click
   const handleClaim = useCallback(() => {
@@ -61,6 +46,22 @@ export default function MissionCard({ mission, onClaim }) {
       setIsClaiming(false)
     }, 300)
   }, [isComplete, isClaimed, isClaiming, onClaim, mission])
+
+  // Early return for null/undefined mission (keep hooks order stable)
+  if (!mission) {
+    return null
+  }
+
+  const {
+    title,
+    description,
+    progress = 0,
+    target = 1,
+    xpReward = 0,
+  } = mission
+
+  // Calculate progress percentage safely
+  const progressPercent = target > 0 ? (progress / target) * 100 : 0
 
   // Determine card styling based on state
   const getCardClasses = () => {

@@ -13,18 +13,32 @@ import { MISSIONS } from './gameConfig'
 describe('useGameMissions', () => {
   let mockLocalStorage
   let originalDate
+  let originalLocalStorage
 
   beforeEach(() => {
-    // Mock localStorage
+    // Ensure other test files haven't left fake timers/system time behind.
+    vi.useRealTimers()
+
+    // Some other test files replace `global.localStorage` with a plain object.
+    // Spy'ing on Storage.prototype won't intercept in that scenario, so we stub
+    // localStorage directly for this suite.
+    originalLocalStorage = global.localStorage
     mockLocalStorage = {}
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation((key) => {
-      return mockLocalStorage[key] || null
-    })
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation((key, value) => {
-      mockLocalStorage[key] = value
-    })
-    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation((key) => {
-      delete mockLocalStorage[key]
+    Object.defineProperty(global, 'localStorage', {
+      value: {
+        getItem: (key) => (key in mockLocalStorage ? mockLocalStorage[key] : null),
+        setItem: (key, value) => {
+          mockLocalStorage[key] = value
+        },
+        removeItem: (key) => {
+          delete mockLocalStorage[key]
+        },
+        clear: () => {
+          mockLocalStorage = {}
+        },
+      },
+      writable: true,
+      configurable: true,
     })
 
     // Store original Date
@@ -33,7 +47,13 @@ describe('useGameMissions', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.useRealTimers()
     global.Date = originalDate
+    Object.defineProperty(global, 'localStorage', {
+      value: originalLocalStorage,
+      writable: true,
+      configurable: true,
+    })
   })
 
   describe('initialization', () => {
@@ -393,6 +413,7 @@ describe('useGameMissions', () => {
   describe('weekly reset', () => {
     it('resets weekly missions on Monday', () => {
       // Mock current date as Monday
+      vi.useFakeTimers()
       const mockMonday = new Date('2025-01-27T10:00:00Z') // This is a Monday
       vi.setSystemTime(mockMonday)
 
@@ -413,6 +434,7 @@ describe('useGameMissions', () => {
 
     it('does not reset weekly missions if already reset this week', () => {
       // Mock current date as Wednesday
+      vi.useFakeTimers()
       const mockWednesday = new Date('2025-01-29T10:00:00Z')
       vi.setSystemTime(mockWednesday)
 
@@ -433,6 +455,7 @@ describe('useGameMissions', () => {
 
     it('preserves daily missions on weekly reset', () => {
       // Mock current date as Monday
+      vi.useFakeTimers()
       const mockMonday = new Date('2025-01-27T10:00:00Z')
       vi.setSystemTime(mockMonday)
 
