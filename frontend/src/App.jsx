@@ -162,6 +162,8 @@ function App() {
   // GAMIFY-003: User progress and gamification
   const {
     progress: userProgress,
+    badges: badgeDefinitions,
+    isLoading: isUserProgressLoading,
     newBadges,
     clearNewBadges,
     clientId: userClientId,
@@ -3320,8 +3322,6 @@ function App() {
           }}
           onDeleteTopic={handleDeleteTopic}
           onQuickQuizTopic={(topic) => requestTopicQuiz(topic)}
-          tier={worldTier}
-          xpProgress={xpProgress}
           streakCount={userProgress?.streakCount || 0}
         />
       )}
@@ -3444,26 +3444,17 @@ function App() {
 
         {/* Progress Tab - consolidates World and Tree views */}
         {activeTab === 'progress' && (
-          <div className="min-h-screen bg-cream-100 dark:bg-night-900 pt-4">
+          <div className="w-full bg-cream-100 dark:bg-night-900">
             <ProgressTab
               topics={progressPieces}
               onReviewSlideshow={handleReviewSlideshowFromProgress}
               onLaunchMode={handleLaunchLearningMode}
-              onQuickQuiz={handleQuickQuizFromProgress}
-              onLearnTopic={handleLearnTopicFromPiece}
-              onAskQuestion={() => {
-                setActiveTab('learn')
-                setUiState(UI_STATE.HOME)
-              }}
               totalXP={totalWorldXP}
               streak={{ current: userProgress?.streakCount || 0, todayCompleted: false }}
-              treeLevel={progressTreeLevel}
-              explorerRank={explorerRank}
               onSelectSuggestedTopic={(topicName) => {
                 setActiveTab('learn')
                 handleQuestion(topicName, { source: 'progress_suggestion' })
               }}
-              graph={knowledgeGraph}
               graphNodes={graphNodes}
               graphEdges={graphEdges}
               graphClusters={graphClusters}

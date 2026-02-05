@@ -78,7 +78,7 @@ export default function ConstellationEdge({ edge, fromPos, toPos, onTap }) {
    * Calculate opacity based on discovered status and strength
    */
   const opacity = useMemo(() => {
-    const baseOpacity = edge.discovered ? 1 : 0.3
+    const baseOpacity = edge.discovered ? 1 : 0.5
     const strength = edge.strength || 1
     return baseOpacity * strength
   }, [edge.discovered, edge.strength])

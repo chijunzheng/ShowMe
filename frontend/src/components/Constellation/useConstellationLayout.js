@@ -178,13 +178,14 @@ function runSimulation(nodes, edges, config = {}) {
 /**
  * Create a stable key from nodes and edges for memoization
  */
-function createCacheKey(nodes, edges) {
+function createCacheKey(nodes, edges, config = {}) {
   if (!nodes || nodes.length === 0) return 'empty'
 
   const nodeKey = nodes.map((n) => n.id).sort().join(',')
   const edgeKey = edges?.map((e) => `${e.from}-${e.to}`).sort().join(',') || ''
+  const centerKey = `${Math.round(config.centerX || 400)},${Math.round(config.centerY || 300)}`
 
-  return `${nodeKey}|${edgeKey}`
+  return `${nodeKey}|${edgeKey}|${centerKey}`
 }
 
 /**
@@ -198,7 +199,11 @@ function createCacheKey(nodes, edges) {
  */
 export default function useConstellationLayout(nodes, edges, config = {}) {
   // Create stable cache key based on node/edge structure
-  const cacheKey = useMemo(() => createCacheKey(nodes, edges), [nodes, edges])
+  const cacheKey = useMemo(
+    () => createCacheKey(nodes, edges, config),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [nodes, edges, config.centerX, config.centerY]
+  )
 
   // Memoize the layout calculation
   const positions = useMemo(() => {

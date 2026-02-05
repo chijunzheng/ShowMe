@@ -1,29 +1,13 @@
 /**
  * StatsBar Component
  *
- * Displays user learning statistics including streak, XP, topics learned, and tree level.
+ * Displays user learning statistics including streak, XP, topics learned, and explorer rank.
  * Supports animated updates and loading state.
  */
 
 import { useState, useEffect, useRef } from 'react'
 import PropTypes from 'prop-types'
-
-/**
- * Valid tree levels
- */
-const VALID_TREE_LEVELS = new Set(['seed', 'sprout', 'sapling', 'young', 'mature', 'magical'])
-
-/**
- * Tree level icons
- */
-const TREE_LEVEL_ICONS = {
-  seed: '\ud83c\udf31',    // seedling
-  sprout: '\ud83c\udf3f',  // herb
-  sapling: '\ud83c\udf3f', // herb
-  young: '\ud83c\udf33',   // tree
-  mature: '\ud83c\udf33',  // tree
-  magical: '\u2728',       // sparkles
-}
+import { getExplorerRank } from '../ExplorerRank/explorerRankUtils'
 
 /**
  * Format number with commas or K suffix
@@ -74,7 +58,6 @@ function StatsBarSkeleton() {
  * @param {number} props.streak - Current learning streak (days)
  * @param {number} props.totalXP - Total XP earned
  * @param {number} props.topicsLearned - Number of topics learned
- * @param {string} props.treeLevel - Current tree level
  * @param {boolean} props.isLoading - Whether stats are loading
  * @param {boolean} props.compact - Whether to use compact display
  */
@@ -82,18 +65,18 @@ export default function StatsBar({
   streak = 0,
   totalXP = 0,
   topicsLearned = 0,
-  treeLevel = 'seed',
   isLoading = false,
   compact = false,
 }) {
+  // Calculate explorer rank from topics learned
+  const explorerRank = getExplorerRank(topicsLearned)
+
   // Track previous values for animation
   const prevStreak = useRef(streak)
   const prevXP = useRef(totalXP)
-  const prevLevel = useRef(treeLevel)
 
   const [streakAnimating, setStreakAnimating] = useState(false)
   const [xpAnimating, setXpAnimating] = useState(false)
-  const [levelAnimating, setLevelAnimating] = useState(false)
 
   // Detect value changes and trigger animations
   useEffect(() => {
@@ -112,14 +95,6 @@ export default function StatsBar({
     prevXP.current = totalXP
   }, [totalXP])
 
-  useEffect(() => {
-    if (treeLevel !== prevLevel.current) {
-      setLevelAnimating(true)
-      setTimeout(() => setLevelAnimating(false), 500)
-    }
-    prevLevel.current = treeLevel
-  }, [treeLevel])
-
   // Show skeleton when loading
   if (isLoading) {
     return <StatsBarSkeleton />
@@ -129,10 +104,6 @@ export default function StatsBar({
   const safeStreak = Math.max(0, streak || 0)
   const safeXP = Math.max(0, totalXP || 0)
   const safeTopics = Math.max(0, topicsLearned || 0)
-  const safeLevel = VALID_TREE_LEVELS.has(treeLevel) ? treeLevel : 'seed'
-
-  // Determine topic label
-  const topicLabel = safeTopics === 1 ? '1 Topic' : `${safeTopics} Topics`
 
   return (
     <div
@@ -140,7 +111,11 @@ export default function StatsBar({
       className={`
         flex items-center justify-around gap-3
         ${compact ? 'p-2 text-sm compact' : 'p-3'}
-        bg-slate-100 dark:bg-slate-800
+        ${compact
+          ? 'border-2 border-black dark:border-slate-600 shadow-[2px_2px_0_0_#000] dark:shadow-[2px_2px_0_0_#475569]'
+          : 'bg-slate-100 dark:bg-slate-800'
+        }
+        bg-white dark:bg-slate-800
         rounded-xl
       `}
     >
@@ -179,34 +154,27 @@ export default function StatsBar({
       {/* Topics */}
       <div
         data-testid="stat-topics"
-        className="
-          flex flex-col items-center
-          px-3 py-2
-          rounded-lg
-          bg-emerald-50 dark:bg-emerald-900/30
-        "
+        className="flex flex-col items-center px-3 py-2 rounded-lg bg-emerald-50 dark:bg-emerald-900/30"
       >
         <span className="text-xl">{'\ud83c\udf3f'}</span>
         <span className="font-bold text-slate-800 dark:text-white">{safeTopics}</span>
-        <span className="text-xs text-slate-500 dark:text-slate-400">
-          {safeTopics} {safeTopics === 1 ? 'Topic' : 'Topics'}
-        </span>
+        {!compact && <span className="text-xs text-slate-500 dark:text-slate-400">Topics</span>}
       </div>
 
-      {/* Tree Level */}
+      {/* Explorer Rank */}
       <div
-        data-testid="stat-level"
+        data-testid="stat-rank"
         className={`
           flex flex-col items-center
           px-3 py-2
           rounded-lg
-          ${safeLevel === 'magical' ? 'bg-purple-100 dark:bg-purple-900/30 shimmer' : 'bg-sky-50 dark:bg-sky-900/30'}
-          ${levelAnimating ? 'animate-pulse' : ''}
+          ${explorerRank.level === 7 ? 'bg-red-100 dark:bg-red-900/30 shimmer' : 'bg-sky-50 dark:bg-sky-900/30'}
         `}
       >
-        <span className="text-xl">{TREE_LEVEL_ICONS[safeLevel] || '\ud83c\udf31'}</span>
-        <span className="font-bold text-slate-800 dark:text-white capitalize">{safeLevel}</span>
-        {!compact && <span className="text-xs text-slate-500 dark:text-slate-400">Level</span>}
+        <span className="text-xl">{explorerRank.icon}</span>
+        <span className="font-bold text-slate-800 dark:text-white text-xs">
+          {compact ? explorerRank.title.split(' ')[0] : explorerRank.title}
+        </span>
       </div>
     </div>
   )
@@ -216,7 +184,6 @@ StatsBar.propTypes = {
   streak: PropTypes.number,
   totalXP: PropTypes.number,
   topicsLearned: PropTypes.number,
-  treeLevel: PropTypes.string,
   isLoading: PropTypes.bool,
   compact: PropTypes.bool,
 }

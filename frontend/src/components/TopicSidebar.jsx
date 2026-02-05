@@ -1,15 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
-
-/**
- * Tier configuration with colors, icons, and labels
- */
-const TIER_CONFIG = {
-  barren: { icon: '🏜️', label: 'Barren', color: 'text-slate-500' },
-  sprouting: { icon: '🌱', label: 'Sprouting', color: 'text-green-500' },
-  growing: { icon: '🌿', label: 'Growing', color: 'text-emerald-500' },
-  thriving: { icon: '🌳', label: 'Thriving', color: 'text-cyan-500' },
-  legendary: { icon: '✨', label: 'Legendary', color: 'text-purple-500' },
-}
+import { getExplorerRank, getRankProgress } from './ExplorerRank/explorerRankUtils'
 
 /**
  * TopicSidebar Component (CORE016 & CORE017)
@@ -32,8 +22,6 @@ const TIER_CONFIG = {
  * @param {Function} props.onRenameTopic - Callback when topic is renamed, receives (topicId, newName)
  * @param {Function} props.onDeleteTopic - Callback when topic is deleted, receives topicId
  * @param {Function} [props.onQuickQuizTopic] - Callback for quick quiz, receives topic object
- * @param {string} props.tier - Current tier (barren, sprouting, etc.)
- * @param {Object} props.xpProgress - XP progress { current, target }
  * @param {number} props.streakCount - Current streak days
  */
 function TopicSidebar({
@@ -44,16 +32,15 @@ function TopicSidebar({
   onRenameTopic,
   onDeleteTopic,
   onQuickQuizTopic,
-  tier = 'barren',
-  xpProgress = { current: 0, target: 250 },
   streakCount = 0,
 }) {
+  // Calculate explorer rank based on topics
+  const explorerRank = getExplorerRank(topics.length)
+  const rankProgress = getRankProgress(topics.length)
+
   const MENU_GAP = 8
   const MENU_MARGIN = 8
   const BOTTOM_BAR_HEIGHT = 64
-  const safeCurrentXP = Number.isFinite(xpProgress?.current) ? Math.max(0, xpProgress.current) : 0
-  const safeTargetXP = Number.isFinite(xpProgress?.target) && xpProgress.target > 0 ? xpProgress.target : 1
-  const progressPercent = Math.min(100, (safeCurrentXP / safeTargetXP) * 100)
 
   // Mobile sidebar open/closed state
   const [isOpen, setIsOpen] = useState(false)
@@ -380,22 +367,24 @@ function TopicSidebar({
 
         {/* Compact Stats Row */}
         <div className="px-3 py-2 border-b border-cream-200 bg-gray-50/50">
-          {/* Tier + XP row */}
+          {/* Explorer Rank + progress */}
           <div className="flex items-center justify-between text-sm mb-1.5">
-            <span className={`flex items-center gap-1 font-medium ${TIER_CONFIG[tier]?.color || 'text-gray-500'}`}>
-              {TIER_CONFIG[tier]?.icon} {TIER_CONFIG[tier]?.label}
+            <span className="flex items-center gap-1 font-medium text-indigo-600 dark:text-indigo-400">
+              {explorerRank.icon} {explorerRank.title}
             </span>
-            <span className="text-gray-500 text-xs">
-              {Math.round(safeCurrentXP)}/{Math.round(safeTargetXP)} XP
-            </span>
+            {explorerRank.nextRank && (
+              <span className="text-gray-500 text-xs">
+                {explorerRank.topicsToNextRank} to {explorerRank.nextRank.title}
+              </span>
+            )}
           </div>
-          {/* XP Progress bar + Streak row */}
+          {/* Rank Progress bar + Streak row */}
           <div className="flex items-center gap-2">
-            {/* XP Progress bar */}
-            <div className="flex-1 h-1.5 bg-primary-100 rounded-full overflow-hidden">
+            {/* Rank Progress bar */}
+            <div className="flex-1 h-1.5 bg-indigo-100 dark:bg-indigo-900/30 rounded-full overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-primary-400 to-primary-500 rounded-full transition-all duration-500"
-                style={{ width: `${progressPercent}%` }}
+                className="h-full bg-gradient-to-r from-indigo-400 to-indigo-500 rounded-full transition-all duration-500"
+                style={{ width: `${rankProgress}%` }}
               />
             </div>
             {/* Streak */}

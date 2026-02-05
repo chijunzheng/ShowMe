@@ -116,7 +116,7 @@ describe('Constellation', () => {
       const props = createDefaultProps({ nodes: [], edges: [], clusters: [], gaps: [] })
       render(<Constellation {...props} />)
 
-      expect(screen.getByText(/constellation awaits/i)).toBeInTheDocument()
+      expect(screen.getByText(/your knowledge constellation/i)).toBeInTheDocument()
     })
 
     it('shows guidance to start learning', () => {
@@ -265,7 +265,7 @@ describe('Constellation', () => {
       render(<Constellation {...props} />)
 
       const container = screen.getByTestId('constellation')
-      expect(container.className).toMatch(/bg-slate-950/)
+      expect(container.className).toMatch(/bg-gradient-to-b from-slate-900 via-slate-950 to-indigo-950/)
     })
 
     it('has overflow hidden', () => {

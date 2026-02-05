@@ -198,7 +198,7 @@ describe('ConstellationEdge', () => {
       renderInSvg(<ConstellationEdge {...props} />)
 
       const edge = screen.getByTestId('constellation-edge-edge-1')
-      expect(parseFloat(edge.getAttribute('opacity'))).toBe(0.3)
+      expect(parseFloat(edge.getAttribute('opacity'))).toBe(0.5)
     })
 
     it('applies pulse animation when undiscovered', () => {
@@ -242,7 +242,7 @@ describe('ConstellationEdge', () => {
       renderInSvg(<ConstellationEdge {...props} />)
 
       const edge = screen.getByTestId('constellation-edge-edge-1')
-      expect(parseFloat(edge.getAttribute('opacity'))).toBe(0.15) // 0.3 * 0.5
+      expect(parseFloat(edge.getAttribute('opacity'))).toBe(0.25) // 0.5 * 0.5
     })
 
     it('defaults strength to 1 when not provided', () => {

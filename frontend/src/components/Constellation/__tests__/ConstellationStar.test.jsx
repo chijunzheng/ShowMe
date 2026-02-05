@@ -76,7 +76,7 @@ describe('ConstellationStar', () => {
       render(<ConstellationStar {...props} />)
 
       const star = screen.getByTestId('constellation-star-n1')
-      expect(star.className).toMatch(/w-4|h-4|opacity-40/)
+      expect(star.className).toMatch(/w-5|h-5|opacity-60/)
     })
 
     it('applies glow styling for glow brightness', () => {
@@ -86,7 +86,7 @@ describe('ConstellationStar', () => {
       render(<ConstellationStar {...props} />)
 
       const star = screen.getByTestId('constellation-star-n1')
-      expect(star.className).toMatch(/w-5|h-5|opacity-70/)
+      expect(star.className).toMatch(/w-6|h-6|opacity-80/)
     })
 
     it('applies bright styling for bright brightness', () => {
@@ -96,7 +96,7 @@ describe('ConstellationStar', () => {
       render(<ConstellationStar {...props} />)
 
       const star = screen.getByTestId('constellation-star-n1')
-      expect(star.className).toMatch(/w-6|h-6|opacity-90/)
+      expect(star.className).toMatch(/w-7|h-7|opacity-95/)
     })
 
     it('applies brilliant styling for brilliant brightness', () => {
@@ -106,7 +106,7 @@ describe('ConstellationStar', () => {
       render(<ConstellationStar {...props} />)
 
       const star = screen.getByTestId('constellation-star-n1')
-      expect(star.className).toMatch(/w-8|h-8|opacity-100/)
+      expect(star.className).toMatch(/w-9|h-9|opacity-100/)
     })
 
     it('renders rays for brilliant stars', () => {
@@ -189,7 +189,8 @@ describe('ConstellationStar', () => {
       const star = screen.getByTestId('constellation-star-n1')
       fireEvent.mouseEnter(star)
 
-      expect(screen.getByText('Black Holes')).toBeInTheDocument()
+      // Persistent label + tooltip both show name; tooltip has role="tooltip"
+      expect(screen.getByRole('tooltip')).toBeInTheDocument()
     })
 
     it('shows mastery percentage in tooltip', () => {
@@ -334,8 +335,8 @@ describe('ConstellationStar', () => {
       render(<ConstellationStar {...props} />)
 
       const star = screen.getByTestId('constellation-star-n1')
-      // Should have glow-level styling (w-5 h-5)
-      expect(star.className).toMatch(/w-5|h-5/)
+      // Should have glow-level styling (w-6 h-6)
+      expect(star.className).toMatch(/w-6|h-6/)
     })
   })
 })

@@ -35,13 +35,6 @@ const PRACTICE_MODES = [
     description: 'Create a tale',
     color: 'rose',
   },
-  {
-    id: 'quiz',
-    icon: '⚡',
-    name: 'Quick Quiz',
-    description: 'Test yourself',
-    color: 'emerald',
-  },
 ]
 
 /**
@@ -66,7 +59,6 @@ function getModeColorClasses(color) {
  * @param {Function} props.onClose - Callback when sheet is closed
  * @param {Function} props.onReviewSlideshow - Callback for Review Slideshow action
  * @param {Function} props.onLaunchMode - Callback for launching a practice mode (topicName, mode, topicData)
- * @param {Function} props.onQuickQuiz - Callback for Quick Quiz action
  * @param {Function} props.onSelectRelatedTopic - Callback when a related topic chip is clicked
  */
 export default function TopicActionSheet({
@@ -75,7 +67,6 @@ export default function TopicActionSheet({
   onClose,
   onReviewSlideshow,
   onLaunchMode,
-  onQuickQuiz,
   onSelectRelatedTopic,
 }) {
   const sheetRef = useRef(null)
@@ -109,15 +100,11 @@ export default function TopicActionSheet({
 
   // Handle mode button click
   const handleModeClick = useCallback((mode) => {
-    if (mode.id === 'quiz') {
-      onQuickQuiz?.(topic?.topicName)
-    } else {
-      onLaunchMode?.(topic?.topicName, mode.id, {
-        slides: topic?.slides,
-        level: topic?.level,
-      })
-    }
-  }, [topic, onLaunchMode, onQuickQuiz])
+    onLaunchMode?.(topic?.topicName, mode.id, {
+      slides: topic?.slides,
+      level: topic?.level,
+    })
+  }, [topic, onLaunchMode])
 
   // Handle review slideshow click
   const handleReviewClick = useCallback(() => {
@@ -241,7 +228,7 @@ export default function TopicActionSheet({
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">
             Practice Modes
           </h3>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             {PRACTICE_MODES.map((mode) => (
               <button
                 key={mode.id}

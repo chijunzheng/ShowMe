@@ -1,20 +1,19 @@
 /**
  * StatsBar Component Tests
  *
- * TDD: These tests define the behavior for the StatsBar component
- * BEFORE implementation. StatsBar displays user learning statistics
- * including streak, XP, topics learned, and tree level.
+ * Tests for the StatsBar component that displays user learning statistics
+ * including streak, XP, topics learned, and explorer rank.
  *
  * Features:
  * - Streak counter with fire icon
  * - Total XP display
  * - Topics learned count
- * - Current tree level indicator
+ * - Explorer rank indicator (derived from topics learned)
  * - Animated updates
  */
 
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest'
-import { render, screen, cleanup, waitFor, act } from '@testing-library/react'
+import { render, screen, cleanup } from '@testing-library/react'
 import StatsBar from '../StatsBar'
 
 /**
@@ -24,7 +23,6 @@ const createDefaultProps = (overrides = {}) => ({
   streak: 0,
   totalXP: 0,
   topicsLearned: 0,
-  treeLevel: 'seed',
   isLoading: false,
   ...overrides,
 })
@@ -51,14 +49,13 @@ describe('StatsBar', () => {
         streak: 5,
         totalXP: 250,
         topicsLearned: 12,
-        treeLevel: 'mature',
       })
       render(<StatsBar {...props} />)
 
       expect(screen.getByTestId('stat-streak')).toBeInTheDocument()
       expect(screen.getByTestId('stat-xp')).toBeInTheDocument()
       expect(screen.getByTestId('stat-topics')).toBeInTheDocument()
-      expect(screen.getByTestId('stat-level')).toBeInTheDocument()
+      expect(screen.getByTestId('stat-rank')).toBeInTheDocument()
     })
   })
 
@@ -172,21 +169,7 @@ describe('StatsBar', () => {
       expect(screen.getByText(/topic/i)).toBeInTheDocument()
     })
 
-    it('uses singular "topic" for 1 topic', () => {
-      const props = createDefaultProps({ topicsLearned: 1 })
-      render(<StatsBar {...props} />)
-
-      expect(screen.getByText(/1 topic(?!s)/i)).toBeInTheDocument()
-    })
-
-    it('uses plural "topics" for multiple topics', () => {
-      const props = createDefaultProps({ topicsLearned: 5 })
-      render(<StatsBar {...props} />)
-
-      expect(screen.getByText(/5 topics/i)).toBeInTheDocument()
-    })
-
-    it('shows book/leaf icon for topics', () => {
+    it('shows leaf icon for topics', () => {
       const props = createDefaultProps({ topicsLearned: 10 })
       render(<StatsBar {...props} />)
 
@@ -195,41 +178,61 @@ describe('StatsBar', () => {
     })
   })
 
-  describe('tree level display', () => {
-    it('displays current tree level', () => {
-      const props = createDefaultProps({ treeLevel: 'sapling' })
+  describe('explorer rank display', () => {
+    it('displays stargazer rank for 0 topics', () => {
+      const props = createDefaultProps({ topicsLearned: 0 })
       render(<StatsBar {...props} />)
 
-      expect(screen.getByText(/sapling/i)).toBeInTheDocument()
+      const rankStat = screen.getByTestId('stat-rank')
+      // Should show telescope icon for Stargazer
+      expect(rankStat.textContent).toMatch(/\uD83D\uDD2D|Stargazer/)
     })
 
-    it('displays all tree levels correctly', () => {
-      const levels = ['seed', 'sprout', 'sapling', 'young', 'mature', 'magical']
-
-      levels.forEach((level) => {
-        cleanup()
-        const props = createDefaultProps({ treeLevel: level })
-        render(<StatsBar {...props} />)
-
-        const levelText = screen.getByTestId('stat-level')
-        expect(levelText.textContent.toLowerCase()).toContain(level)
-      })
-    })
-
-    it('shows tree icon', () => {
-      const props = createDefaultProps({ treeLevel: 'mature' })
+    it('displays space cadet rank for 3+ topics', () => {
+      const props = createDefaultProps({ topicsLearned: 3 })
       render(<StatsBar {...props} />)
 
-      const levelStat = screen.getByTestId('stat-level')
-      expect(levelStat.textContent).toMatch(/\ud83c\udf33|\ud83c\udf31|\ud83c\udf3f|tree/)
+      const rankStat = screen.getByTestId('stat-rank')
+      // Should show rocket icon for Space Cadet
+      expect(rankStat.textContent).toMatch(/\uD83D\uDE80|Space Cadet/)
     })
 
-    it('shows special styling for magical level', () => {
-      const props = createDefaultProps({ treeLevel: 'magical' })
+    it('displays navigator rank for 8+ topics', () => {
+      const props = createDefaultProps({ topicsLearned: 8 })
       render(<StatsBar {...props} />)
 
-      const levelStat = screen.getByTestId('stat-level')
-      expect(levelStat.className).toMatch(/purple|magic|shimmer|glow|gradient/)
+      const rankStat = screen.getByTestId('stat-rank')
+      // Should show compass icon for Navigator
+      expect(rankStat.textContent).toMatch(/\uD83E\uDDED|Navigator/)
+    })
+
+    it('displays explorer rank for 15+ topics', () => {
+      const props = createDefaultProps({ topicsLearned: 15 })
+      render(<StatsBar {...props} />)
+
+      const rankStat = screen.getByTestId('stat-rank')
+      expect(rankStat.textContent).toMatch(/\uD83C\uDF0C|Explorer/)
+    })
+
+    it('shows special styling for max rank (Pioneer)', () => {
+      const props = createDefaultProps({ topicsLearned: 60 })
+      render(<StatsBar {...props} />)
+
+      const rankStat = screen.getByTestId('stat-rank')
+      expect(rankStat.className).toMatch(/red|shimmer/)
+    })
+
+    it('rank updates when topics increase', () => {
+      const props = createDefaultProps({ topicsLearned: 2 })
+      const { rerender } = render(<StatsBar {...props} />)
+
+      let rankStat = screen.getByTestId('stat-rank')
+      expect(rankStat.textContent).toMatch(/\uD83D\uDD2D/) // telescope (Stargazer)
+
+      rerender(<StatsBar {...createDefaultProps({ topicsLearned: 8 })} />)
+
+      rankStat = screen.getByTestId('stat-rank')
+      expect(rankStat.textContent).toMatch(/\uD83E\uDDED/) // compass (Navigator)
     })
   })
 
@@ -289,16 +292,6 @@ describe('StatsBar', () => {
 
       const streakStat = screen.getByTestId('stat-streak')
       expect(streakStat.className).toMatch(/animate|pulse|pop/)
-    })
-
-    it('animates level up', async () => {
-      const props = createDefaultProps({ treeLevel: 'sprout' })
-      const { rerender } = render(<StatsBar {...props} />)
-
-      rerender(<StatsBar {...props} treeLevel={'sapling'} />)
-
-      const levelStat = screen.getByTestId('stat-level')
-      expect(levelStat.className).toMatch(/animate|pulse|glow/)
     })
   })
 
@@ -368,7 +361,6 @@ describe('StatsBar', () => {
         streak: 5,
         totalXP: 100,
         topicsLearned: 10,
-        treeLevel: 'sapling',
       })
       render(<StatsBar {...props} />)
 
@@ -394,7 +386,6 @@ describe('StatsBar', () => {
         streak: null,
         totalXP: null,
         topicsLearned: null,
-        treeLevel: null,
       }
 
       expect(() => render(<StatsBar {...props} />)).not.toThrow()
@@ -419,12 +410,13 @@ describe('StatsBar', () => {
       expect(screen.queryByText('-100')).not.toBeInTheDocument()
     })
 
-    it('handles invalid treeLevel by defaulting to seed', () => {
-      const props = createDefaultProps({ treeLevel: 'invalid' })
+    it('defaults to stargazer rank for invalid topic count', () => {
+      const props = createDefaultProps({ topicsLearned: -5 })
       render(<StatsBar {...props} />)
 
-      const levelStat = screen.getByTestId('stat-level')
-      expect(levelStat.textContent.toLowerCase()).toContain('seed')
+      const rankStat = screen.getByTestId('stat-rank')
+      // Should default to Stargazer (telescope icon)
+      expect(rankStat.textContent).toMatch(/\uD83D\uDD2D/)
     })
   })
 
@@ -437,12 +429,33 @@ describe('StatsBar', () => {
       expect(statsBar.className).toMatch(/compact|sm:|text-sm/)
     })
 
+    it('has neobrutalism styling in compact mode', () => {
+      const props = createDefaultProps({ compact: true })
+      render(<StatsBar {...props} />)
+
+      const statsBar = screen.getByTestId('stats-bar')
+      expect(statsBar.className).toMatch(/border-2|shadow/)
+    })
+
     it('hides labels in compact mode', () => {
       const props = createDefaultProps({ compact: true, streak: 5 })
       render(<StatsBar {...props} />)
 
       // Should show number but hide label text in compact
       expect(screen.getByText('5')).toBeInTheDocument()
+      // Labels like "Streak", "XP", "Topics" should not appear
+      expect(screen.queryByText('Streak')).not.toBeInTheDocument()
+      expect(screen.queryByText('XP')).not.toBeInTheDocument()
+    })
+
+    it('shows abbreviated rank title in compact mode', () => {
+      const props = createDefaultProps({ compact: true, topicsLearned: 8 })
+      render(<StatsBar {...props} />)
+
+      // Icon should show with abbreviated title
+      const rankStat = screen.getByTestId('stat-rank')
+      expect(rankStat.textContent).toMatch(/\uD83E\uDDED/) // compass icon
+      expect(screen.getByText('Navigator')).toBeInTheDocument()
     })
   })
 })

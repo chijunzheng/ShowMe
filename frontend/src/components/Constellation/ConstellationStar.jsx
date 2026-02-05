@@ -18,20 +18,20 @@ import { useState, useCallback, useMemo } from 'react'
  * Size classes for different brightness levels
  */
 const SIZE_CLASSES = {
-  dim: 'w-4 h-4',
-  glow: 'w-5 h-5',
-  bright: 'w-6 h-6',
-  brilliant: 'w-8 h-8',
+  dim: 'w-5 h-5',
+  glow: 'w-6 h-6',
+  bright: 'w-7 h-7',
+  brilliant: 'w-9 h-9',
 }
 
 /**
  * Glow effect classes for different brightness levels
  */
 const GLOW_CLASSES = {
-  dim: 'opacity-40',
-  glow: 'opacity-70 shadow-[0_0_8px_rgba(99,102,241,0.4)]',
-  bright: 'opacity-90 shadow-[0_0_12px_rgba(99,102,241,0.6)]',
-  brilliant: 'opacity-100 shadow-[0_0_20px_rgba(99,102,241,0.8)] animate-pulse-slow',
+  dim: 'opacity-60 shadow-[0_0_6px_rgba(99,102,241,0.3)]',
+  glow: 'opacity-80 shadow-[0_0_10px_rgba(99,102,241,0.5)]',
+  bright: 'opacity-95 shadow-[0_0_14px_rgba(99,102,241,0.7)]',
+  brilliant: 'opacity-100 shadow-[0_0_22px_rgba(99,102,241,0.9)] animate-pulse-slow',
 }
 
 /**
@@ -155,6 +155,19 @@ export default function ConstellationStar({ node, position, onTap }) {
           />
         </div>
       )}
+
+      {/* Persistent label - always visible */}
+      <div
+        className="
+          absolute left-1/2 top-full mt-1 -translate-x-1/2
+          text-[10px] text-slate-300/80
+          whitespace-nowrap pointer-events-none
+          max-w-[80px] truncate text-center
+        "
+        aria-hidden="true"
+      >
+        {node.name}
+      </div>
     </button>
   )
 }
