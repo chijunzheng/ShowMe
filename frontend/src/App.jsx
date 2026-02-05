@@ -409,6 +409,41 @@ function App() {
     [explorerRank?.title, progressPieces.length]
   )
 
+  const earnedTrophies = useMemo(() => {
+    const badgeIds = Array.isArray(userProgress?.badges) ? userProgress.badges : []
+    if (badgeIds.length === 0) return []
+
+    const definitions = badgeDefinitions && typeof badgeDefinitions === 'object'
+      ? badgeDefinitions
+      : {}
+    const unlockDates = userProgress?.badgeUnlockDates || {}
+
+    return badgeIds
+      .map((badgeId) => {
+        const badge = definitions[badgeId]
+        const earnedAt = unlockDates?.[badgeId] || null
+
+        if (!badge) {
+          return {
+            id: badgeId,
+            name: badgeId,
+            description: '',
+            icon: 'trophy',
+            earnedAt,
+          }
+        }
+
+        return {
+          id: badgeId,
+          name: badge.name,
+          description: badge.description,
+          icon: badge.icon,
+          earnedAt,
+        }
+      })
+      .filter(Boolean)
+  }, [userProgress?.badges, userProgress?.badgeUnlockDates, badgeDefinitions])
+
   // CORE032: Slides split into top-level (visible) and child slides for 2D navigation
   const allTopicSlides = useMemo(() => buildTopicSlides(activeTopic), [activeTopic])
   const visibleSlides = useMemo(() => allTopicSlides.filter(s => !s.parentId), [allTopicSlides])
@@ -3451,6 +3486,8 @@ function App() {
               onLaunchMode={handleLaunchLearningMode}
               totalXP={totalWorldXP}
               streak={{ current: userProgress?.streakCount || 0, todayCompleted: false }}
+              trophies={earnedTrophies}
+              trophiesLoading={isUserProgressLoading}
               onSelectSuggestedTopic={(topicName) => {
                 setActiveTab('learn')
                 handleQuestion(topicName, { source: 'progress_suggestion' })

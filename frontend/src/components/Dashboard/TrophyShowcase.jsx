@@ -14,11 +14,16 @@ import PropTypes from 'prop-types'
 const TROPHY_ICONS = {
   'question-mark': '\u2753',
   fire: '\ud83d\udd25',
+  'flame-small': '\ud83d\udd25',
+  'flame-medium': '\ud83d\udd25',
+  'flame-large': '\ud83d\udd25',
   compass: '\ud83e\udded',
   star: '\u2b50',
   trophy: '\ud83c\udfc6',
   book: '\ud83d\udcd6',
   lightbulb: '\ud83d\udca1',
+  brain: '\ud83e\udde0',
+  'thought-bubble': '\ud83d\udcad',
   rocket: '\ud83d\ude80',
   medal: '\ud83c\udfc5',
 }
