@@ -76,7 +76,7 @@ export default function Constellation({
   // Calculate node positions using force-directed layout
   const positions = useConstellationLayout(nodes, edges, {
     centerX: containerSize.width / 2,
-    centerY: containerSize.height / 2,
+    centerY: containerSize.height / 2 - 20,
   }, clusters)
 
   /**
@@ -177,13 +177,21 @@ export default function Constellation({
   }, [gaps, positions, nodes])
 
   /**
+   * Filter out "General" cluster for display
+   */
+  const displayClusters = useMemo(() =>
+    clusters.filter(c => c.name?.toLowerCase() !== 'general'),
+    [clusters]
+  )
+
+  /**
    * Calculate nebula cloud data for each cluster
    * Each cluster gets a soft radial gradient ellipse behind its nodes
    */
   const nebulaData = useMemo(() => {
-    if (!clusters || clusters.length === 0) return []
+    if (!displayClusters || displayClusters.length === 0) return []
 
-    return clusters.map((cluster) => {
+    return displayClusters.map((cluster) => {
       // Get positions of all nodes in this cluster
       const clusterPositions = cluster.nodeIds
         .map((id) => positions.get(id))
@@ -200,7 +208,7 @@ export default function Constellation({
       const maxY = Math.max(...ys)
 
       // Center and radius with padding
-      const padding = 60
+      const padding = 30
       const cx = (minX + maxX) / 2
       const cy = (minY + maxY) / 2
       const rx = Math.max(40, (maxX - minX) / 2 + padding)
@@ -215,7 +223,7 @@ export default function Constellation({
         color: cluster.color || '#64748B',
       }
     }).filter(Boolean)
-  }, [clusters, positions])
+  }, [displayClusters, positions])
 
   /**
    * Transform style for pan/zoom
@@ -290,14 +298,14 @@ export default function Constellation({
       {nebulaData.length > 0 && (
         <svg
           className="absolute inset-0 w-full h-full pointer-events-none"
-          style={transformStyle}
+          style={{ ...transformStyle, mixBlendMode: 'screen' }}
           aria-hidden="true"
         >
           <defs>
             {nebulaData.map((nebula) => (
               <radialGradient key={`grad-${nebula.id}`} id={`nebula-${nebula.id}`}>
-                <stop offset="0%" stopColor={nebula.color} stopOpacity="0.15" />
-                <stop offset="70%" stopColor={nebula.color} stopOpacity="0.05" />
+                <stop offset="0%" stopColor={nebula.color} stopOpacity="0.08" />
+                <stop offset="70%" stopColor={nebula.color} stopOpacity="0.03" />
                 <stop offset="100%" stopColor={nebula.color} stopOpacity="0" />
               </radialGradient>
             ))}
@@ -342,7 +350,7 @@ export default function Constellation({
       {/* Stars layer (nodes, clusters, gaps) */}
       <div className="absolute inset-0" style={transformStyle}>
         {/* Cluster labels (rendered first, below stars) */}
-        {clusters.map((cluster) => (
+        {displayClusters.map((cluster) => (
           <ConstellationCluster
             key={cluster.id}
             cluster={cluster}

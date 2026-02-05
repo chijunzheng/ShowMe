@@ -634,6 +634,82 @@ export default function useKnowledgeGraph() {
   )
 
   /**
+   * Reconcile graph nodes with current topics from sidebar
+   * Removes stale nodes from localStorage that no longer exist in the topics array
+   *
+   * @param {string[]} topicNames - Array of topic name strings from sidebar
+   */
+  const reconcileWithTopics = useCallback((topicNames) => {
+    setGraph((prev) => {
+      // Create case-insensitive lookup of valid topic names
+      const validNames = new Set(
+        topicNames.map((name) => name?.toLowerCase()).filter(Boolean)
+      )
+
+      // Keep only nodes whose name matches a valid topic (case-insensitive)
+      const updatedNodes = prev.nodes.filter((node) =>
+        validNames.has(node.name?.toLowerCase())
+      )
+
+      // Extract IDs of remaining nodes for edge/cluster cleanup
+      const validNodeIds = new Set(updatedNodes.map((n) => n.id))
+
+      // Remove orphaned edges (where from or to references a deleted node)
+      const updatedEdges = prev.edges.filter(
+        (edge) => validNodeIds.has(edge.from) && validNodeIds.has(edge.to)
+      )
+
+      // Remove empty clusters and filter out deleted nodes from cluster nodeIds
+      const updatedClusters = prev.clusters
+        .map((cluster) => ({
+          ...cluster,
+          nodeIds: cluster.nodeIds.filter((id) => validNodeIds.has(id)),
+        }))
+        .filter((cluster) => cluster.nodeIds.length > 0)
+
+      // Clean up gaps that reference deleted nodes
+      const updatedGaps = prev.gaps.filter((gap) =>
+        gap.relatedNodeIds?.every((id) => validNodeIds.has(id))
+      )
+
+      // Clean nodeId references from remaining nodes' followUps arrays
+      const cleanedNodes = updatedNodes.map((node) => {
+        const validFollowUps = node.followUps.filter((id) =>
+          validNodeIds.has(id)
+        )
+        if (validFollowUps.length === node.followUps.length) {
+          return node
+        }
+        return {
+          ...node,
+          followUps: validFollowUps,
+        }
+      })
+
+      // Recalculate explorer rank from remaining node count
+      const explorerRank = getExplorerRank(cleanedNodes.length)
+
+      const removedCount = prev.nodes.length - cleanedNodes.length
+
+      if (removedCount > 0) {
+        logger.info('STORAGE', 'Reconciled knowledge graph with topics', {
+          removedNodes: removedCount,
+          remainingNodes: cleanedNodes.length,
+        })
+      }
+
+      return {
+        ...prev,
+        nodes: cleanedNodes,
+        edges: updatedEdges,
+        clusters: updatedClusters,
+        gaps: updatedGaps,
+        explorerRank,
+      }
+    })
+  }, [])
+
+  /**
    * Mark an edge as discovered (user explored the connection)
    *
    * @param {string} edgeId - Edge ID
@@ -809,6 +885,7 @@ export default function useKnowledgeGraph() {
     recluster,
     deleteTopic,
     deleteTopicByName,
+    reconcileWithTopics,
 
     // Query methods
     getNode,

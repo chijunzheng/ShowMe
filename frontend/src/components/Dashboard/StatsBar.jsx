@@ -7,7 +7,6 @@
 
 import { useState, useEffect, useRef } from 'react'
 import PropTypes from 'prop-types'
-import { getExplorerRank, MAX_RANK_LEVEL } from '../ExplorerRank/explorerRankUtils'
 
 /**
  * Format number with commas or K suffix
@@ -58,6 +57,8 @@ function StatsBarSkeleton() {
  * @param {number} props.streak - Current learning streak (days)
  * @param {number} props.totalXP - Total XP earned
  * @param {number} props.topicsLearned - Number of topics learned
+ * @param {number} props.trophyCount - Number of trophies earned
+ * @param {string} props.rankIcon - Optional rank icon to replace default XP star
  * @param {boolean} props.isLoading - Whether stats are loading
  * @param {boolean} props.compact - Whether to use compact display
  */
@@ -65,11 +66,12 @@ export default function StatsBar({
   streak = 0,
   totalXP = 0,
   topicsLearned = 0,
+  trophyCount = 0,
+  rankIcon,
   isLoading = false,
   compact = false,
+  onStatTap,
 }) {
-  // Calculate explorer rank from topics learned and XP
-  const explorerRank = getExplorerRank(topicsLearned, totalXP)
 
   // Track previous values for animation
   const prevStreak = useRef(streak)
@@ -104,6 +106,7 @@ export default function StatsBar({
   const safeStreak = Math.max(0, streak || 0)
   const safeXP = Math.max(0, totalXP || 0)
   const safeTopics = Math.max(0, topicsLearned || 0)
+  const safeTrophyCount = Math.max(0, trophyCount || 0)
 
   return (
     <div
@@ -120,62 +123,66 @@ export default function StatsBar({
       `}
     >
       {/* Streak */}
-      <div
+      <button
+        type="button"
         data-testid="stat-streak"
+        onClick={() => onStatTap?.('streak')}
         className={`
           flex flex-col items-center
           px-3 py-2
           rounded-lg
+          cursor-pointer hover:scale-105 active:scale-95 transition-transform
           ${safeStreak > 0 ? 'bg-orange-50 dark:bg-orange-900/30' : 'opacity-50 bg-slate-50 dark:bg-slate-700'}
           ${streakAnimating ? 'animate-pulse' : ''}
         `}
       >
         <span className="text-xl">{'\ud83d\udd25'}</span>
         <span className="font-bold text-slate-800 dark:text-white">{safeStreak}</span>
-        {!compact && <span className="text-xs text-slate-500 dark:text-slate-400">Streak</span>}
-      </div>
+        <span className="text-xs text-slate-500 dark:text-slate-400">Streak</span>
+      </button>
 
       {/* XP */}
-      <div
+      <button
+        type="button"
         data-testid="stat-xp"
+        onClick={() => onStatTap?.('xp')}
         className={`
           flex flex-col items-center
           px-3 py-2
           rounded-lg
+          cursor-pointer hover:scale-105 active:scale-95 transition-transform
           bg-yellow-50 dark:bg-yellow-900/30
           ${xpAnimating ? 'animate-pulse' : ''}
         `}
       >
-        <span className="text-xl">{'\u2b50'}</span>
+        <span className="text-xl">{rankIcon || '\u2b50'}</span>
         <span className="font-bold text-slate-800 dark:text-white">{formatNumber(safeXP)}</span>
-        {!compact && <span className="text-xs text-slate-500 dark:text-slate-400">XP</span>}
-      </div>
+        <span className="text-xs text-slate-500 dark:text-slate-400">XP</span>
+      </button>
 
       {/* Topics */}
-      <div
+      <button
+        type="button"
         data-testid="stat-topics"
-        className="flex flex-col items-center px-3 py-2 rounded-lg bg-emerald-50 dark:bg-emerald-900/30"
+        onClick={() => onStatTap?.('topics')}
+        className="flex flex-col items-center px-3 py-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 cursor-pointer hover:scale-105 active:scale-95 transition-transform"
       >
-        <span className="text-xl">{'\ud83c\udf3f'}</span>
+        <span className="text-xl">{'\ud83d\udcda'}</span>
         <span className="font-bold text-slate-800 dark:text-white">{safeTopics}</span>
-        {!compact && <span className="text-xs text-slate-500 dark:text-slate-400">Topics</span>}
-      </div>
+        <span className="text-xs text-slate-500 dark:text-slate-400">Topics</span>
+      </button>
 
-      {/* Explorer Rank */}
-      <div
-        data-testid="stat-rank"
-        className={`
-          flex flex-col items-center
-          px-3 py-2
-          rounded-lg
-          ${explorerRank.level === MAX_RANK_LEVEL ? 'bg-red-100 dark:bg-red-900/30 shimmer' : 'bg-sky-50 dark:bg-sky-900/30'}
-        `}
+      {/* Trophies */}
+      <button
+        type="button"
+        data-testid="stat-trophies"
+        onClick={() => onStatTap?.('trophies')}
+        className="flex flex-col items-center px-3 py-2 rounded-lg bg-yellow-50 dark:bg-yellow-900/30 cursor-pointer hover:scale-105 active:scale-95 transition-transform"
       >
-        <span className="text-xl">{explorerRank.icon}</span>
-        <span className="font-bold text-slate-800 dark:text-white text-xs">
-          {compact ? explorerRank.title.split(' ')[0] : explorerRank.title}
-        </span>
-      </div>
+        <span className="text-xl">{'\ud83c\udfc6'}</span>
+        <span className="font-bold text-slate-800 dark:text-white">{safeTrophyCount}</span>
+        <span className="text-xs text-slate-500 dark:text-slate-400">Trophies</span>
+      </button>
     </div>
   )
 }
@@ -184,6 +191,9 @@ StatsBar.propTypes = {
   streak: PropTypes.number,
   totalXP: PropTypes.number,
   topicsLearned: PropTypes.number,
+  trophyCount: PropTypes.number,
+  rankIcon: PropTypes.string,
   isLoading: PropTypes.bool,
   compact: PropTypes.bool,
+  onStatTap: PropTypes.func,
 }

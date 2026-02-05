@@ -22,28 +22,29 @@ import { useMemo } from 'react'
  */
 export default function ConstellationCluster({ cluster, nodePositions }) {
   /**
-   * Calculate centroid of all cluster nodes
+   * Calculate label position at top of cluster
    */
-  const centroid = useMemo(() => {
+  const labelPosition = useMemo(() => {
     // Get positions for all nodes in cluster
     const positions = cluster.nodeIds
       .map((id) => nodePositions.get(id))
       .filter(Boolean)
 
-    // Can't calculate centroid without positions
+    // Can't calculate position without positions
     if (positions.length === 0) {
       return null
     }
 
-    // Calculate average x and y
+    // Calculate average x for horizontal centering
     const x = positions.reduce((sum, p) => sum + p.x, 0) / positions.length
-    const y = positions.reduce((sum, p) => sum + p.y, 0) / positions.length
+    // Find minimum y (topmost node) and position label 30px above
+    const minY = Math.min(...positions.map((p) => p.y))
 
-    return { x, y }
+    return { x, y: minY - 30 }
   }, [cluster.nodeIds, nodePositions])
 
-  // Don't render if no valid centroid
-  if (!centroid) {
+  // Don't render if no valid position
+  if (!labelPosition) {
     return null
   }
 
@@ -57,8 +58,8 @@ export default function ConstellationCluster({ cluster, nodePositions }) {
       data-testid={`constellation-cluster-${cluster.id}`}
       className="absolute transform -translate-x-1/2 -translate-y-1/2 pointer-events-none"
       style={{
-        left: centroid.x,
-        top: centroid.y - 40, // Position above the centroid
+        left: labelPosition.x,
+        top: labelPosition.y,
       }}
       aria-hidden="true"
     >
@@ -67,6 +68,7 @@ export default function ConstellationCluster({ cluster, nodePositions }) {
         style={{
           backgroundColor,
           color: cluster.color || '#9CA3AF',
+          textShadow: '0 1px 4px rgba(0,0,0,0.6)',
         }}
       >
         {cluster.icon && (

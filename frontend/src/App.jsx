@@ -147,6 +147,7 @@ function App() {
     getNodeByName: getGraphNodeByName,
     topicCount: graphTopicCount,
     deleteTopicByName,
+    reconcileWithTopics,
   } = useKnowledgeGraph()
 
   const [isWorldRegenerating, setIsWorldRegenerating] = useState(false)
@@ -472,6 +473,25 @@ function App() {
     activeTopicRef.current = activeTopic
     visibleSlidesRef.current = visibleSlides
   }, [activeTopic, visibleSlides])
+
+  // CONSTELLATION-FIX: Reconcile knowledge graph with topics from localStorage
+  // Remove stale nodes that no longer exist in the topics array
+  const reconcileDoneRef = useRef(false)
+  useEffect(() => {
+    // Only run once after graph loads and topics are available
+    if (reconcileDoneRef.current || graphIsLoading || topics.length === 0) {
+      return
+    }
+
+    // Extract topic names and reconcile graph
+    const topicNames = topics.map((t) => t.name)
+    reconcileWithTopics(topicNames)
+    reconcileDoneRef.current = true
+
+    logger.debug('APP', 'Reconciled knowledge graph with topics', {
+      topicCount: topics.length,
+    })
+  }, [graphIsLoading, topics, reconcileWithTopics])
 
   // Note: activeChildSlides, displayedSlide come from useSlideshowControl hook (after slideAudio hook)
 
