@@ -19,6 +19,7 @@ import logger from './utils/logger.js'
 
 // Import request logging middleware (F077)
 import requestLogger from './middleware/requestLogger.js'
+import createJsonBodyParserMiddleware from './middleware/jsonBodyParser.js'
 
 // Import WebSocket progress utilities for client management
 import {
@@ -104,16 +105,8 @@ app.use(cors({
   optionsSuccessStatus: 204,
 }))
 
-// Parse JSON bodies with size limit (security measure)
-// Slides and world piece payloads can be large (base64 images), so allow a larger limit on those routes.
-const smallJson = express.json({ limit: '10kb' })
-const largeJson = express.json({ limit: '20mb' })
-app.use((req, res, next) => {
-  if (req.path.startsWith('/api/slides') || req.path.startsWith('/api/world/piece')) {
-    return largeJson(req, res, next)
-  }
-  return smallJson(req, res, next)
-})
+// Parse JSON bodies with size limits (security measure)
+app.use(createJsonBodyParserMiddleware())
 
 // F077: Request logging middleware - logs all requests with timing
 app.use(requestLogger)
