@@ -21,6 +21,7 @@ describe('ExplorerRankProgress', () => {
     title: 'Space Cadet',
     icon: 'ROCKET',
     minTopics: 3,
+    minXP: 150,
     description: 'Ready for launch!',
   }
 
@@ -30,47 +31,36 @@ describe('ExplorerRankProgress', () => {
     title: 'Navigator',
     icon: 'COMPASS',
     minTopics: 8,
+    minXP: 350,
     description: 'Charting new courses',
+  }
+
+  const baseProps = {
+    currentTopics: 5,
+    topicsForNextRank: 3,
+    currentXP: 200,
+    xpForNextRank: 150,
+    currentRank: mockCurrentRank,
+    nextRank: mockNextRank,
   }
 
   describe('basic rendering', () => {
     it('renders the progress component', () => {
-      render(
-        <ExplorerRankProgress
-          currentTopics={5}
-          topicsForNextRank={3}
-          currentRank={mockCurrentRank}
-          nextRank={mockNextRank}
-        />
-      )
+      render(<ExplorerRankProgress {...baseProps} />)
 
       const progress = screen.getByTestId('explorer-rank-progress')
       expect(progress).toBeTruthy()
     })
 
     it('displays current rank icon', () => {
-      render(
-        <ExplorerRankProgress
-          currentTopics={5}
-          topicsForNextRank={3}
-          currentRank={mockCurrentRank}
-          nextRank={mockNextRank}
-        />
-      )
+      render(<ExplorerRankProgress {...baseProps} />)
 
       const progress = screen.getByTestId('explorer-rank-progress')
       expect(progress.textContent).toContain('ROCKET')
     })
 
     it('displays next rank icon', () => {
-      render(
-        <ExplorerRankProgress
-          currentTopics={5}
-          topicsForNextRank={3}
-          currentRank={mockCurrentRank}
-          nextRank={mockNextRank}
-        />
-      )
+      render(<ExplorerRankProgress {...baseProps} />)
 
       const progress = screen.getByTestId('explorer-rank-progress')
       expect(progress.textContent).toContain('COMPASS')
@@ -79,28 +69,14 @@ describe('ExplorerRankProgress', () => {
 
   describe('progress bar', () => {
     it('has progressbar role', () => {
-      render(
-        <ExplorerRankProgress
-          currentTopics={5}
-          topicsForNextRank={3}
-          currentRank={mockCurrentRank}
-          nextRank={mockNextRank}
-        />
-      )
+      render(<ExplorerRankProgress {...baseProps} />)
 
       const progressBar = screen.getByRole('progressbar')
       expect(progressBar).toBeTruthy()
     })
 
     it('has correct aria values', () => {
-      render(
-        <ExplorerRankProgress
-          currentTopics={5}
-          topicsForNextRank={3}
-          currentRank={mockCurrentRank}
-          nextRank={mockNextRank}
-        />
-      )
+      render(<ExplorerRankProgress {...baseProps} />)
 
       const progressBar = screen.getByRole('progressbar')
       expect(progressBar.getAttribute('aria-valuemin')).toBe('0')
@@ -110,14 +86,7 @@ describe('ExplorerRankProgress', () => {
 
   describe('progress text', () => {
     it('shows topics remaining text', () => {
-      render(
-        <ExplorerRankProgress
-          currentTopics={5}
-          topicsForNextRank={3}
-          currentRank={mockCurrentRank}
-          nextRank={mockNextRank}
-        />
-      )
+      render(<ExplorerRankProgress {...baseProps} />)
 
       const progress = screen.getByTestId('explorer-rank-progress')
       expect(progress.textContent).toContain('3')
@@ -128,10 +97,9 @@ describe('ExplorerRankProgress', () => {
     it('shows singular topic when 1 topic remaining', () => {
       render(
         <ExplorerRankProgress
+          {...baseProps}
           currentTopics={7}
           topicsForNextRank={1}
-          currentRank={mockCurrentRank}
-          nextRank={mockNextRank}
         />
       )
 
@@ -140,14 +108,7 @@ describe('ExplorerRankProgress', () => {
     })
 
     it('shows plural topics when multiple topics remaining', () => {
-      render(
-        <ExplorerRankProgress
-          currentTopics={5}
-          topicsForNextRank={3}
-          currentRank={mockCurrentRank}
-          nextRank={mockNextRank}
-        />
-      )
+      render(<ExplorerRankProgress {...baseProps} />)
 
       const progress = screen.getByTestId('explorer-rank-progress')
       expect(progress.textContent).toMatch(/3 topics/i)
@@ -158,15 +119,18 @@ describe('ExplorerRankProgress', () => {
     it('shows max rank achieved message when no next rank', () => {
       render(
         <ExplorerRankProgress
-          currentTopics={60}
+          currentTopics={120}
           topicsForNextRank={0}
+          currentXP={9000}
+          xpForNextRank={0}
           currentRank={{
-            level: 7,
-            id: 'pioneer',
-            title: 'Pioneer',
-            icon: 'STAR',
-            minTopics: 60,
-            description: 'Legendary space pioneer',
+            level: 12,
+            id: 'luminary',
+            title: 'Legendary Luminary',
+            icon: 'SUN',
+            minTopics: 120,
+            minXP: 9000,
+            description: 'A beacon of knowledge',
           }}
           nextRank={null}
         />
@@ -179,15 +143,18 @@ describe('ExplorerRankProgress', () => {
     it('shows star icon for max rank', () => {
       render(
         <ExplorerRankProgress
-          currentTopics={60}
+          currentTopics={120}
           topicsForNextRank={0}
+          currentXP={9000}
+          xpForNextRank={0}
           currentRank={{
-            level: 7,
-            id: 'pioneer',
-            title: 'Pioneer',
-            icon: 'STAR',
-            minTopics: 60,
-            description: 'Legendary space pioneer',
+            level: 12,
+            id: 'luminary',
+            title: 'Legendary Luminary',
+            icon: 'SUN',
+            minTopics: 120,
+            minXP: 9000,
+            description: 'A beacon of knowledge',
           }}
           nextRank={null}
         />
@@ -203,10 +170,7 @@ describe('ExplorerRankProgress', () => {
     it('shows current topic count', () => {
       render(
         <ExplorerRankProgress
-          currentTopics={5}
-          topicsForNextRank={3}
-          currentRank={mockCurrentRank}
-          nextRank={mockNextRank}
+          {...baseProps}
         />
       )
 
@@ -217,10 +181,7 @@ describe('ExplorerRankProgress', () => {
     it('shows next rank threshold', () => {
       render(
         <ExplorerRankProgress
-          currentTopics={5}
-          topicsForNextRank={3}
-          currentRank={mockCurrentRank}
-          nextRank={mockNextRank}
+          {...baseProps}
         />
       )
 

@@ -23,6 +23,7 @@ import { getExplorerRank, getRankProgress } from './ExplorerRank/explorerRankUti
  * @param {Function} props.onDeleteTopic - Callback when topic is deleted, receives topicId
  * @param {Function} [props.onQuickQuizTopic] - Callback for quick quiz, receives topic object
  * @param {number} props.streakCount - Current streak days
+ * @param {number} props.totalXP - Total XP earned
  */
 function TopicSidebar({
   topics,
@@ -33,10 +34,11 @@ function TopicSidebar({
   onDeleteTopic,
   onQuickQuizTopic,
   streakCount = 0,
+  totalXP = 0,
 }) {
   // Calculate explorer rank based on topics
-  const explorerRank = getExplorerRank(topics.length)
-  const rankProgress = getRankProgress(topics.length)
+  const explorerRank = getExplorerRank(topics.length, totalXP)
+  const rankProgress = getRankProgress(topics.length, totalXP)
 
   const MENU_GAP = 8
   const MENU_MARGIN = 8

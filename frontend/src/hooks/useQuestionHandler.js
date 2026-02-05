@@ -79,6 +79,7 @@ export default function useQuestionHandler({
   stopListening,
   interruptActiveAudio,
   recordQuestionAsked,
+  recordTopicLearned,
   setSlideshowFinished,
   onTopicCreated,
 }) {
@@ -640,6 +641,11 @@ export default function useQuestionHandler({
         // Add the new topic
         setTopics((prev) => pruneSlideCache([newTopic, ...prev], newTopic.id))
 
+        // Record topic learned for progress/badges
+        if (recordTopicLearned) {
+          recordTopicLearned()
+        }
+
         // Notify parent about new topic creation (for Knowledge Graph integration)
         if (onTopicCreated) {
           onTopicCreated({
@@ -732,6 +738,7 @@ export default function useQuestionHandler({
     stopListening,
     interruptActiveAudio,
     recordQuestionAsked,
+    recordTopicLearned,
     setSlideshowFinished,
   ])
 

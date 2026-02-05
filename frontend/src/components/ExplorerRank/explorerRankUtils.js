@@ -16,6 +16,7 @@ export const EXPLORER_RANKS = [
     title: 'Stargazer',
     icon: '\uD83D\uDD2D', // telescope
     minTopics: 0,
+    minXP: 0,
     description: 'Begin your cosmic journey',
   },
   {
@@ -24,6 +25,7 @@ export const EXPLORER_RANKS = [
     title: 'Space Cadet',
     icon: '\uD83D\uDE80', // rocket
     minTopics: 3,
+    minXP: 150,
     description: 'Ready for launch!',
   },
   {
@@ -32,6 +34,7 @@ export const EXPLORER_RANKS = [
     title: 'Navigator',
     icon: '\uD83E\uDDED', // compass
     minTopics: 8,
+    minXP: 350,
     description: 'Charting new courses',
   },
   {
@@ -40,6 +43,7 @@ export const EXPLORER_RANKS = [
     title: 'Explorer',
     icon: '\uD83C\uDF0C', // milky way
     minTopics: 15,
+    minXP: 600,
     description: 'Venturing into the unknown',
   },
   {
@@ -48,6 +52,7 @@ export const EXPLORER_RANKS = [
     title: 'Voyager',
     icon: '\uD83D\uDEF8', // flying saucer
     minTopics: 25,
+    minXP: 900,
     description: 'Traveling between stars',
   },
   {
@@ -55,7 +60,8 @@ export const EXPLORER_RANKS = [
     id: 'astronaut',
     title: 'Astronaut',
     icon: '\uD83E\uDDD1\u200D\uD83D\uDE80', // astronaut
-    minTopics: 40,
+    minTopics: 38,
+    minXP: 1300,
     description: 'Master of the cosmos',
   },
   {
@@ -63,10 +69,58 @@ export const EXPLORER_RANKS = [
     id: 'pioneer',
     title: 'Pioneer',
     icon: '\u2B50', // star
-    minTopics: 60,
+    minTopics: 52,
+    minXP: 1800,
     description: 'Legendary space pioneer',
   },
+  {
+    level: 8,
+    id: 'captain',
+    title: 'Star Captain',
+    icon: '\uD83D\uDEF0\uFE0F', // satellite
+    minTopics: 68,
+    minXP: 2500,
+    description: 'Leading missions across the stars',
+  },
+  {
+    level: 9,
+    id: 'sage',
+    title: 'Celestial Sage',
+    icon: '\uD83C\uDF20', // shooting star
+    minTopics: 84,
+    minXP: 3400,
+    description: 'Wisdom among constellations',
+  },
+  {
+    level: 10,
+    id: 'cosmic',
+    title: 'Cosmic Pioneer',
+    icon: '\uD83E\uDE90', // ringed planet
+    minTopics: 100,
+    minXP: 4600,
+    description: 'Opening new cosmic frontiers',
+  },
+  {
+    level: 11,
+    id: 'legend',
+    title: 'Galactic Legend',
+    icon: '\uD83C\uDF0C', // milky way
+    minTopics: 110,
+    minXP: 6200,
+    description: 'A legendary force of discovery',
+  },
+  {
+    level: 12,
+    id: 'luminary',
+    title: 'Legendary Luminary',
+    icon: '\u2600\uFE0F', // sun
+    minTopics: 120,
+    minXP: 9000,
+    description: 'A beacon of knowledge',
+  },
 ]
+
+export const MAX_RANK_LEVEL = EXPLORER_RANKS[EXPLORER_RANKS.length - 1].level
 
 /**
  * Get rank info for a given topic count
@@ -74,9 +128,10 @@ export const EXPLORER_RANKS = [
  * @param {number} topicCount - Number of topics learned
  * @returns {Object} Current rank with additional computed fields
  */
-export function getExplorerRank(topicCount) {
+export function getExplorerRank(topicCount, totalXP = 0) {
   // Handle edge cases
   let count = topicCount
+  let xp = totalXP
 
   // Handle string input by parsing
   if (typeof count === 'string') {
@@ -87,9 +142,13 @@ export function getExplorerRank(topicCount) {
   if (count === null || count === undefined || Number.isNaN(count)) {
     count = 0
   }
+  if (xp === null || xp === undefined || Number.isNaN(xp)) {
+    xp = 0
+  }
 
   // Floor the value for floating point numbers
   count = Math.floor(count)
+  xp = Math.floor(xp)
 
   // Handle negative numbers
   if (count < 0) {
@@ -101,8 +160,9 @@ export function getExplorerRank(topicCount) {
 
   // Find the highest rank the user has achieved
   for (let i = EXPLORER_RANKS.length - 1; i >= 0; i--) {
-    if (count >= EXPLORER_RANKS[i].minTopics) {
-      currentRank = EXPLORER_RANKS[i]
+    const rank = EXPLORER_RANKS[i]
+    if (count >= rank.minTopics && xp >= rank.minXP) {
+      currentRank = rank
       nextRank = EXPLORER_RANKS[i + 1] || null
       break
     }
@@ -110,7 +170,8 @@ export function getExplorerRank(topicCount) {
 
   return {
     ...currentRank,
-    topicsToNextRank: nextRank ? nextRank.minTopics - count : 0,
+    topicsToNextRank: nextRank ? Math.max(0, nextRank.minTopics - count) : 0,
+    xpToNextRank: nextRank ? Math.max(0, nextRank.minXP - xp) : 0,
     nextRank,
   }
 }
@@ -122,9 +183,9 @@ export function getExplorerRank(topicCount) {
  * @param {number} newTopicCount - New topic count
  * @returns {Object} Result with rankUp flag and rank info if promotion occurred
  */
-export function checkRankUp(oldTopicCount, newTopicCount) {
-  const oldRank = getExplorerRank(oldTopicCount)
-  const newRank = getExplorerRank(newTopicCount)
+export function checkRankUp(oldTopicCount, newTopicCount, oldXP = 0, newXP = 0) {
+  const oldRank = getExplorerRank(oldTopicCount, oldXP)
+  const newRank = getExplorerRank(newTopicCount, newXP)
 
   if (newRank.level > oldRank.level) {
     return {
@@ -143,20 +204,27 @@ export function checkRankUp(oldTopicCount, newTopicCount) {
  * @param {number} topicCount - Current topic count
  * @returns {number} 0-100 percentage toward next rank
  */
-export function getRankProgress(topicCount) {
-  const rank = getExplorerRank(topicCount)
+export function getRankProgress(topicCount, totalXP = 0) {
+  const rank = getExplorerRank(topicCount, totalXP)
 
   // Max rank reached
   if (!rank.nextRank) {
     return 100
   }
 
-  const currentMin = rank.minTopics
-  const nextMin = rank.nextRank.minTopics
-  const range = nextMin - currentMin
-  const progress = topicCount - currentMin
+  const currentTopicsMin = rank.minTopics
+  const nextTopicsMin = rank.nextRank.minTopics
+  const topicsRange = Math.max(1, nextTopicsMin - currentTopicsMin)
+  const topicsProgress = Math.min(1, Math.max(0, (topicCount - currentTopicsMin) / topicsRange))
 
-  return Math.min(100, Math.round((progress / range) * 100))
+  const currentXpMin = rank.minXP
+  const nextXpMin = rank.nextRank.minXP
+  const xpRange = Math.max(1, nextXpMin - currentXpMin)
+  const xpProgress = Math.min(1, Math.max(0, (totalXP - currentXpMin) / xpRange))
+
+  const combinedProgress = Math.min(topicsProgress, xpProgress)
+
+  return Math.min(100, Math.round(combinedProgress * 100))
 }
 
 /**
@@ -174,6 +242,11 @@ export function getRankColors(level) {
     5: { primary: '#8B5CF6', secondary: '#A78BFA', glow: '#8B5CF6' }, // Purple - Voyager
     6: { primary: '#EC4899', secondary: '#F472B6', glow: '#EC4899' }, // Pink - Astronaut
     7: { primary: '#EF4444', secondary: '#F87171', glow: '#EF4444' }, // Red - Pioneer
+    8: { primary: '#14B8A6', secondary: '#2DD4BF', glow: '#14B8A6' }, // Teal - Star Captain
+    9: { primary: '#6366F1', secondary: '#818CF8', glow: '#6366F1' }, // Indigo - Celestial Sage
+    10: { primary: '#F97316', secondary: '#FDBA74', glow: '#F97316' }, // Orange - Cosmic Pioneer
+    11: { primary: '#A855F7', secondary: '#C084FC', glow: '#A855F7' }, // Violet - Galactic Legend
+    12: { primary: '#FACC15', secondary: '#FDE68A', glow: '#FACC15' }, // Gold - Legendary Luminary
   }
 
   return colors[level] || colors[1]
@@ -228,6 +301,36 @@ export function getRankTailwindColors(level) {
       text: 'text-red-600 dark:text-red-300',
       border: 'border-red-300 dark:border-red-600',
       gradient: 'from-red-400 to-rose-600',
+    },
+    8: {
+      bg: 'bg-teal-100 dark:bg-teal-900/30',
+      text: 'text-teal-600 dark:text-teal-300',
+      border: 'border-teal-300 dark:border-teal-600',
+      gradient: 'from-teal-400 to-cyan-600',
+    },
+    9: {
+      bg: 'bg-indigo-100 dark:bg-indigo-900/30',
+      text: 'text-indigo-600 dark:text-indigo-300',
+      border: 'border-indigo-300 dark:border-indigo-600',
+      gradient: 'from-indigo-400 to-violet-600',
+    },
+    10: {
+      bg: 'bg-orange-100 dark:bg-orange-900/30',
+      text: 'text-orange-600 dark:text-orange-300',
+      border: 'border-orange-300 dark:border-orange-600',
+      gradient: 'from-orange-400 to-amber-600',
+    },
+    11: {
+      bg: 'bg-purple-100 dark:bg-purple-900/30',
+      text: 'text-purple-600 dark:text-purple-300',
+      border: 'border-purple-300 dark:border-purple-600',
+      gradient: 'from-purple-400 to-fuchsia-600',
+    },
+    12: {
+      bg: 'bg-yellow-100 dark:bg-yellow-900/30',
+      text: 'text-yellow-600 dark:text-yellow-300',
+      border: 'border-yellow-300 dark:border-yellow-600',
+      gradient: 'from-yellow-400 to-amber-500',
     },
   }
 

@@ -138,13 +138,31 @@ const BADGES = {
     name: 'Curious Mind',
     description: 'Asked your first question',
     icon: 'lightbulb',
+    criteriaText: 'Ask your first question',
     criteria: { totalQuestions: 1 }
+  },
+  FIRST_STEPS: {
+    id: 'FIRST_STEPS',
+    name: 'First Steps',
+    description: 'Completed your first topic',
+    icon: 'book',
+    criteriaText: 'Complete 1 topic',
+    criteria: { totalTopicsLearned: 1 }
+  },
+  FIRST_QUIZ: {
+    id: 'FIRST_QUIZ',
+    name: 'First Quiz',
+    description: 'Finished your first quiz',
+    icon: 'trophy',
+    criteriaText: 'Finish 1 quiz',
+    criteria: { totalQuizzes: 1 }
   },
   STREAK_3: {
     id: 'STREAK_3',
     name: 'Getting Started',
     description: 'Achieved a 3-day learning streak',
     icon: 'flame-small',
+    criteriaText: 'Reach a 3-day streak',
     criteria: { streakCount: 3 }
   },
   STREAK_7: {
@@ -152,13 +170,23 @@ const BADGES = {
     name: 'Dedicated Learner',
     description: 'Achieved a 7-day learning streak',
     icon: 'flame-medium',
+    criteriaText: 'Reach a 7-day streak',
     criteria: { streakCount: 7 }
+  },
+  STREAK_14: {
+    id: 'STREAK_14',
+    name: 'Habit Builder',
+    description: 'Achieved a 14-day learning streak',
+    icon: 'flame-large',
+    criteriaText: 'Reach a 14-day streak',
+    criteria: { streakCount: 14 }
   },
   STREAK_30: {
     id: 'STREAK_30',
     name: 'Knowledge Seeker',
     description: 'Achieved a 30-day learning streak',
-    icon: 'flame-large',
+    icon: 'medal',
+    criteriaText: 'Reach a 30-day streak',
     criteria: { streakCount: 30 }
   },
   DEEP_THINKER: {
@@ -166,13 +194,39 @@ const BADGES = {
     name: 'Deep Thinker',
     description: 'Explored a topic in Deep mode',
     icon: 'brain',
+    criteriaText: 'Use Deep mode once',
     criteria: { deepLevelUsed: true }
+  },
+  STORY_WEAVER: {
+    id: 'STORY_WEAVER',
+    name: 'Story Weaver',
+    description: 'Completed Story Studio',
+    icon: 'book',
+    criteriaText: 'Complete 1 story',
+    criteria: { storyCompletions: 1 }
+  },
+  MYSTERY_SOLVER: {
+    id: 'MYSTERY_SOLVER',
+    name: 'Mystery Solver',
+    description: 'Solved a Mystery Lab case',
+    icon: 'compass',
+    criteriaText: 'Solve 1 mystery',
+    criteria: { mysteryCompletions: 1 }
+  },
+  WONDER_SEEKER: {
+    id: 'WONDER_SEEKER',
+    name: 'Wonder Seeker',
+    description: 'Completed Wonder Lab',
+    icon: 'star',
+    criteriaText: 'Complete 1 wonder',
+    criteria: { wonderCompletions: 1 }
   },
   QUESTION_10: {
     id: 'QUESTION_10',
     name: 'Question Champion',
     description: 'Asked 10 questions',
     icon: 'trophy',
+    criteriaText: 'Ask 10 questions',
     criteria: { totalQuestions: 10 }
   },
   SOCRATIC_5: {
@@ -180,7 +234,32 @@ const BADGES = {
     name: 'Critical Thinker',
     description: 'Answered 5 Socratic questions',
     icon: 'thought-bubble',
+    criteriaText: 'Answer 5 Socratic questions',
     criteria: { totalSocraticAnswers: 5 }
+  },
+  QUIZ_CADENCE: {
+    id: 'QUIZ_CADENCE',
+    name: 'Quiz Cadence',
+    description: 'Completed 5 quizzes',
+    icon: 'medal',
+    criteriaText: 'Complete 5 quizzes',
+    criteria: { totalQuizzes: 5 }
+  },
+  TOPIC_EXPLORER: {
+    id: 'TOPIC_EXPLORER',
+    name: 'Topic Explorer',
+    description: 'Learned 25 topics',
+    icon: 'compass',
+    criteriaText: 'Learn 25 topics',
+    criteria: { totalTopicsLearned: 25 }
+  },
+  MASTER_LEARNER: {
+    id: 'MASTER_LEARNER',
+    name: 'Master Learner',
+    description: 'Learned 50 topics',
+    icon: 'star',
+    criteriaText: 'Learn 50 topics',
+    criteria: { totalTopicsLearned: 50 }
   }
 }
 
@@ -188,7 +267,12 @@ const BADGES = {
 const POINTS = {
   QUESTION_ASKED: 10,
   SOCRATIC_ANSWERED: 5,
-  DEEP_LEVEL_USED: 15
+  DEEP_LEVEL_USED: 15,
+  TOPIC_LEARNED: 20,
+  QUIZ_COMPLETE: 15,
+  STORY_COMPLETE: 25,
+  MYSTERY_COMPLETE: 25,
+  WONDER_COMPLETE: 25,
 }
 
 /**
@@ -237,6 +321,11 @@ function createDefaultProgress(clientId) {
     clientId,
     totalQuestions: 0,
     totalSocraticAnswers: 0,
+    totalTopicsLearned: 0,
+    totalQuizzes: 0,
+    storyCompletions: 0,
+    mysteryCompletions: 0,
+    wonderCompletions: 0,
     streakCount: 0,
     longestStreak: 0,
     lastActiveDate: null,
@@ -324,6 +413,26 @@ function applyActivityUpdate(progress, action, now) {
     case 'deep_level_used':
       updated.deepLevelUsed = true
       updated.points += POINTS.DEEP_LEVEL_USED
+      break
+    case 'topic_learned':
+      updated.totalTopicsLearned += 1
+      updated.points += POINTS.TOPIC_LEARNED
+      break
+    case 'quiz_complete':
+      updated.totalQuizzes += 1
+      updated.points += POINTS.QUIZ_COMPLETE
+      break
+    case 'story_complete':
+      updated.storyCompletions += 1
+      updated.points += POINTS.STORY_COMPLETE
+      break
+    case 'mystery_complete':
+      updated.mysteryCompletions += 1
+      updated.points += POINTS.MYSTERY_COMPLETE
+      break
+    case 'wonder_complete':
+      updated.wonderCompletions += 1
+      updated.points += POINTS.WONDER_COMPLETE
       break
     default:
       logger.warn('PROGRESS', 'Unknown action type', { action })
@@ -427,7 +536,7 @@ export async function getUserProgress(clientId) {
 /**
  * Record an activity and update user progress
  * @param {string} clientId
- * @param {string} action - 'question_asked' | 'socratic_answered' | 'deep_level_used'
+ * @param {string} action - progress action key (question_asked, topic_learned, quiz_complete, etc.)
  * @returns {Promise<{progress: Object|null, newBadges: string[], error: string|null}>}
  */
 export async function recordActivity(clientId, action) {

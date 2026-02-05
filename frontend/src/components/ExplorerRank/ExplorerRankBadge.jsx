@@ -14,7 +14,7 @@
  */
 
 import PropTypes from 'prop-types'
-import { getRankTailwindColors } from './explorerRankUtils'
+import { getRankTailwindColors, MAX_RANK_LEVEL } from './explorerRankUtils'
 
 /**
  * Size configuration for badge variants
@@ -49,7 +49,7 @@ export default function ExplorerRankBadge({
   onClick,
 }) {
   // Validate level
-  const safeLevel = level >= 1 && level <= 7 ? level : 1
+  const safeLevel = level >= 1 && level <= MAX_RANK_LEVEL ? level : 1
   const colors = getRankTailwindColors(safeLevel)
   const sizeConfig = SIZE_CONFIG[size] || SIZE_CONFIG.standard
 
@@ -69,7 +69,7 @@ export default function ExplorerRankBadge({
     'transition-all duration-200',
     isClickable ? 'cursor-pointer hover:scale-105 active:scale-95' : '',
     // Special shimmer effect for max rank
-    safeLevel === 7 ? 'shimmer' : '',
+    safeLevel === MAX_RANK_LEVEL ? 'shimmer' : '',
   ]
     .filter(Boolean)
     .join(' ')

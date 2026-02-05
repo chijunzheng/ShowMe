@@ -117,7 +117,7 @@ export interface KnowledgeGap {
  * Explorer rank definition (static configuration)
  */
 export interface ExplorerRankDefinition {
-  /** Rank level (1-7) */
+  /** Rank level (1-12) */
   level: number
   /** Rank title */
   title: string
@@ -131,7 +131,7 @@ export interface ExplorerRankDefinition {
  * User's current explorer rank with progress info
  */
 export interface ExplorerRank {
-  /** Current rank level (1-7) */
+  /** Current rank level (1-12) */
   level: number
   /** Rank title */
   title: string
@@ -166,12 +166,17 @@ export interface KnowledgeGraph {
  */
 export const EXPLORER_RANKS: ExplorerRankDefinition[] = [
   { level: 1, title: 'Stargazer', icon: '🔭', minTopics: 0 },
-  { level: 2, title: 'Observer', icon: '👁️', minTopics: 3 },
+  { level: 2, title: 'Space Cadet', icon: '🚀', minTopics: 3 },
   { level: 3, title: 'Navigator', icon: '🧭', minTopics: 8 },
-  { level: 4, title: 'Cartographer', icon: '🗺️', minTopics: 15 },
-  { level: 5, title: 'Astronomer', icon: '⭐', minTopics: 25 },
-  { level: 6, title: 'Cosmologist', icon: '🌌', minTopics: 40 },
-  { level: 7, title: 'Pioneer', icon: '🚀', minTopics: 60 },
+  { level: 4, title: 'Explorer', icon: '🌌', minTopics: 15 },
+  { level: 5, title: 'Voyager', icon: '🛸', minTopics: 25 },
+  { level: 6, title: 'Astronaut', icon: '🧑‍🚀', minTopics: 38 },
+  { level: 7, title: 'Pioneer', icon: '⭐', minTopics: 52 },
+  { level: 8, title: 'Star Captain', icon: '🛰️', minTopics: 68 },
+  { level: 9, title: 'Celestial Sage', icon: '🌠', minTopics: 84 },
+  { level: 10, title: 'Cosmic Pioneer', icon: '🪐', minTopics: 100 },
+  { level: 11, title: 'Galactic Legend', icon: '🌌', minTopics: 110 },
+  { level: 12, title: 'Legendary Luminary', icon: '☀️', minTopics: 120 },
 ]
 
 /**

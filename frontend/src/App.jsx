@@ -169,7 +169,12 @@ function App() {
     clientId: userClientId,
     recordQuestionAsked,
     recordSocraticAnswered,
-    recordDeepLevelUsed
+    recordDeepLevelUsed,
+    recordTopicLearned,
+    recordQuizCompleted,
+    recordStoryCompleted,
+    recordMysteryCompleted,
+    recordWonderCompleted
   } = useUserProgress()
 
   // UI002: World stats for home screen display
@@ -410,39 +415,51 @@ function App() {
   )
 
   const earnedTrophies = useMemo(() => {
-    const badgeIds = Array.isArray(userProgress?.badges) ? userProgress.badges : []
-    if (badgeIds.length === 0) return []
-
     const definitions = badgeDefinitions && typeof badgeDefinitions === 'object'
       ? badgeDefinitions
       : {}
+    const definitionList = Object.values(definitions)
+    if (definitionList.length === 0) return []
+
+    const unlockedIds = new Set(Array.isArray(userProgress?.badges) ? userProgress.badges : [])
     const unlockDates = userProgress?.badgeUnlockDates || {}
 
-    return badgeIds
-      .map((badgeId) => {
-        const badge = definitions[badgeId]
-        const earnedAt = unlockDates?.[badgeId] || null
+    return definitionList
+      .map((badge) => {
+        if (!badge?.id) return null
+        const isUnlocked = unlockedIds.has(badge.id)
+        const earnedAt = unlockDates?.[badge.id] || null
 
-        if (!badge) {
-          return {
-            id: badgeId,
-            name: badgeId,
-            description: '',
-            icon: 'trophy',
-            earnedAt,
+        const criteriaEntries = Object.entries(badge.criteria || {})
+        let progressCurrent = 0
+        let progressTarget = 0
+        if (criteriaEntries.length > 0) {
+          const [criteriaKey, criteriaValue] = criteriaEntries[0]
+          if (typeof criteriaValue === 'number') {
+            const currentValue = Number(userProgress?.[criteriaKey] || 0)
+            progressTarget = criteriaValue
+            progressCurrent = Math.min(currentValue, criteriaValue)
+          } else if (typeof criteriaValue === 'boolean') {
+            const currentValue = userProgress?.[criteriaKey] ? 1 : 0
+            progressTarget = 1
+            progressCurrent = currentValue
           }
         }
 
         return {
-          id: badgeId,
-          name: badge.name,
-          description: badge.description,
-          icon: badge.icon,
+          id: badge.id,
+          name: badge.name || badge.id,
+          description: badge.description || '',
+          icon: badge.icon || 'trophy',
           earnedAt,
+          locked: !isUnlocked,
+          criteriaText: badge.criteriaText || '',
+          progressCurrent,
+          progressTarget,
         }
       })
       .filter(Boolean)
-  }, [userProgress?.badges, userProgress?.badgeUnlockDates, badgeDefinitions])
+  }, [badgeDefinitions, userProgress])
 
   // CORE032: Slides split into top-level (visible) and child slides for 2D navigation
   const allTopicSlides = useMemo(() => buildTopicSlides(activeTopic), [activeTopic])
@@ -1860,12 +1877,7 @@ function App() {
     setLearnModeOrigin((prev) => prev || 'after_slideshow')
     setSelectedLearningMode(mode)
     setUiState(UI_STATE.LEARN_MODE)
-
-    // Show placeholder toast for unimplemented modes
-    if (mode === 'story') {
-      showToast(`${mode} mode coming soon!`, 'info')
-    }
-  }, [activeTopic, showToast, setUiState])
+  }, [activeTopic, setUiState])
 
   // Learning Modes: Handle learning mode completion with XP and world evolution
   const handleLearningModeComplete = useCallback(async (result) => {
@@ -1881,9 +1893,21 @@ function App() {
     const topicName = activeTopic?.name || ''
     const topicId = activeTopic?.id || topicName
 
+    const modeCompleted = result?.completed ?? (result?.xpEarned > 0)
+
     // Show XP earned toast
     if (result?.xpEarned > 0) {
       showQuickXp(result.xpEarned)
+    }
+
+    if (modeCompleted) {
+      if (selectedLearningMode === 'mystery') {
+        recordMysteryCompleted()
+      } else if (selectedLearningMode === 'whatif') {
+        recordWonderCompleted()
+      } else if (selectedLearningMode === 'story') {
+        recordStoryCompleted()
+      }
     }
 
     // Update mastery in Knowledge Graph based on quiz performance
@@ -1987,6 +2011,9 @@ function App() {
     setUiState,
     getGraphNodeByName,
     updateGraphMastery,
+    recordMysteryCompleted,
+    recordWonderCompleted,
+    recordStoryCompleted,
   ])
 
   // Learning Modes: Handle learning mode exit
@@ -2836,6 +2863,7 @@ function App() {
     stopListening,
     interruptActiveAudio,
     recordQuestionAsked,
+    recordTopicLearned,
     setSlideshowFinished,
     onTopicCreated: handleTopicCreated,
   })
@@ -3358,6 +3386,7 @@ function App() {
           onDeleteTopic={handleDeleteTopic}
           onQuickQuizTopic={(topic) => requestTopicQuiz(topic)}
           streakCount={userProgress?.streakCount || 0}
+          totalXP={userProgress?.points || 0}
         />
       )}
 
@@ -3382,6 +3411,7 @@ function App() {
             recordDeepLevelUsed={recordDeepLevelUsed}
             piecesNeedingReview={piecesNeedingReview}
             onStartReview={startReviewSession}
+            hasSidebar={topics.length > 0}
           />
         )}
 
@@ -3484,7 +3514,7 @@ function App() {
               topics={progressPieces}
               onReviewSlideshow={handleReviewSlideshowFromProgress}
               onLaunchMode={handleLaunchLearningMode}
-              totalXP={totalWorldXP}
+              totalXP={userProgress?.points || 0}
               streak={{ current: userProgress?.streakCount || 0, todayCompleted: false }}
               trophies={earnedTrophies}
               trophiesLoading={isUserProgressLoading}

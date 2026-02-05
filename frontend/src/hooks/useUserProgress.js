@@ -43,10 +43,17 @@ export default function useUserProgress() {
           clientId,
           totalQuestions: 0,
           totalSocraticAnswers: 0,
+          totalTopicsLearned: 0,
+          totalQuizzes: 0,
+          storyCompletions: 0,
+          mysteryCompletions: 0,
+          wonderCompletions: 0,
           streakCount: 0,
           longestStreak: 0,
           points: 0,
-          badges: []
+          badges: [],
+          badgeUnlockDates: {},
+          deepLevelUsed: false,
         })
       } finally {
         setIsLoading(false)
@@ -102,6 +109,26 @@ export default function useUserProgress() {
     return recordActivity('deep_level_used')
   }, [recordActivity])
 
+  const recordTopicLearned = useCallback(() => {
+    return recordActivity('topic_learned')
+  }, [recordActivity])
+
+  const recordQuizCompleted = useCallback(() => {
+    return recordActivity('quiz_complete')
+  }, [recordActivity])
+
+  const recordStoryCompleted = useCallback(() => {
+    return recordActivity('story_complete')
+  }, [recordActivity])
+
+  const recordMysteryCompleted = useCallback(() => {
+    return recordActivity('mystery_complete')
+  }, [recordActivity])
+
+  const recordWonderCompleted = useCallback(() => {
+    return recordActivity('wonder_complete')
+  }, [recordActivity])
+
   return {
     progress,
     badges,
@@ -113,6 +140,11 @@ export default function useUserProgress() {
     recordActivity,
     recordQuestionAsked,
     recordSocraticAnswered,
-    recordDeepLevelUsed
+    recordDeepLevelUsed,
+    recordTopicLearned,
+    recordQuizCompleted,
+    recordStoryCompleted,
+    recordMysteryCompleted,
+    recordWonderCompleted
   }
 }

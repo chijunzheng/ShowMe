@@ -189,7 +189,7 @@ describe('StatsBar', () => {
     })
 
     it('displays space cadet rank for 3+ topics', () => {
-      const props = createDefaultProps({ topicsLearned: 3 })
+      const props = createDefaultProps({ topicsLearned: 3, totalXP: 150 })
       render(<StatsBar {...props} />)
 
       const rankStat = screen.getByTestId('stat-rank')
@@ -198,7 +198,7 @@ describe('StatsBar', () => {
     })
 
     it('displays navigator rank for 8+ topics', () => {
-      const props = createDefaultProps({ topicsLearned: 8 })
+      const props = createDefaultProps({ topicsLearned: 8, totalXP: 350 })
       render(<StatsBar {...props} />)
 
       const rankStat = screen.getByTestId('stat-rank')
@@ -207,15 +207,15 @@ describe('StatsBar', () => {
     })
 
     it('displays explorer rank for 15+ topics', () => {
-      const props = createDefaultProps({ topicsLearned: 15 })
+      const props = createDefaultProps({ topicsLearned: 15, totalXP: 600 })
       render(<StatsBar {...props} />)
 
       const rankStat = screen.getByTestId('stat-rank')
       expect(rankStat.textContent).toMatch(/\uD83C\uDF0C|Explorer/)
     })
 
-    it('shows special styling for max rank (Pioneer)', () => {
-      const props = createDefaultProps({ topicsLearned: 60 })
+    it('shows special styling for max rank (Legendary Luminary)', () => {
+      const props = createDefaultProps({ topicsLearned: 120, totalXP: 9000 })
       render(<StatsBar {...props} />)
 
       const rankStat = screen.getByTestId('stat-rank')
@@ -223,13 +223,13 @@ describe('StatsBar', () => {
     })
 
     it('rank updates when topics increase', () => {
-      const props = createDefaultProps({ topicsLearned: 2 })
+      const props = createDefaultProps({ topicsLearned: 2, totalXP: 100 })
       const { rerender } = render(<StatsBar {...props} />)
 
       let rankStat = screen.getByTestId('stat-rank')
       expect(rankStat.textContent).toMatch(/\uD83D\uDD2D/) // telescope (Stargazer)
 
-      rerender(<StatsBar {...createDefaultProps({ topicsLearned: 8 })} />)
+      rerender(<StatsBar {...createDefaultProps({ topicsLearned: 8, totalXP: 350 })} />)
 
       rankStat = screen.getByTestId('stat-rank')
       expect(rankStat.textContent).toMatch(/\uD83E\uDDED/) // compass (Navigator)
@@ -449,7 +449,7 @@ describe('StatsBar', () => {
     })
 
     it('shows abbreviated rank title in compact mode', () => {
-      const props = createDefaultProps({ compact: true, topicsLearned: 8 })
+      const props = createDefaultProps({ compact: true, topicsLearned: 8, totalXP: 350 })
       render(<StatsBar {...props} />)
 
       // Icon should show with abbreviated title

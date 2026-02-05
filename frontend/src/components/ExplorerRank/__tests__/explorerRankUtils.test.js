@@ -18,8 +18,8 @@ import {
 
 describe('explorerRankUtils', () => {
   describe('EXPLORER_RANKS constant', () => {
-    it('has 7 rank levels', () => {
-      expect(EXPLORER_RANKS).toHaveLength(7)
+    it('has 12 rank levels', () => {
+      expect(EXPLORER_RANKS).toHaveLength(12)
     })
 
     it('has ranks in ascending level order', () => {
@@ -45,6 +45,7 @@ describe('explorerRankUtils', () => {
         expect(rank).toHaveProperty('title')
         expect(rank).toHaveProperty('icon')
         expect(rank).toHaveProperty('minTopics')
+        expect(rank).toHaveProperty('minXP')
         expect(rank).toHaveProperty('description')
       })
     })
@@ -52,151 +53,196 @@ describe('explorerRankUtils', () => {
 
   describe('getExplorerRank', () => {
     it('returns first rank (Stargazer) for 0 topics', () => {
-      const rank = getExplorerRank(0)
+      const rank = getExplorerRank(0, 0)
       expect(rank.id).toBe('stargazer')
       expect(rank.level).toBe(1)
     })
 
     it('returns first rank for negative topic count', () => {
-      const rank = getExplorerRank(-5)
+      const rank = getExplorerRank(-5, 0)
       expect(rank.id).toBe('stargazer')
     })
 
     it('returns first rank for null input', () => {
-      const rank = getExplorerRank(null)
+      const rank = getExplorerRank(null, 0)
       expect(rank.id).toBe('stargazer')
     })
 
     it('returns first rank for undefined input', () => {
-      const rank = getExplorerRank(undefined)
+      const rank = getExplorerRank(undefined, 0)
       expect(rank.id).toBe('stargazer')
     })
 
     it('returns first rank for NaN input', () => {
-      const rank = getExplorerRank(NaN)
+      const rank = getExplorerRank(NaN, 0)
       expect(rank.id).toBe('stargazer')
     })
 
     it('handles string numeric input', () => {
-      const rank = getExplorerRank('10')
+      const rank = getExplorerRank('10', 400)
       expect(rank.id).toBe('navigator')
     })
 
     it('floors floating point numbers', () => {
-      const rank = getExplorerRank(7.9)
+      const rank = getExplorerRank(7.9, 200)
       expect(rank.id).toBe('cadet') // 7.9 floors to 7, still in cadet range (3-7)
     })
 
-    it('returns Space Cadet for 3-7 topics', () => {
-      expect(getExplorerRank(3).id).toBe('cadet')
-      expect(getExplorerRank(7).id).toBe('cadet')
+    it('returns Space Cadet for 3-7 topics with enough XP', () => {
+      expect(getExplorerRank(3, 150).id).toBe('cadet')
+      expect(getExplorerRank(7, 200).id).toBe('cadet')
     })
 
-    it('returns Navigator for 8-14 topics', () => {
-      expect(getExplorerRank(8).id).toBe('navigator')
-      expect(getExplorerRank(14).id).toBe('navigator')
+    it('does not promote without XP threshold', () => {
+      const rank = getExplorerRank(10, 0)
+      expect(rank.id).toBe('stargazer')
     })
 
-    it('returns Explorer for 15-24 topics', () => {
-      expect(getExplorerRank(15).id).toBe('explorer')
-      expect(getExplorerRank(24).id).toBe('explorer')
+    it('returns Navigator for 8-14 topics with enough XP', () => {
+      expect(getExplorerRank(8, 350).id).toBe('navigator')
+      expect(getExplorerRank(14, 500).id).toBe('navigator')
     })
 
-    it('returns Voyager for 25-39 topics', () => {
-      expect(getExplorerRank(25).id).toBe('voyager')
-      expect(getExplorerRank(39).id).toBe('voyager')
+    it('returns Explorer for 15-24 topics with enough XP', () => {
+      expect(getExplorerRank(15, 600).id).toBe('explorer')
+      expect(getExplorerRank(24, 800).id).toBe('explorer')
     })
 
-    it('returns Astronaut for 40-59 topics', () => {
-      expect(getExplorerRank(40).id).toBe('astronaut')
-      expect(getExplorerRank(59).id).toBe('astronaut')
+    it('returns Voyager for 25-37 topics with enough XP', () => {
+      expect(getExplorerRank(25, 900).id).toBe('voyager')
+      expect(getExplorerRank(37, 1200).id).toBe('voyager')
     })
 
-    it('returns Pioneer for 60+ topics', () => {
-      expect(getExplorerRank(60).id).toBe('pioneer')
-      expect(getExplorerRank(100).id).toBe('pioneer')
+    it('returns Astronaut for 38-51 topics with enough XP', () => {
+      expect(getExplorerRank(38, 1300).id).toBe('astronaut')
+      expect(getExplorerRank(51, 1700).id).toBe('astronaut')
+    })
+
+    it('returns Pioneer for 52-67 topics with enough XP', () => {
+      expect(getExplorerRank(52, 1800).id).toBe('pioneer')
+      expect(getExplorerRank(67, 2400).id).toBe('pioneer')
+    })
+
+    it('returns Star Captain for 68-83 topics with enough XP', () => {
+      expect(getExplorerRank(68, 2500).id).toBe('captain')
+      expect(getExplorerRank(83, 3300).id).toBe('captain')
+    })
+
+    it('returns Celestial Sage for 84-99 topics with enough XP', () => {
+      expect(getExplorerRank(84, 3400).id).toBe('sage')
+      expect(getExplorerRank(99, 4500).id).toBe('sage')
+    })
+
+    it('returns Cosmic Pioneer for 100-109 topics with enough XP', () => {
+      expect(getExplorerRank(100, 4600).id).toBe('cosmic')
+      expect(getExplorerRank(109, 6100).id).toBe('cosmic')
+    })
+
+    it('returns Galactic Legend for 110-119 topics with enough XP', () => {
+      expect(getExplorerRank(110, 6200).id).toBe('legend')
+      expect(getExplorerRank(119, 8900).id).toBe('legend')
+    })
+
+    it('returns Legendary Luminary for 120+ topics with enough XP', () => {
+      expect(getExplorerRank(120, 9000).id).toBe('luminary')
+      expect(getExplorerRank(140, 12000).id).toBe('luminary')
     })
 
     it('includes topicsToNextRank for non-max ranks', () => {
-      const rank = getExplorerRank(5)
+      const rank = getExplorerRank(5, 200)
       expect(rank.topicsToNextRank).toBe(3) // 8 - 5 = 3
     })
 
-    it('has topicsToNextRank of 0 for max rank', () => {
-      const rank = getExplorerRank(60)
-      expect(rank.topicsToNextRank).toBe(0)
-    })
-
     it('includes nextRank for non-max ranks', () => {
-      const rank = getExplorerRank(5)
+      const rank = getExplorerRank(5, 200)
       expect(rank.nextRank).toBeTruthy()
       expect(rank.nextRank.id).toBe('navigator')
     })
 
+    it('includes xpToNextRank for non-max ranks', () => {
+      const rank = getExplorerRank(5, 200)
+      expect(rank.xpToNextRank).toBe(150) // 350 - 200 = 150
+    })
+
+    it('has topicsToNextRank of 0 for max rank', () => {
+      const rank = getExplorerRank(120, 9000)
+      expect(rank.topicsToNextRank).toBe(0)
+    })
+
+    it('has xpToNextRank of 0 for max rank', () => {
+      const rank = getExplorerRank(120, 9000)
+      expect(rank.xpToNextRank).toBe(0)
+    })
+
     it('has null nextRank for max rank', () => {
-      const rank = getExplorerRank(60)
+      const rank = getExplorerRank(120, 9000)
       expect(rank.nextRank).toBeNull()
     })
   })
 
   describe('checkRankUp', () => {
     it('returns rankUp: false when staying at same rank', () => {
-      const result = checkRankUp(0, 2)
+      const result = checkRankUp(0, 2, 0, 100)
       expect(result.rankUp).toBe(false)
     })
 
     it('returns rankUp: true when crossing threshold', () => {
-      const result = checkRankUp(2, 3)
+      const result = checkRankUp(2, 3, 100, 150)
       expect(result.rankUp).toBe(true)
       expect(result.newRank.id).toBe('cadet')
       expect(result.previousRank.id).toBe('stargazer')
     })
 
     it('returns rankUp: true for multi-rank jump', () => {
-      const result = checkRankUp(0, 15)
+      const result = checkRankUp(0, 15, 0, 600)
       expect(result.rankUp).toBe(true)
       expect(result.newRank.id).toBe('explorer')
       expect(result.previousRank.id).toBe('stargazer')
     })
 
     it('returns rankUp: false when topic count decreases', () => {
-      const result = checkRankUp(10, 5)
+      const result = checkRankUp(10, 5, 400, 200)
       expect(result.rankUp).toBe(false)
     })
 
     it('returns correct ranks for threshold boundary', () => {
-      const result = checkRankUp(7, 8)
+      const result = checkRankUp(7, 8, 200, 350)
       expect(result.rankUp).toBe(true)
       expect(result.newRank.id).toBe('navigator')
+    })
+
+    it('does not rank up without required XP', () => {
+      const result = checkRankUp(7, 8, 200, 300)
+      expect(result.rankUp).toBe(false)
     })
   })
 
   describe('getRankProgress', () => {
     it('returns 0 at rank minimum', () => {
-      const progress = getRankProgress(0)
+      const progress = getRankProgress(0, 0)
       expect(progress).toBe(0)
     })
 
     it('returns 100 at max rank', () => {
-      const progress = getRankProgress(60)
+      const progress = getRankProgress(120, 9000)
       expect(progress).toBe(100)
     })
 
     it('returns percentage within rank range', () => {
-      // Stargazer: 0-2 topics (range of 3 for Space Cadet at 3)
-      // At 1 topic, progress = 1/3 = 33%
-      const progress = getRankProgress(1)
+      // Stargazer: 0-2 topics and 0-149 XP (range to Space Cadet)
+      // At 1 topic + 50 XP, progress = min(1/3, 50/150) = 33%
+      const progress = getRankProgress(1, 50)
       expect(progress).toBe(33)
     })
 
     it('returns correct progress at boundary', () => {
       // Just below next rank
-      const progress = getRankProgress(2)
+      const progress = getRankProgress(2, 100)
       expect(progress).toBe(67) // 2/3 = 67%
     })
 
     it('caps at 100%', () => {
-      const progress = getRankProgress(1000)
+      const progress = getRankProgress(1000, 20000)
       expect(progress).toBeLessThanOrEqual(100)
     })
   })

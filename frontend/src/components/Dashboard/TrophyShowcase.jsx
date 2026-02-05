@@ -143,6 +143,8 @@ function TrophyItem({ trophy, isRecent, isMostRecent, onClick }) {
 
   const icon = TROPHY_ICONS[trophy.icon] || TROPHY_ICONS.trophy
   const styleClass = TROPHY_STYLES[trophy.id] || TROPHY_STYLES.default
+  const isLocked = !!trophy.locked
+  const showNew = isRecent && !isLocked
 
   return (
     <div
@@ -155,6 +157,7 @@ function TrophyItem({ trophy, isRecent, isMostRecent, onClick }) {
         border
         ${styleClass}
         ${isMostRecent ? 'ring-2 ring-amber-400 ring-offset-2 highlight' : ''}
+        ${isLocked ? 'opacity-60 grayscale' : ''}
         cursor-pointer
         hover:scale-105
         transition-transform duration-200
@@ -162,7 +165,7 @@ function TrophyItem({ trophy, isRecent, isMostRecent, onClick }) {
       `}
       role="listitem"
       tabIndex="0"
-      aria-label={`${trophy.name || 'Unknown trophy'}${trophy.description ? `, ${trophy.description}` : ''}`}
+      aria-label={`${trophy.name || 'Unknown trophy'}${trophy.description ? `, ${trophy.description}` : ''}${isLocked ? ', locked' : ''}`}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
     >
@@ -186,9 +189,15 @@ function TrophyItem({ trophy, isRecent, isMostRecent, onClick }) {
       </span>
 
       {/* New badge */}
-      {isRecent && (
+      {showNew && (
         <span className="absolute -top-1 -right-1 px-1.5 py-0.5 bg-amber-400 text-white text-[10px] font-bold rounded-full">
           New
+        </span>
+      )}
+
+      {isLocked && (
+        <span className="absolute -bottom-1 -right-1 px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-full">
+          Locked
         </span>
       )}
     </div>
@@ -222,6 +231,7 @@ export default function TrophyShowcase({
   onTrophyClick,
   isLoading = false,
   maxVisible = 10,
+  showNewBadgeForIds = null,
 }) {
   // Safe trophies array
   const safeTrophies = useMemo(() => {
@@ -231,6 +241,13 @@ export default function TrophyShowcase({
 
   // Most recently earned trophy
   const mostRecent = useMemo(() => getMostRecent(safeTrophies), [safeTrophies])
+
+  const newBadgeSet = useMemo(() => {
+    if (!showNewBadgeForIds) return null
+    if (showNewBadgeForIds instanceof Set) return showNewBadgeForIds
+    if (Array.isArray(showNewBadgeForIds)) return new Set(showNewBadgeForIds)
+    return null
+  }, [showNewBadgeForIds])
 
   // Determine visible trophies
   const needsShowAll = safeTrophies.length > maxVisible
@@ -285,7 +302,7 @@ export default function TrophyShowcase({
           <TrophyItem
             key={trophy.id || `trophy-${Math.random()}`}
             trophy={trophy}
-            isRecent={isRecentlyEarned(trophy.earnedAt)}
+            isRecent={newBadgeSet ? newBadgeSet.has(trophy.id) : isRecentlyEarned(trophy.earnedAt)}
             isMostRecent={mostRecent?.id === trophy.id}
             onClick={onTrophyClick}
           />
@@ -321,9 +338,14 @@ TrophyShowcase.propTypes = {
       description: PropTypes.string,
       icon: PropTypes.string,
       earnedAt: PropTypes.string,
+      locked: PropTypes.bool,
     })
   ),
   onTrophyClick: PropTypes.func,
   isLoading: PropTypes.bool,
   maxVisible: PropTypes.number,
+  showNewBadgeForIds: PropTypes.oneOfType([
+    PropTypes.instanceOf(Set),
+    PropTypes.arrayOf(PropTypes.string),
+  ]),
 }

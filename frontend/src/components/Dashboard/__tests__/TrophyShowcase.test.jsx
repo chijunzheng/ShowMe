@@ -137,6 +137,16 @@ describe('TrophyShowcase', () => {
       // Different trophy types should have different colors/styles
       expect(firstTrophy.className).not.toBe(streakTrophy.className)
     })
+
+    it('shows locked styling and label for locked trophies', () => {
+      const lockedTrophy = { ...sampleTrophies[0], locked: true }
+      const props = createDefaultProps({ trophies: [lockedTrophy] })
+      render(<TrophyShowcase {...props} />)
+
+      const trophyItem = screen.getByTestId('trophy-item-first-question')
+      expect(trophyItem.className).toMatch(/grayscale|opacity/)
+      expect(screen.getByText(/locked/i)).toBeInTheDocument()
+    })
   })
 
   describe('horizontal scrolling', () => {

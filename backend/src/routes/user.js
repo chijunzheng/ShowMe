@@ -94,7 +94,16 @@ router.post('/activity', async (req, res) => {
     }
 
     // Validate action
-    const validActions = ['question_asked', 'socratic_answered', 'deep_level_used']
+    const validActions = [
+      'question_asked',
+      'socratic_answered',
+      'deep_level_used',
+      'topic_learned',
+      'quiz_complete',
+      'story_complete',
+      'mystery_complete',
+      'wonder_complete',
+    ]
     if (!action || !validActions.includes(action)) {
       return res.status(400).json({
         error: `Invalid action. Must be one of: ${validActions.join(', ')}`,

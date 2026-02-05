@@ -7,6 +7,8 @@
  * @param {Object} props
  * @param {number} props.currentTopics - Number of topics learned
  * @param {number} props.topicsForNextRank - Topics needed for next rank
+ * @param {number} props.currentXP - Total XP earned
+ * @param {number} props.xpForNextRank - XP needed for next rank
  * @param {Object} props.currentRank - Current rank info
  * @param {Object} [props.nextRank] - Next rank info (null if max rank)
  */
@@ -17,11 +19,13 @@ import { getRankProgress, getRankTailwindColors } from './explorerRankUtils'
 export default function ExplorerRankProgress({
   currentTopics,
   topicsForNextRank,
+  currentXP,
+  xpForNextRank,
   currentRank,
   nextRank,
 }) {
   // Calculate progress percentage
-  const progress = getRankProgress(currentTopics)
+  const progress = getRankProgress(currentTopics, currentXP)
   const isMaxRank = !nextRank
 
   // Get colors for current rank
@@ -29,11 +33,12 @@ export default function ExplorerRankProgress({
 
   // Calculate topics remaining
   const topicsRemaining = topicsForNextRank > 0 ? topicsForNextRank : 0
+  const xpRemaining = xpForNextRank > 0 ? xpForNextRank : 0
 
   // Build progress text
   const progressText = isMaxRank
     ? 'Maximum rank achieved!'
-    : `${topicsRemaining} topic${topicsRemaining === 1 ? '' : 's'} to ${nextRank?.title || 'next rank'}`
+    : `${topicsRemaining} topic${topicsRemaining === 1 ? '' : 's'} and ${xpRemaining} XP to ${nextRank?.title || 'next rank'}`
 
   return (
     <div
@@ -127,6 +132,11 @@ export default function ExplorerRankProgress({
             <span className="text-slate-400 dark:text-slate-500">
               /{nextRank?.minTopics || 0}
             </span>
+            <span className="mx-1">•</span>
+            <span className="font-semibold">{currentXP}</span>
+            <span className="text-slate-400 dark:text-slate-500">
+              /{nextRank?.minXP || 0}
+            </span>
             <span className="ml-1">{progressText}</span>
           </>
         )}
@@ -138,12 +148,15 @@ export default function ExplorerRankProgress({
 ExplorerRankProgress.propTypes = {
   currentTopics: PropTypes.number.isRequired,
   topicsForNextRank: PropTypes.number.isRequired,
+  currentXP: PropTypes.number.isRequired,
+  xpForNextRank: PropTypes.number.isRequired,
   currentRank: PropTypes.shape({
     level: PropTypes.number,
     id: PropTypes.string,
     title: PropTypes.string,
     icon: PropTypes.string,
     minTopics: PropTypes.number,
+    minXP: PropTypes.number,
     description: PropTypes.string,
   }).isRequired,
   nextRank: PropTypes.shape({
@@ -152,6 +165,7 @@ ExplorerRankProgress.propTypes = {
     title: PropTypes.string,
     icon: PropTypes.string,
     minTopics: PropTypes.number,
+    minXP: PropTypes.number,
     description: PropTypes.string,
   }),
 }

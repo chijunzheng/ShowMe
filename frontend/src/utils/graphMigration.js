@@ -26,12 +26,17 @@ const MIGRATION_BACKUP_SUFFIX = '_backup'
  */
 const EXPLORER_RANKS = [
   { level: 1, title: 'Stargazer', icon: '\u{1F52D}', minTopics: 0 },
-  { level: 2, title: 'Observer', icon: '\u{1F441}\u{FE0F}', minTopics: 3 },
+  { level: 2, title: 'Space Cadet', icon: '\u{1F680}', minTopics: 3 },
   { level: 3, title: 'Navigator', icon: '\u{1F9ED}', minTopics: 8 },
-  { level: 4, title: 'Cartographer', icon: '\u{1F5FA}\u{FE0F}', minTopics: 15 },
-  { level: 5, title: 'Astronomer', icon: '\u{2B50}', minTopics: 25 },
-  { level: 6, title: 'Cosmologist', icon: '\u{1F30C}', minTopics: 40 },
-  { level: 7, title: 'Pioneer', icon: '\u{1F680}', minTopics: 60 },
+  { level: 4, title: 'Explorer', icon: '\u{1F30C}', minTopics: 15 },
+  { level: 5, title: 'Voyager', icon: '\u{1F6F8}', minTopics: 25 },
+  { level: 6, title: 'Astronaut', icon: '\u{1F9D1}\u{200D}\u{1F680}', minTopics: 38 },
+  { level: 7, title: 'Pioneer', icon: '\u{2B50}', minTopics: 52 },
+  { level: 8, title: 'Star Captain', icon: '\u{1F6F0}\u{FE0F}', minTopics: 68 },
+  { level: 9, title: 'Celestial Sage', icon: '\u{1F320}', minTopics: 84 },
+  { level: 10, title: 'Cosmic Pioneer', icon: '\u{1FA90}', minTopics: 100 },
+  { level: 11, title: 'Galactic Legend', icon: '\u{1F30C}', minTopics: 110 },
+  { level: 12, title: 'Legendary Luminary', icon: '\u{2600}\u{FE0F}', minTopics: 120 },
 ]
 
 /**

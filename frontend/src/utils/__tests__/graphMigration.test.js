@@ -663,8 +663,8 @@ describe('migrateToGraphModel', () => {
 
       const graph = migrateToGraphModel(topics)
 
-      expect(graph.explorerRank.level).toBe(2) // Observer rank (3+ topics)
-      expect(graph.explorerRank.title).toBe('Observer')
+      expect(graph.explorerRank.level).toBe(2) // Space Cadet rank (3+ topics)
+      expect(graph.explorerRank.title).toBe('Space Cadet')
     })
 
     it('preserves all node data during migration', () => {

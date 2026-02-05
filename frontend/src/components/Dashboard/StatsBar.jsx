@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import PropTypes from 'prop-types'
-import { getExplorerRank } from '../ExplorerRank/explorerRankUtils'
+import { getExplorerRank, MAX_RANK_LEVEL } from '../ExplorerRank/explorerRankUtils'
 
 /**
  * Format number with commas or K suffix
@@ -68,8 +68,8 @@ export default function StatsBar({
   isLoading = false,
   compact = false,
 }) {
-  // Calculate explorer rank from topics learned
-  const explorerRank = getExplorerRank(topicsLearned)
+  // Calculate explorer rank from topics learned and XP
+  const explorerRank = getExplorerRank(topicsLearned, totalXP)
 
   // Track previous values for animation
   const prevStreak = useRef(streak)
@@ -168,7 +168,7 @@ export default function StatsBar({
           flex flex-col items-center
           px-3 py-2
           rounded-lg
-          ${explorerRank.level === 7 ? 'bg-red-100 dark:bg-red-900/30 shimmer' : 'bg-sky-50 dark:bg-sky-900/30'}
+          ${explorerRank.level === MAX_RANK_LEVEL ? 'bg-red-100 dark:bg-red-900/30 shimmer' : 'bg-sky-50 dark:bg-sky-900/30'}
         `}
       >
         <span className="text-xl">{explorerRank.icon}</span>

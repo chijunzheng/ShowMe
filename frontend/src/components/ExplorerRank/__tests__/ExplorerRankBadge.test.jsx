@@ -236,9 +236,9 @@ describe('ExplorerRankBadge', () => {
 
       rerender(
         <ExplorerRankBadge
-          level={7}
-          title="Pioneer"
-          icon="\u2B50"
+          level={12}
+          title="Legendary Luminary"
+          icon="\u2600\uFE0F"
         />
       )
 
@@ -249,12 +249,12 @@ describe('ExplorerRankBadge', () => {
       expect(classes1).not.toBe(classes7)
     })
 
-    it('has shimmer class for max rank (level 7)', () => {
+    it('has shimmer class for max rank (level 12)', () => {
       render(
         <ExplorerRankBadge
-          level={7}
-          title="Pioneer"
-          icon="\u2B50"
+          level={12}
+          title="Legendary Luminary"
+          icon="\u2600\uFE0F"
         />
       )
 
