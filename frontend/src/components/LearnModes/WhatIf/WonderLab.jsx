@@ -22,6 +22,7 @@ import BonusFactCard from './BonusFactCard'
 import logger from '../../../utils/logger'
 import { vibrateSuccess } from '../../../utils/haptics'
 import { playAchievementSound } from '../../../utils/soundEffects'
+import { buildLearnSlidesPayload } from '../../../utils/learnSlidesPayload'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
 
@@ -82,11 +83,13 @@ export default function WonderLab({
     try {
       logger.info('LEARN', 'Generating What If scenario', { topicName })
 
+      const slidesPayload = buildLearnSlidesPayload(slides)
+
       const response = await fetch(`${API_BASE}/api/learn/whatif`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          slides,
+          slides: slidesPayload,
           topicName,
           explanationLevel,
         }),
@@ -94,7 +97,11 @@ export default function WonderLab({
       })
 
       if (!response.ok) {
-        throw new Error('Failed to generate scenario')
+        if (response.status === 413) {
+          throw new Error('Lesson content is too large to process. Try a shorter lesson or fewer details.')
+        }
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData?.error || 'Failed to generate scenario')
       }
 
       const data = await response.json()
@@ -172,7 +179,11 @@ export default function WonderLab({
       })
 
       if (!response.ok) {
-        throw new Error('Failed to evaluate prediction')
+        if (response.status === 413) {
+          throw new Error('Your prediction is too long to process. Try a shorter answer.')
+        }
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData?.error || 'Failed to evaluate prediction')
       }
 
       const data = await response.json()

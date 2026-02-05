@@ -16,6 +16,7 @@ import VoiceStoryRecorder from './VoiceStoryRecorder'
 import StoryPlayback from './StoryPlayback'
 import ShareStory from './ShareStory'
 import logger from '../../../utils/logger'
+import { buildLearnSlidesPayload } from '../../../utils/learnSlidesPayload'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
 
@@ -78,13 +79,16 @@ export default function StoryStudio({ slides, topicName, onComplete, onBack }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          slides,
+          slides: buildLearnSlidesPayload(slides),
           topicName
         }),
         signal: abortControllerRef.current.signal
       })
 
       if (!response.ok) {
+        if (response.status === 413) {
+          throw new Error('Lesson content is too large to process. Try a shorter lesson or fewer details.')
+        }
         const errorData = await response.json().catch(() => ({}))
         throw new Error(errorData.error || 'Failed to load story prompt')
       }

@@ -13,6 +13,7 @@ import DetectiveReward from './DetectiveReward'
 import logger from '../../../utils/logger'
 import { vibrateSuccess, vibrateShort } from '../../../utils/haptics'
 import { playCorrectSound, playPartialSound, playIncorrectSound } from '../../../utils/soundEffects'
+import { buildLearnSlidesPayload } from '../../../utils/learnSlidesPayload'
 
 // API base URL for backend calls
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
@@ -83,10 +84,7 @@ export default function MysteryLab({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          slides: slides.map(s => ({
-            subtitle: s.subtitle || '',
-            script: s.script || ''
-          })),
+          slides: buildLearnSlidesPayload(slides),
           topicName,
           explanationLevel,
         }),
