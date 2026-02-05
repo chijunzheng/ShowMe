@@ -24,6 +24,9 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# Backend local progress persistence
+backend/.data/
+
 # Local SQLite storage
 data/
 

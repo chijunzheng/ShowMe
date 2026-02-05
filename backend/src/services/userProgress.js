@@ -15,6 +15,9 @@
  */
 
 import { Firestore } from '@google-cloud/firestore'
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import logger from '../utils/logger.js'
 
 // Initialize Firestore
@@ -22,6 +25,67 @@ let db = null
 let firestoreUnavailable = false
 let warnedLocalFallback = false
 const localProgress = new Map()
+let localProgressLoaded = false
+let localProgressSaveTimer = null
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const DEFAULT_LOCAL_PROGRESS_FILE = path.resolve(__dirname, '..', '..', '.data', 'userProgress.json')
+const LOCAL_PROGRESS_FILE = process.env.SHOWME_LOCAL_PROGRESS_FILE || DEFAULT_LOCAL_PROGRESS_FILE
+const LOCAL_PROGRESS_SAVE_DEBOUNCE_MS = process.env.NODE_ENV === 'test' ? 0 : 300
+
+function loadLocalProgressFromDisk() {
+  if (localProgressLoaded) return
+  localProgressLoaded = true
+
+  try {
+    if (!LOCAL_PROGRESS_FILE || !fs.existsSync(LOCAL_PROGRESS_FILE)) {
+      return
+    }
+
+    const raw = fs.readFileSync(LOCAL_PROGRESS_FILE, 'utf8')
+    if (!raw) return
+
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return
+
+    Object.entries(parsed).forEach(([clientId, progress]) => {
+      if (!clientId || !progress) return
+      localProgress.set(clientId, progress)
+    })
+  } catch (error) {
+    logger.warn('PROGRESS', 'Failed to load local progress from disk', { error: error.message })
+  }
+}
+
+function writeLocalProgressToDisk() {
+  try {
+    if (!LOCAL_PROGRESS_FILE) return
+    const dir = path.dirname(LOCAL_PROGRESS_FILE)
+    fs.mkdirSync(dir, { recursive: true })
+    const payload = Object.fromEntries(localProgress.entries())
+    fs.writeFileSync(LOCAL_PROGRESS_FILE, JSON.stringify(payload, null, 2), 'utf8')
+  } catch (error) {
+    logger.warn('PROGRESS', 'Failed to persist local progress', { error: error.message })
+  }
+}
+
+function scheduleLocalProgressSave() {
+  if (!LOCAL_PROGRESS_FILE) return
+
+  if (LOCAL_PROGRESS_SAVE_DEBOUNCE_MS === 0) {
+    writeLocalProgressToDisk()
+    return
+  }
+
+  if (localProgressSaveTimer) {
+    clearTimeout(localProgressSaveTimer)
+  }
+
+  localProgressSaveTimer = setTimeout(() => {
+    localProgressSaveTimer = null
+    writeLocalProgressToDisk()
+  }, LOCAL_PROGRESS_SAVE_DEBOUNCE_MS)
+}
 
 function shouldUseLocalProgress() {
   if (process.env.SHOWME_LOCAL_PROGRESS === '1') return true
@@ -186,16 +250,19 @@ function createDefaultProgress(clientId) {
 }
 
 function getLocalProgress(clientId) {
+  loadLocalProgressFromDisk()
   if (localProgress.has(clientId)) {
     return localProgress.get(clientId)
   }
   const progress = createDefaultProgress(clientId)
   localProgress.set(clientId, progress)
+  scheduleLocalProgressSave()
   return progress
 }
 
 function setLocalProgress(clientId, progress) {
   localProgress.set(clientId, progress)
+  scheduleLocalProgressSave()
 }
 
 function normalizeProgress(data, clientId) {
