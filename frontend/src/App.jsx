@@ -146,6 +146,7 @@ function App() {
     getNode: getGraphNode,
     getNodeByName: getGraphNodeByName,
     topicCount: graphTopicCount,
+    deleteTopicByName,
   } = useKnowledgeGraph()
 
   const [isWorldRegenerating, setIsWorldRegenerating] = useState(false)
@@ -3041,6 +3042,12 @@ function App() {
     // Clear cached slides for this topic
     removeTopicSlides(topicId)
 
+    // Remove topic from knowledge graph constellation
+    const deletedTopic = topics.find((topic) => topic.id === topicId)
+    if (deletedTopic?.name) {
+      deleteTopicByName(deletedTopic.name)
+    }
+
     if (remainingTopics.length === 0) {
       void resetLivingWorldState()
     }
@@ -3063,7 +3070,7 @@ function App() {
     }
 
     logger.info('STATE', 'Topic deleted', { topicId })
-  }, [activeTopicId, topics, resetLivingWorldState])
+  }, [activeTopicId, topics, resetLivingWorldState, deleteTopicByName])
 
   /**
    * Handle regeneration of a topic at a different explanation level.

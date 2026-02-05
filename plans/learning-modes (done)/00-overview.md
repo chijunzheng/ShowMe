@@ -1,5 +1,7 @@
 # Learning Modes: Quiz Replacement Plan
 
+**Status:** ✅ Completed (5/5 features)
+
 ## Problem
 
 Traditional quizzes (MCQ, fill-blank, true/false) feel like school tests. Replace entirely with 3 new modes that feel like **play**.

@@ -6,7 +6,7 @@
  * - Level selection cards (Simple, Standard, Deep)
  * - Text fallback for typing questions
  * - StrengthSection for spaced repetition review
- * - Surprise Me button for random topics
+ * - "I'm feeling curious!" button for random topics
  */
 import { useState } from 'react'
 import LevelCard from '../LevelCard.jsx'
@@ -55,6 +55,7 @@ export default function HomeScreen({
   piecesNeedingReview = [],
   onStartReview,
   isReviewLoading = false,
+  hasSidebar = false,
 }) {
   // State for random topic modal
   const [showRandomModal, setShowRandomModal] = useState(false)
@@ -135,7 +136,7 @@ export default function HomeScreen({
 
       </div>
 
-      {/* Surprise Me button - compact pill, secondary action */}
+      {/* "I'm feeling curious!" button - compact pill, secondary action */}
       <div
         className="animate-fade-in flex justify-center"
         style={{ animationDelay: '240ms' }}
@@ -154,8 +155,8 @@ export default function HomeScreen({
             text-sm
           `}
         >
-          <span className="text-base">🎲</span>
-          <span className="font-medium">Surprise Me!</span>
+          <span className="text-base">🔮</span>
+          <span className="font-medium">I'm feeling curious!</span>
         </button>
       </div>
 
@@ -230,6 +231,7 @@ export default function HomeScreen({
         isOpen={showRandomModal}
         onClose={() => setShowRandomModal(false)}
         onSelectLevel={handleRandomTopicSelect}
+        hasSidebar={hasSidebar}
       />
     </div>
   )

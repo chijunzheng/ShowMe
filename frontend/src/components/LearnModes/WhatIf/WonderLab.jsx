@@ -97,11 +97,21 @@ export default function WonderLab({
       })
 
       if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        const errorCode = errorData?.error
         if (response.status === 413) {
           throw new Error('Lesson content is too large to process. Try a shorter lesson or fewer details.')
         }
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData?.error || 'Failed to generate scenario')
+        if (response.status === 503 || errorCode === 'API_NOT_AVAILABLE') {
+          throw new Error('AI service is unavailable right now. Please try again in a bit.')
+        }
+        if (response.status === 429 || errorCode === 'RATE_LIMITED') {
+          throw new Error('Too many requests. Please wait a moment and try again.')
+        }
+        if (response.status === 502 || errorCode === 'PARSE_ERROR' || errorCode === 'INVALID_RESPONSE') {
+          throw new Error('Had trouble generating a scenario. Please try again.')
+        }
+        throw new Error(errorCode || errorData?.message || 'Failed to generate scenario')
       }
 
       const data = await response.json()
@@ -179,11 +189,21 @@ export default function WonderLab({
       })
 
       if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        const errorCode = errorData?.error
         if (response.status === 413) {
           throw new Error('Your prediction is too long to process. Try a shorter answer.')
         }
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData?.error || 'Failed to evaluate prediction')
+        if (response.status === 503 || errorCode === 'API_NOT_AVAILABLE') {
+          throw new Error('AI service is unavailable right now. Please try again in a bit.')
+        }
+        if (response.status === 429 || errorCode === 'RATE_LIMITED') {
+          throw new Error('Too many requests. Please wait a moment and try again.')
+        }
+        if (response.status === 502 || errorCode === 'PARSE_ERROR' || errorCode === 'INVALID_RESPONSE') {
+          throw new Error('Had trouble evaluating your prediction. Please try again.')
+        }
+        throw new Error(errorCode || errorData?.message || 'Failed to evaluate prediction')
       }
 
       const data = await response.json()

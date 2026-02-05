@@ -1,7 +1,7 @@
 # Feature: Show Earned Badges in Progress Tab (Compact Trophy Row)
 
 **ID:** 02  
-**Status:** ⬜ Not Started  
+**Status:** ✅ Completed  
 **Priority:** Medium  
 **Estimated Complexity:** Low  
 **Dependencies:** 01
@@ -42,5 +42,4 @@ Use `TrophyShowcase` expected props:
 
 **Created:** 2026-02-05  
 **Last Updated:** 2026-02-05  
-**Implemented By:** TBD
-
+**Implemented By:** Codex

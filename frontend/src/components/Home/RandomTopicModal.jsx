@@ -63,6 +63,7 @@ export default function RandomTopicModal({
   isOpen,
   onClose,
   onSelectLevel,
+  hasSidebar = false,
 }) {
   const [topic, setTopic] = useState(null)
   const [category, setCategory] = useState(null)
@@ -156,6 +157,7 @@ export default function RandomTopicModal({
     <div
       className={`
         fixed inset-0 z-50
+        ${hasSidebar ? 'md:left-64' : ''}
         bg-black/50 backdrop-blur-sm
         flex items-center justify-center
         p-4
@@ -177,8 +179,8 @@ export default function RandomTopicModal({
         <div className="bg-gradient-to-r from-primary-500 to-primary-600 p-4 text-white">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold flex items-center gap-2">
-              <span>🎲</span>
-              Surprise Me!
+              <span>🔮</span>
+              I'm feeling curious!
             </h2>
             <button
               onClick={onClose}

@@ -3,7 +3,7 @@
  *
  * Section for the Progress Tab that allows quick access to learning modes.
  * Shows mode cards (Mystery, Wonder, Story) and topic picker.
- * Includes "Surprise Me!" for random mode + topic selection.
+ * Includes "I'm feeling curious!" for random mode + topic selection.
  */
 
 import { useState, useCallback, useMemo } from 'react'
@@ -105,7 +105,7 @@ export default function QuickPractice({
     }
   }, [selectedMode, onLaunchMode, onTopicSelect])
 
-  // Handle Surprise Me click
+  // Handle "I'm feeling curious!" click
   const handleSurpriseMe = useCallback(() => {
     if (topics.length === 0) return
 
@@ -188,7 +188,7 @@ export default function QuickPractice({
         ))}
       </div>
 
-      {/* Surprise Me Button */}
+      {/* "I'm feeling curious!" Button */}
       <button
         onClick={handleSurpriseMe}
         className="
@@ -204,8 +204,8 @@ export default function QuickPractice({
           transition-all duration-200
         "
       >
-        <span className="text-xl" aria-hidden="true">🎲</span>
-        <span>Surprise Me!</span>
+        <span className="text-xl" aria-hidden="true">🔮</span>
+        <span>I'm feeling curious!</span>
       </button>
 
       {/* Topic Selection Hint */}

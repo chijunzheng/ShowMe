@@ -59,9 +59,9 @@ export function ProgressIcon({ active = false, className = '' }) {
     <span
       className={`text-2xl transition-opacity ${active ? '' : 'opacity-50'} ${className}`}
       role="img"
-      aria-label="Progress"
+      aria-label="Journey"
     >
-      📊
+      🧭
     </span>
   )
 }

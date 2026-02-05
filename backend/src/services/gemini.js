@@ -3024,7 +3024,8 @@ Generate the quiz questions now:`
  * @returns {Object} { scenario, imagePrompt, thinkAboutHints, expectedConsequences, bonusFact, error }
  */
 export async function generateWhatIfScenario({ slides, topicName, explanationLevel, language }) {
-  if (!isGeminiAvailable()) {
+  const ai = getAIClient()
+  if (!ai) {
     return { error: 'API_NOT_AVAILABLE' }
   }
 
@@ -3081,13 +3082,23 @@ Respond with ONLY valid JSON (no markdown, no code blocks):
     const response = await ai.models.generateContent({
       model: TEXT_MODEL,
       contents: prompt,
+      config: {
+        temperature: 0.7,
+        maxOutputTokens: 900,
+        responseMimeType: 'application/json',
+      }
     })
 
     const text = response.text || ''
-    const extracted = extractJSON(text)
-
-    if (!extracted) {
-      console.error('[Gemini] What If generation failed to extract JSON from:', text.substring(0, 200))
+    let extracted
+    try {
+      const jsonStr = repairJSON(extractJSON(text))
+      extracted = JSON.parse(jsonStr)
+    } catch (parseError) {
+      console.error('[Gemini] What If generation failed to parse JSON:', {
+        error: parseError.message,
+        preview: text.substring(0, 400),
+      })
       return { error: 'PARSE_ERROR' }
     }
 
@@ -3100,12 +3111,29 @@ Respond with ONLY valid JSON (no markdown, no code blocks):
       return { error: 'INVALID_RESPONSE' }
     }
 
+    const expectedConsequences = extracted.expectedConsequences
+      .filter(c => c && typeof c === 'object')
+      .map(c => ({
+        concept: typeof c.concept === 'string' ? c.concept.trim() : '',
+        consequence: typeof c.consequence === 'string' ? c.consequence.trim() : '',
+      }))
+      .filter(c => c.concept && c.consequence)
+      .slice(0, 6)
+
+    if (expectedConsequences.length === 0) {
+      return { error: 'INVALID_RESPONSE' }
+    }
+
     return {
-      scenario: extracted.scenario,
-      imagePrompt: extracted.imagePrompt || `Visual representation of: ${extracted.scenario}`,
-      thinkAboutHints: Array.isArray(extracted.thinkAboutHints) ? extracted.thinkAboutHints : [],
-      expectedConsequences: extracted.expectedConsequences,
-      bonusFact: extracted.bonusFact || '',
+      scenario: extracted.scenario.trim(),
+      imagePrompt: (typeof extracted.imagePrompt === 'string' && extracted.imagePrompt.trim())
+        ? extracted.imagePrompt.trim()
+        : `Visual representation of: ${extracted.scenario}`,
+      thinkAboutHints: Array.isArray(extracted.thinkAboutHints)
+        ? extracted.thinkAboutHints.filter(h => typeof h === 'string' && h.trim()).map(h => h.trim()).slice(0, 4)
+        : [],
+      expectedConsequences,
+      bonusFact: typeof extracted.bonusFact === 'string' ? extracted.bonusFact.trim() : '',
       error: null
     }
   } catch (error) {
@@ -3123,6 +3151,250 @@ Respond with ONLY valid JSON (no markdown, no code blocks):
 }
 
 /**
+ * Generate story prompt with concept checklist for Story Studio learning mode.
+ *
+ * @param {Object} params
+ * @param {Array} params.slides - Lesson slides (expects subtitle/script fields)
+ * @param {string} params.topicName - The topic being learned
+ * @param {string} params.language - 'en' or 'zh'
+ * @returns {Promise<{storyPrompt: string, conceptChecklist: string[], starterSuggestion: string, imageStyle: string, error: string|null}>}
+ */
+export async function generateStoryPrompt({ slides, topicName, language }) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', error: 'API_NOT_AVAILABLE' }
+  }
+
+  try {
+    const slideContext = (Array.isArray(slides) ? slides : [])
+      .map((slide, index) => {
+        const subtitle = typeof slide?.subtitle === 'string' ? slide.subtitle : ''
+        const script = typeof slide?.script === 'string' ? slide.script : ''
+        const content = (script || subtitle).trim()
+        return content ? `Slide ${index + 1}: ${content}` : null
+      })
+      .filter(Boolean)
+      .join('\n')
+
+    const languageNote = language === 'zh'
+      ? 'Return all text in Simplified Chinese (简体中文).'
+      : 'Return all text in English.'
+
+    const prompt = language === 'zh'
+      ? `基于这个教育主题，为小朋友创建一个创意故事提示。
+
+主题: ${topicName}
+
+教学内容:
+${slideContext}
+
+请返回一个JSON对象，包含:
+{
+  "storyPrompt": "创意写作提示，引导孩子使用学到的概念创作故事",
+  "conceptChecklist": ["概念1", "概念2", "概念3"],
+  "starterSuggestion": "故事的开头建议，帮助孩子开始",
+  "imageStyle": "插图风格描述，用于生成儿童友好的插图"
+}
+
+要求:
+- 故事提示应该有趣、适合儿童
+- 概念清单应包含3-5个关键概念
+- 开头建议应该引人入胜
+- 插图风格应该是“儿童图书插图，色彩鲜艳，友好”
+
+只返回JSON，不要其他文本。`
+      : `Based on this educational topic, create a creative story prompt for a kid.
+
+Topic: ${topicName}
+
+Lesson content:
+${slideContext}
+
+Return a JSON object with:
+{
+  "storyPrompt": "A creative writing prompt that encourages using learned concepts",
+  "conceptChecklist": ["concept1", "concept2", "concept3"],
+  "starterSuggestion": "An opening line to help the kid start their story",
+  "imageStyle": "Style description for generating kid-friendly illustrations"
+}
+
+Requirements:
+- Story prompt should be engaging and age-appropriate
+- Concept checklist should have 3-5 key concepts from the lesson
+- Starter suggestion should hook the imagination
+- Image style should be \"children's book illustration, colorful, friendly\"
+- Keep concepts concise (2-4 words each)
+
+${languageNote}
+
+Return ONLY the JSON object, no other text.`
+
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.9,
+        maxOutputTokens: 900,
+        responseMimeType: 'application/json',
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    if (!parsed || typeof parsed !== 'object') {
+      return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', error: 'INVALID_RESPONSE' }
+    }
+
+    const storyPrompt = typeof parsed.storyPrompt === 'string' ? parsed.storyPrompt.trim() : ''
+    const conceptChecklist = Array.isArray(parsed.conceptChecklist)
+      ? parsed.conceptChecklist.filter(c => typeof c === 'string' && c.trim()).map(c => c.trim()).slice(0, 5)
+      : []
+    const starterSuggestion = typeof parsed.starterSuggestion === 'string' ? parsed.starterSuggestion.trim() : ''
+    const imageStyle = typeof parsed.imageStyle === 'string' ? parsed.imageStyle.trim() : ''
+
+    if (!storyPrompt || conceptChecklist.length === 0 || !starterSuggestion || !imageStyle) {
+      return { storyPrompt, conceptChecklist, starterSuggestion, imageStyle, error: 'INVALID_RESPONSE' }
+    }
+
+    return { storyPrompt, conceptChecklist, starterSuggestion, imageStyle, error: null }
+  } catch (error) {
+    console.error('[Gemini] Story prompt generation error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', error: 'RATE_LIMITED' }
+    }
+
+    if (error.message?.includes('JSON')) {
+      return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', error: 'PARSE_ERROR' }
+    }
+
+    return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
+ * Extract a scene from a story transcript for Story Studio and return structured JSON.
+ *
+ * @param {Object} params
+ * @param {string} params.transcript
+ * @param {string} params.topicName
+ * @param {string[]} params.conceptChecklist
+ * @param {string[]} params.previousScenes
+ * @param {string} params.language - 'en' or 'zh'
+ * @returns {Promise<{sceneDescription: string, imagePrompt: string, conceptsFound: string[], narrativeText: string, error: string|null}>}
+ */
+export async function extractStoryScene({ transcript, topicName, conceptChecklist = [], previousScenes = [], language }) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { sceneDescription: '', imagePrompt: '', conceptsFound: [], narrativeText: '', error: 'API_NOT_AVAILABLE' }
+  }
+
+  try {
+    const sceneContext = Array.isArray(previousScenes) && previousScenes.length > 0
+      ? `\nPrevious scenes:\n${previousScenes.map((s, i) => `${i + 1}. ${String(s || '').slice(0, 200)}`).join('\n')}`
+      : ''
+
+    const checklistText = Array.isArray(conceptChecklist)
+      ? conceptChecklist.filter(Boolean).join(', ')
+      : ''
+
+    const prompt = language === 'zh'
+      ? `从这段孩子讲述的故事中提取一个场景。
+
+主题: ${topicName}
+概念清单: ${checklistText}
+${sceneContext}
+
+故事文本:
+${transcript}
+
+生成JSON对象:
+{
+  "sceneDescription": "简短的场景描述（用于内部）",
+  "imagePrompt": "详细的插图提示（卡通风格，友好，色彩鲜艳）",
+  "conceptsFound": ["检测到的概念"],
+  "narrativeText": "这个场景的清理后的叙述文本"
+}
+
+要求:
+- 场景描述应该简洁
+- 图像提示应该详细，适合生成儿童友好的插图
+- 只检测概念清单中出现的概念（尽量匹配）
+- 叙述文本应该是完整的句子
+
+只返回JSON。`
+      : `Extract a scene from this kid's story narration.
+
+Topic: ${topicName}
+Concept checklist: ${checklistText}
+${sceneContext}
+
+Story text:
+${transcript}
+
+Return a JSON object:
+{
+  "sceneDescription": "Brief scene description (for internal use)",
+  "imagePrompt": "Detailed prompt for illustration (cartoon style, friendly, colorful)",
+  "conceptsFound": ["detected concepts from checklist"],
+  "narrativeText": "Clean narrative text for this scene"
+}
+
+Requirements:
+- Scene description should be concise
+- Image prompt should be detailed and suitable for kid-friendly illustration
+- Detect which concepts from the checklist appear in this scene
+- Narrative text should be a complete sentence or two
+
+Return ONLY JSON.`
+
+    const response = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.7,
+        maxOutputTokens: 500,
+        responseMimeType: 'application/json',
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    if (!parsed || typeof parsed !== 'object') {
+      return { sceneDescription: '', imagePrompt: '', conceptsFound: [], narrativeText: '', error: 'INVALID_RESPONSE' }
+    }
+
+    const sceneDescription = typeof parsed.sceneDescription === 'string' ? parsed.sceneDescription.trim() : ''
+    const imagePrompt = typeof parsed.imagePrompt === 'string' ? parsed.imagePrompt.trim() : ''
+    const narrativeText = typeof parsed.narrativeText === 'string' ? parsed.narrativeText.trim() : ''
+    const conceptsFound = Array.isArray(parsed.conceptsFound)
+      ? parsed.conceptsFound.filter(c => typeof c === 'string' && c.trim()).map(c => c.trim()).slice(0, 10)
+      : []
+
+    if (!sceneDescription || !imagePrompt || !narrativeText) {
+      return { sceneDescription, imagePrompt, conceptsFound, narrativeText, error: 'INVALID_RESPONSE' }
+    }
+
+    return { sceneDescription, imagePrompt, conceptsFound, narrativeText, error: null }
+  } catch (error) {
+    console.error('[Gemini] Story scene extraction error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { sceneDescription: '', imagePrompt: '', conceptsFound: [], narrativeText: '', error: 'RATE_LIMITED' }
+    }
+    if (error.message?.includes('JSON')) {
+      return { sceneDescription: '', imagePrompt: '', conceptsFound: [], narrativeText: '', error: 'PARSE_ERROR' }
+    }
+
+    return { sceneDescription: '', imagePrompt: '', conceptsFound: [], narrativeText: '', error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
  * Evaluate user's prediction against expected consequences (non-judgmental)
  * Matches user's reasoning to expected outcomes and provides encouragement
  *
@@ -3133,7 +3405,8 @@ Respond with ONLY valid JSON (no markdown, no code blocks):
  * @returns {Object} { matchedPredictions, missedConsequences, xpEarned, error }
  */
 export async function evaluateWhatIfPrediction({ userPrediction, expectedConsequences, language }) {
-  if (!isGeminiAvailable()) {
+  const ai = getAIClient()
+  if (!ai) {
     return { error: 'API_NOT_AVAILABLE' }
   }
 
@@ -3186,23 +3459,33 @@ Respond with ONLY valid JSON (no markdown, no code blocks):
     const response = await ai.models.generateContent({
       model: FAST_MODEL,
       contents: prompt,
+      config: {
+        temperature: 0.6,
+        maxOutputTokens: 600,
+        responseMimeType: 'application/json',
+      }
     })
 
     const text = response.text || ''
-    const extracted = extractJSON(text)
-
-    if (!extracted) {
-      console.error('[Gemini] What If evaluation failed to extract JSON from:', text.substring(0, 200))
+    let extracted
+    try {
+      const jsonStr = repairJSON(extractJSON(text))
+      extracted = JSON.parse(jsonStr)
+    } catch (parseError) {
+      console.error('[Gemini] What If evaluation failed to parse JSON:', {
+        error: parseError.message,
+        preview: text.substring(0, 400),
+      })
       return { error: 'PARSE_ERROR' }
     }
 
     // Ensure arrays exist
-    const matchedPredictions = Array.isArray(extracted.matchedPredictions)
-      ? extracted.matchedPredictions
+    const matchedPredictions = Array.isArray(extracted?.matchedPredictions)
+      ? extracted.matchedPredictions.filter(m => m && typeof m === 'object').slice(0, 6)
       : []
 
-    const missedConsequences = Array.isArray(extracted.missedConsequences)
-      ? extracted.missedConsequences
+    const missedConsequences = Array.isArray(extracted?.missedConsequences)
+      ? extracted.missedConsequences.filter(m => m && typeof m === 'object').slice(0, 6)
       : []
 
     // Calculate XP based on matches (ensure always positive)

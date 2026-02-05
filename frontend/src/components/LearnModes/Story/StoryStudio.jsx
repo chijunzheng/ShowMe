@@ -19,6 +19,7 @@ import logger from '../../../utils/logger'
 import { buildLearnSlidesPayload } from '../../../utils/learnSlidesPayload'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
+const STORY_PROMPT_TIMEOUT_MS = 30_000
 
 // Story state machine
 const STORY_STATE = {
@@ -51,10 +52,21 @@ export default function StoryStudio({ slides, topicName, onComplete, onBack }) {
   const abortControllerRef = useRef(null)
   const isMountedRef = useRef(true)
 
+  const handleCancelLoading = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    onBack?.()
+  }, [onBack])
+
   /**
    * Load story prompt on mount
    */
   useEffect(() => {
+    // React 18 StrictMode (dev) intentionally mounts, runs effects, cleans up, then
+    // re-runs effects to surface unsafe side-effects. Reset this guard each run so
+    // we don't get stuck in LOADING_PROMPT forever.
+    isMountedRef.current = true
     loadStoryPrompt()
 
     return () => {
@@ -72,9 +84,20 @@ export default function StoryStudio({ slides, topicName, onComplete, onBack }) {
     setStoryState(STORY_STATE.LOADING_PROMPT)
     setErrorMessage('')
 
-    try {
-      abortControllerRef.current = new AbortController()
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
 
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
+    let didTimeout = false
+    const timeoutId = setTimeout(() => {
+      didTimeout = true
+      controller.abort()
+    }, STORY_PROMPT_TIMEOUT_MS)
+
+    try {
       const response = await fetch(`${API_BASE}/api/learn/story`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -82,15 +105,25 @@ export default function StoryStudio({ slides, topicName, onComplete, onBack }) {
           slides: buildLearnSlidesPayload(slides),
           topicName
         }),
-        signal: abortControllerRef.current.signal
+        signal: controller.signal
       })
 
       if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        const errorCode = errorData?.error
         if (response.status === 413) {
           throw new Error('Lesson content is too large to process. Try a shorter lesson or fewer details.')
         }
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.error || 'Failed to load story prompt')
+        if (response.status === 503 || errorCode === 'API_NOT_AVAILABLE') {
+          throw new Error('AI service is unavailable right now. Please try again in a bit.')
+        }
+        if (response.status === 429 || errorCode === 'RATE_LIMITED') {
+          throw new Error('Too many requests. Please wait a moment and try again.')
+        }
+        if (response.status === 502 || errorCode === 'PARSE_ERROR' || errorCode === 'INVALID_RESPONSE') {
+          throw new Error('Had trouble generating a story prompt. Please try again.')
+        }
+        throw new Error(errorCode || errorData.message || 'Failed to load story prompt')
       }
 
       const data = await response.json()
@@ -109,6 +142,11 @@ export default function StoryStudio({ slides, topicName, onComplete, onBack }) {
       }
     } catch (error) {
       if (error.name === 'AbortError') {
+        if (didTimeout && isMountedRef.current) {
+          logger.warn('STORY', 'Story prompt request timed out', { timeoutMs: STORY_PROMPT_TIMEOUT_MS })
+          setErrorMessage('Story prompt is taking longer than expected. Please try again.')
+          setStoryState(STORY_STATE.ERROR)
+        }
         return
       }
 
@@ -118,6 +156,8 @@ export default function StoryStudio({ slides, topicName, onComplete, onBack }) {
         setErrorMessage(error.message || 'Failed to load story prompt. Please try again.')
         setStoryState(STORY_STATE.ERROR)
       }
+    } finally {
+      clearTimeout(timeoutId)
     }
   }
 
@@ -230,12 +270,23 @@ export default function StoryStudio({ slides, topicName, onComplete, onBack }) {
    */
   if (storyState === STORY_STATE.LOADING_PROMPT) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-pink-50 via-white to-rose-50 dark:from-gray-900 dark:via-gray-800 dark:to-pink-950">
-        <div className="text-center">
+      <div className="flex flex-col items-center justify-center min-h-screen px-6 bg-gradient-to-br from-pink-50 via-white to-rose-50 dark:from-gray-900 dark:via-gray-800 dark:to-pink-950">
+        <div className="max-w-md text-center">
           <div className="w-16 h-16 mx-auto mb-4 border-4 border-primary border-t-transparent rounded-full animate-spin" />
           <p className="text-lg text-gray-600 dark:text-gray-400">
             Preparing your story prompt...
           </p>
+          <p className="mt-2 text-sm text-gray-500 dark:text-gray-500">
+            This can take up to {Math.round(STORY_PROMPT_TIMEOUT_MS / 1000)} seconds.
+          </p>
+          <div className="mt-6 flex justify-center">
+            <button
+              onClick={handleCancelLoading}
+              className="px-6 py-3 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+            >
+              Go Back
+            </button>
+          </div>
         </div>
       </div>
     )

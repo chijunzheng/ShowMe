@@ -1,14 +1,14 @@
 /**
  * BottomTabBar Component (UI001)
  *
- * A fixed bottom navigation bar with two tabs: Learn and Progress.
- * Progress tab consolidates World and Tree views.
+ * A fixed bottom navigation bar with two tabs: Learn and Journey.
+ * Journey tab consolidates World and Tree views.
  *
  * Features:
  * - Fixed to bottom of screen with safe area inset support
- * - Two tabs with icons: Learn (lightbulb), Progress (chart)
+ * - Two tabs with icons: Learn (lightbulb), Journey (compass)
  * - Active tab highlighting with colored fill and background
- * - Optional badge on Progress tab
+ * - Optional badge on Journey tab
  * - Dark mode support
  * - Keyboard accessible (Tab + Enter/Space)
  * - 44px+ touch targets for mobile accessibility
@@ -16,7 +16,7 @@
  * @param {Object} props - Component props
  * @param {'learn' | 'progress'} props.activeTab - Currently active tab
  * @param {Function} props.onTabChange - Callback when tab is clicked, receives tab name
- * @param {number} [props.worldBadge] - Optional badge count for Progress tab (new pieces)
+ * @param {number} [props.worldBadge] - Optional badge count for Journey tab (new pieces)
  * @param {boolean} [props.hasSidebar] - Whether sidebar is visible (offsets bar on desktop)
  */
 import { LearnIcon, ProgressIcon } from './icons/TabIcons'
@@ -43,7 +43,7 @@ function BottomTabBar({ activeTab = 'learn', onTabChange, worldBadge = 0, hasSid
 
   const tabs = [
     { id: 'learn', label: 'Learn', Icon: LearnIcon, badge: 0 },
-    { id: 'progress', label: 'Progress', Icon: ProgressIcon, badge: worldBadge },
+    { id: 'progress', label: 'Journey', Icon: ProgressIcon, badge: worldBadge },
   ]
 
   return (

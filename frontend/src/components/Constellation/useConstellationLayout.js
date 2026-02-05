@@ -24,6 +24,8 @@ const DEFAULT_CONFIG = {
   centerGravity: 0.01,
   centerX: 400,
   centerY: 300,
+  clusterGravity: 0.05,
+  clusterRepulsion: 2000,
 }
 
 /**
@@ -145,14 +147,117 @@ function applyCenterGravity(nodes, positions, centerX, centerY, gravity) {
 }
 
 /**
+ * Apply cluster gravity — pull same-cluster nodes toward their cluster centroid
+ *
+ * @param {Array} nodes - Array of node objects
+ * @param {Map} positions - Current positions map
+ * @param {Array} clusters - Array of cluster objects
+ * @param {number} gravity - Cluster gravity force constant
+ */
+function applyClusterGravity(nodes, positions, clusters, gravity) {
+  if (!clusters || clusters.length === 0) return
+
+  clusters.forEach((cluster) => {
+    if (!cluster.nodeIds || cluster.nodeIds.length < 2) return
+
+    // Calculate cluster centroid
+    let cx = 0
+    let cy = 0
+    let count = 0
+    cluster.nodeIds.forEach((id) => {
+      const pos = positions.get(id)
+      if (pos) {
+        cx += pos.x
+        cy += pos.y
+        count++
+      }
+    })
+
+    if (count === 0) return
+    cx /= count
+    cy /= count
+
+    // Pull each cluster node toward centroid
+    cluster.nodeIds.forEach((id) => {
+      const pos = positions.get(id)
+      if (pos) {
+        pos.x += (cx - pos.x) * gravity
+        pos.y += (cy - pos.y) * gravity
+      }
+    })
+  })
+}
+
+/**
+ * Apply cluster repulsion — push cluster centroids apart from each other
+ *
+ * @param {Array} nodes - Array of node objects
+ * @param {Map} positions - Current positions map
+ * @param {Array} clusters - Array of cluster objects
+ * @param {number} repulsion - Cluster repulsion force constant
+ */
+function applyClusterRepulsion(nodes, positions, clusters, repulsion) {
+  if (!clusters || clusters.length < 2) return
+
+  // Calculate centroids for each cluster
+  const centroids = clusters.map((cluster) => {
+    let cx = 0
+    let cy = 0
+    let count = 0
+    cluster.nodeIds.forEach((id) => {
+      const pos = positions.get(id)
+      if (pos) {
+        cx += pos.x
+        cy += pos.y
+        count++
+      }
+    })
+    return { cluster, cx: count > 0 ? cx / count : 0, cy: count > 0 ? cy / count : 0, count }
+  }).filter((c) => c.count > 0)
+
+  // Repel cluster centroids from each other
+  for (let i = 0; i < centroids.length; i++) {
+    for (let j = i + 1; j < centroids.length; j++) {
+      const a = centroids[i]
+      const b = centroids[j]
+      const dx = b.cx - a.cx
+      const dy = b.cy - a.cy
+      const distSquared = dx * dx + dy * dy
+      const dist = Math.max(1, Math.sqrt(distSquared))
+
+      const force = repulsion / distSquared
+      const fx = (dx / dist) * force
+      const fy = (dy / dist) * force
+
+      // Apply force to all nodes in each cluster
+      a.cluster.nodeIds.forEach((id) => {
+        const pos = positions.get(id)
+        if (pos) {
+          pos.x -= fx
+          pos.y -= fy
+        }
+      })
+      b.cluster.nodeIds.forEach((id) => {
+        const pos = positions.get(id)
+        if (pos) {
+          pos.x += fx
+          pos.y += fy
+        }
+      })
+    }
+  }
+}
+
+/**
  * Run force-directed layout simulation
  *
  * @param {Array} nodes - Array of node objects
  * @param {Array} edges - Array of edge objects
  * @param {Object} config - Layout configuration
+ * @param {Array} clusters - Array of cluster objects
  * @returns {Map} Final positions map
  */
-function runSimulation(nodes, edges, config = {}) {
+function runSimulation(nodes, edges, config = {}, clusters = []) {
   const {
     iterations,
     repulsion,
@@ -160,6 +265,8 @@ function runSimulation(nodes, edges, config = {}) {
     centerGravity,
     centerX,
     centerY,
+    clusterGravity,
+    clusterRepulsion,
   } = { ...DEFAULT_CONFIG, ...config }
 
   // Initialize positions
@@ -169,6 +276,8 @@ function runSimulation(nodes, edges, config = {}) {
   for (let i = 0; i < iterations; i++) {
     applyRepulsion(nodes, positions, repulsion)
     applyAttraction(edges, positions, attraction)
+    applyClusterGravity(nodes, positions, clusters, clusterGravity)
+    applyClusterRepulsion(nodes, positions, clusters, clusterRepulsion)
     applyCenterGravity(nodes, positions, centerX, centerY, centerGravity)
   }
 
@@ -177,32 +286,40 @@ function runSimulation(nodes, edges, config = {}) {
 
 /**
  * Create a stable key from nodes and edges for memoization
+ *
+ * @param {Array} nodes - Array of node objects
+ * @param {Array} edges - Array of edge objects
+ * @param {Object} config - Layout configuration
+ * @param {Array} clusters - Array of cluster objects
+ * @returns {string} Cache key
  */
-function createCacheKey(nodes, edges, config = {}) {
+function createCacheKey(nodes, edges, config = {}, clusters = []) {
   if (!nodes || nodes.length === 0) return 'empty'
 
   const nodeKey = nodes.map((n) => n.id).sort().join(',')
   const edgeKey = edges?.map((e) => `${e.from}-${e.to}`).sort().join(',') || ''
   const centerKey = `${Math.round(config.centerX || 400)},${Math.round(config.centerY || 300)}`
+  const clusterKey = clusters?.map((c) => `${c.id}:${[...c.nodeIds].sort().join('+')}`).sort().join(',') || ''
 
-  return `${nodeKey}|${edgeKey}|${centerKey}`
+  return `${nodeKey}|${edgeKey}|${centerKey}|${clusterKey}`
 }
 
 /**
  * Hook for calculating constellation layout positions
- * Uses a simple force-directed algorithm
+ * Uses a simple force-directed algorithm with cluster awareness
  *
  * @param {Array} nodes - Array of KnowledgeNode objects
  * @param {Array} edges - Array of KnowledgeEdge objects
  * @param {Object} config - Optional layout configuration
+ * @param {Array} clusters - Array of KnowledgeCluster objects
  * @returns {Map<string, {x: number, y: number}>} Map of node id to position
  */
-export default function useConstellationLayout(nodes, edges, config = {}) {
-  // Create stable cache key based on node/edge structure
+export default function useConstellationLayout(nodes, edges, config = {}, clusters = []) {
+  // Create stable cache key based on node/edge/cluster structure
   const cacheKey = useMemo(
-    () => createCacheKey(nodes, edges, config),
+    () => createCacheKey(nodes, edges, config, clusters),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [nodes, edges, config.centerX, config.centerY]
+    [nodes, edges, config.centerX, config.centerY, clusters]
   )
 
   // Memoize the layout calculation
@@ -216,7 +333,8 @@ export default function useConstellationLayout(nodes, edges, config = {}) {
     return runSimulation(
       nodes,
       edges || [],
-      { ...DEFAULT_CONFIG, ...config }
+      { ...DEFAULT_CONFIG, ...config },
+      clusters || []
     )
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cacheKey])

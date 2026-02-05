@@ -560,6 +560,80 @@ export default function useKnowledgeGraph() {
   }, [])
 
   /**
+   * Delete a topic node from the graph
+   * Removes the node, all connected edges, and updates clusters
+   *
+   * @param {string} nodeId - Node ID to delete
+   */
+  const deleteTopic = useCallback((nodeId) => {
+    setGraph((prev) => {
+      // Filter out the node
+      const updatedNodes = prev.nodes.filter((n) => n.id !== nodeId)
+
+      // Filter edges where from or to matches nodeId
+      const updatedEdges = prev.edges.filter(
+        (e) => e.from !== nodeId && e.to !== nodeId
+      )
+
+      // Filter nodeId from each cluster's nodeIds array; remove empty clusters
+      const updatedClusters = prev.clusters
+        .map((cluster) => ({
+          ...cluster,
+          nodeIds: cluster.nodeIds.filter((id) => id !== nodeId),
+        }))
+        .filter((cluster) => cluster.nodeIds.length > 0)
+
+      // Clean nodeId from other nodes' followUps arrays
+      const cleanedNodes = updatedNodes.map((node) => {
+        if (!node.followUps.includes(nodeId)) return node
+        return {
+          ...node,
+          followUps: node.followUps.filter((id) => id !== nodeId),
+        }
+      })
+
+      // Recalculate explorer rank
+      const explorerRank = getExplorerRank(cleanedNodes.length)
+
+      logger.info('STORAGE', 'Deleted topic from knowledge graph', {
+        nodeId,
+        remainingNodes: cleanedNodes.length,
+      })
+
+      // Filter gaps that reference the deleted node
+      const updatedGaps = prev.gaps.filter(
+        (gap) => gap.relatedNodeIds?.every((id) => id !== nodeId) !== false
+      )
+
+      return {
+        ...prev,
+        nodes: cleanedNodes,
+        edges: updatedEdges,
+        clusters: updatedClusters,
+        gaps: updatedGaps,
+        explorerRank,
+      }
+    })
+  }, [])
+
+  /**
+   * Delete a topic by name (convenience wrapper)
+   *
+   * @param {string} name - Topic name to delete
+   */
+  const deleteTopicByName = useCallback(
+    (name) => {
+      const node = graph.nodes.find(
+        (n) => n.name.toLowerCase() === name?.toLowerCase()
+      )
+      if (node) {
+        deleteTopic(node.id)
+      }
+    },
+    [graph.nodes, deleteTopic]
+  )
+
+  /**
    * Mark an edge as discovered (user explored the connection)
    *
    * @param {string} edgeId - Edge ID
@@ -733,6 +807,8 @@ export default function useKnowledgeGraph() {
     discoverEdge,
     refreshGaps,
     recluster,
+    deleteTopic,
+    deleteTopicByName,
 
     // Query methods
     getNode,
