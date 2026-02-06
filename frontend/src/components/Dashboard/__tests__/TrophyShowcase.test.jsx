@@ -3,10 +3,10 @@
  *
  * TDD: These tests define the behavior for the TrophyShowcase component
  * BEFORE implementation. TrophyShowcase displays earned trophies/badges
- * in a horizontally scrollable showcase.
+ * in a grid layout.
  *
  * Features:
- * - Horizontal scrolling trophy display
+ * - 3-column grid trophy display
  * - Shows earned trophies with icons and names
  * - Empty state when no trophies
  * - Click to view trophy details
@@ -149,29 +149,29 @@ describe('TrophyShowcase', () => {
     })
   })
 
-  describe('horizontal scrolling', () => {
-    it('container has horizontal scroll', () => {
+  describe('grid layout', () => {
+    it('container uses grid layout', () => {
       const props = createDefaultProps({ trophies: sampleTrophies })
       render(<TrophyShowcase {...props} />)
 
       const showcase = screen.getByTestId('trophy-showcase')
-      expect(showcase.className).toMatch(/overflow-x-auto|scroll/)
+      expect(showcase.className).toMatch(/grid/)
     })
 
-    it('trophies are displayed in a row', () => {
+    it('trophies are displayed in a 3-column grid', () => {
       const props = createDefaultProps({ trophies: sampleTrophies })
       render(<TrophyShowcase {...props} />)
 
       const showcase = screen.getByTestId('trophy-showcase')
-      expect(showcase.className).toMatch(/flex|inline-flex/)
+      expect(showcase.className).toMatch(/grid-cols-3/)
     })
 
-    it('hides scrollbar but allows scrolling', () => {
+    it('has proper gap between grid items', () => {
       const props = createDefaultProps({ trophies: sampleTrophies })
       render(<TrophyShowcase {...props} />)
 
       const showcase = screen.getByTestId('trophy-showcase')
-      expect(showcase.className).toMatch(/scrollbar-hide|no-scrollbar|-webkit-scrollbar/)
+      expect(showcase.className).toMatch(/gap/)
     })
   })
 

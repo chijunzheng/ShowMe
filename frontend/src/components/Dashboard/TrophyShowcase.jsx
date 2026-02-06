@@ -5,7 +5,7 @@
  * Shows empty state when no trophies earned.
  */
 
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import PropTypes from 'prop-types'
 
 /**
@@ -127,7 +127,7 @@ function EmptyState() {
 /**
  * Individual trophy item
  */
-function TrophyItem({ trophy, isRecent, isMostRecent, onClick }) {
+function TrophyItem({ trophy, isRecent, isMostRecent, isSelected, onClick }) {
   const handleClick = useCallback(() => {
     onClick?.(trophy)
   }, [onClick, trophy])
@@ -150,13 +150,14 @@ function TrophyItem({ trophy, isRecent, isMostRecent, onClick }) {
     <div
       data-testid={`trophy-item-${trophy.id}`}
       className={`
+        relative
         flex flex-col items-center gap-2
-        min-w-[80px]
         p-3
         rounded-lg
         border
         ${styleClass}
         ${isMostRecent ? 'ring-2 ring-amber-400 ring-offset-2 highlight' : ''}
+        ${isSelected ? 'ring-2 ring-indigo-400 ring-offset-1' : ''}
         ${isLocked ? 'opacity-60 grayscale' : ''}
         cursor-pointer
         hover:scale-105
@@ -184,9 +185,18 @@ function TrophyItem({ trophy, isRecent, isMostRecent, onClick }) {
       </div>
 
       {/* Trophy name */}
-      <span className="text-xs font-medium text-slate-700 dark:text-slate-300 text-center truncate w-full">
+      <span className="text-xs font-medium text-slate-700 dark:text-slate-300 text-center">
         {trophy.name || 'Unknown'}
       </span>
+
+      {/* Description shown on selection */}
+      {isSelected && (
+        <span className="text-[11px] text-slate-500 dark:text-slate-400 text-center leading-tight">
+          {isLocked
+            ? trophy.criteriaText || 'Keep exploring to unlock!'
+            : trophy.description || ''}
+        </span>
+      )}
 
       {/* New badge */}
       {showNew && (
@@ -209,11 +219,13 @@ TrophyItem.propTypes = {
     id: PropTypes.string,
     name: PropTypes.string,
     description: PropTypes.string,
+    criteriaText: PropTypes.string,
     icon: PropTypes.string,
     earnedAt: PropTypes.string,
   }).isRequired,
   isRecent: PropTypes.bool,
   isMostRecent: PropTypes.bool,
+  isSelected: PropTypes.bool,
   onClick: PropTypes.func,
 }
 
@@ -233,6 +245,8 @@ export default function TrophyShowcase({
   maxVisible = 10,
   showNewBadgeForIds = null,
 }) {
+  const [selectedTrophyId, setSelectedTrophyId] = useState(null)
+
   // Safe trophies array
   const safeTrophies = useMemo(() => {
     if (!trophies || !Array.isArray(trophies)) return []
@@ -248,6 +262,14 @@ export default function TrophyShowcase({
     if (Array.isArray(showNewBadgeForIds)) return new Set(showNewBadgeForIds)
     return null
   }, [showNewBadgeForIds])
+
+  const handleTrophyClick = useCallback(
+    (trophy) => {
+      setSelectedTrophyId((prev) => (prev === trophy.id ? null : trophy.id))
+      onTrophyClick?.(trophy)
+    },
+    [onTrophyClick]
+  )
 
   // Determine visible trophies
   const needsShowAll = safeTrophies.length > maxVisible
@@ -290,11 +312,10 @@ export default function TrophyShowcase({
       <div
         data-testid="trophy-showcase"
         className="
-          flex flex-row items-start overflow-x-auto gap-4
+          grid grid-cols-3 gap-3
           p-4
           bg-slate-50 dark:bg-slate-900
           rounded-xl
-          scrollbar-hide
         "
         role="list"
       >
@@ -304,7 +325,8 @@ export default function TrophyShowcase({
             trophy={trophy}
             isRecent={newBadgeSet ? newBadgeSet.has(trophy.id) : isRecentlyEarned(trophy.earnedAt)}
             isMostRecent={mostRecent?.id === trophy.id}
-            onClick={onTrophyClick}
+            isSelected={selectedTrophyId === trophy.id}
+            onClick={handleTrophyClick}
           />
         ))}
 
@@ -314,7 +336,7 @@ export default function TrophyShowcase({
             type="button"
             className="
               flex items-center justify-center
-              min-w-[80px] h-20
+              h-20
               bg-slate-200 dark:bg-slate-700
               rounded-lg
               text-sm text-slate-600 dark:text-slate-300
@@ -336,6 +358,7 @@ TrophyShowcase.propTypes = {
       id: PropTypes.string,
       name: PropTypes.string,
       description: PropTypes.string,
+      criteriaText: PropTypes.string,
       icon: PropTypes.string,
       earnedAt: PropTypes.string,
       locked: PropTypes.bool,
