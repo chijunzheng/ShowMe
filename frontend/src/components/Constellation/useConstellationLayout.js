@@ -18,14 +18,38 @@ import { useMemo } from 'react'
  * Default layout configuration
  */
 const DEFAULT_CONFIG = {
-  iterations: 50,
-  repulsion: 5000,
-  attraction: 0.01,
-  centerGravity: 0.01,
+  iterations: 70,
+  repulsion: 20000,
+  attraction: 0.008,
+  centerGravity: 0.008,
   centerX: 400,
   centerY: 300,
-  clusterGravity: 0.05,
-  clusterRepulsion: 2000,
+  clusterGravity: 0.018,
+  clusterRepulsion: 12000,
+}
+
+/**
+ * Build adaptive layout config based on node and cluster counts.
+ *
+ * @param {number} nodeCount
+ * @param {number} clusterCount
+ * @returns {Object}
+ */
+export function getAdaptiveLayoutConfig(nodeCount, clusterCount) {
+  const safeNodes = Math.max(1, nodeCount || 0)
+  const safeClusters = Math.max(1, clusterCount || 0)
+
+  const nodeFactor = 1 + Math.min(2, safeNodes / 30)
+  const clusterFactor = 1 + Math.min(3, safeClusters / 2)
+  const centerGravity = DEFAULT_CONFIG.centerGravity * (clusterCount > 1 ? 0.5 : 0.8)
+  const iterations = DEFAULT_CONFIG.iterations + Math.min(60, Math.floor(safeNodes * 0.8))
+
+  return {
+    repulsion: DEFAULT_CONFIG.repulsion * nodeFactor,
+    clusterRepulsion: DEFAULT_CONFIG.clusterRepulsion * clusterFactor,
+    centerGravity,
+    iterations,
+  }
 }
 
 /**
@@ -39,7 +63,7 @@ const DEFAULT_CONFIG = {
  */
 function initializePositions(nodes, centerX, centerY) {
   const positions = new Map()
-  const radius = Math.min(200, 50 * Math.sqrt(nodes.length))
+  const radius = Math.min(450, 95 * Math.sqrt(nodes.length))
 
   nodes.forEach((node, i) => {
     if (node.position) {
@@ -329,11 +353,13 @@ export default function useConstellationLayout(nodes, edges, config = {}, cluste
       return new Map()
     }
 
+    const adaptiveConfig = getAdaptiveLayoutConfig(nodes.length, clusters?.length || 0)
+
     // Run force simulation
     return runSimulation(
       nodes,
       edges || [],
-      { ...DEFAULT_CONFIG, ...config },
+      { ...DEFAULT_CONFIG, ...adaptiveConfig, ...config },
       clusters || []
     )
   // eslint-disable-next-line react-hooks/exhaustive-deps

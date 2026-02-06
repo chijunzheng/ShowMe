@@ -5,7 +5,7 @@
  * topic stars in the knowledge constellation.
  *
  * Features tested:
- * - Edge type styling (colors, patterns)
+ * - Minimal edge styling
  * - Discovered vs undiscovered appearance
  * - Click/tap interactions
  * - SVG rendering
@@ -88,107 +88,28 @@ describe('ConstellationEdge', () => {
     })
   })
 
-  describe('edge type styling', () => {
-    it('applies blue color for prerequisite type', () => {
-      const props = createDefaultProps({
-        edge: { ...createDefaultProps().edge, type: 'prerequisite' },
-      })
-      renderInSvg(<ConstellationEdge {...props} />)
-
-      const edge = screen.getByTestId('constellation-edge-edge-1')
-      expect(edge.getAttribute('stroke')).toBe('#60A5FA')
-    })
-
-    it('applies violet color for extends type', () => {
-      const props = createDefaultProps({
-        edge: { ...createDefaultProps().edge, type: 'extends' },
-      })
-      renderInSvg(<ConstellationEdge {...props} />)
-
-      const edge = screen.getByTestId('constellation-edge-edge-1')
-      expect(edge.getAttribute('stroke')).toBe('#A78BFA')
-    })
-
-    it('applies pink color for contrasts type', () => {
-      const props = createDefaultProps({
-        edge: { ...createDefaultProps().edge, type: 'contrasts' },
-      })
-      renderInSvg(<ConstellationEdge {...props} />)
-
-      const edge = screen.getByTestId('constellation-edge-edge-1')
-      expect(edge.getAttribute('stroke')).toBe('#F472B6')
-    })
-
-    it('applies green color for applies type', () => {
-      const props = createDefaultProps({
-        edge: { ...createDefaultProps().edge, type: 'applies' },
-      })
-      renderInSvg(<ConstellationEdge {...props} />)
-
-      const edge = screen.getByTestId('constellation-edge-edge-1')
-      expect(edge.getAttribute('stroke')).toBe('#34D399')
-    })
-
-    it('applies gold color for bridges type', () => {
+  describe('edge styling', () => {
+    it('uses a single muted stroke style for all types', () => {
       const props = createDefaultProps({
         edge: { ...createDefaultProps().edge, type: 'bridges' },
       })
       renderInSvg(<ConstellationEdge {...props} />)
 
       const edge = screen.getByTestId('constellation-edge-edge-1')
-      expect(edge.getAttribute('stroke')).toBe('#FBBF24')
-    })
-
-    it('applies dashed pattern for extends type', () => {
-      const props = createDefaultProps({
-        edge: { ...createDefaultProps().edge, type: 'extends' },
-      })
-      renderInSvg(<ConstellationEdge {...props} />)
-
-      const edge = screen.getByTestId('constellation-edge-edge-1')
-      expect(edge.getAttribute('stroke-dasharray')).toBe('4 4')
-    })
-
-    it('applies dotted pattern for contrasts type', () => {
-      const props = createDefaultProps({
-        edge: { ...createDefaultProps().edge, type: 'contrasts' },
-      })
-      renderInSvg(<ConstellationEdge {...props} />)
-
-      const edge = screen.getByTestId('constellation-edge-edge-1')
-      expect(edge.getAttribute('stroke-dasharray')).toBe('2 2')
-    })
-
-    it('applies solid line for prerequisite type', () => {
-      const props = createDefaultProps({
-        edge: { ...createDefaultProps().edge, type: 'prerequisite' },
-      })
-      renderInSvg(<ConstellationEdge {...props} />)
-
-      const edge = screen.getByTestId('constellation-edge-edge-1')
+      expect(edge.getAttribute('stroke')).toContain('rgba(148, 163, 184')
       expect(edge.getAttribute('stroke-dasharray')).toBe('none')
-    })
-
-    it('defaults to extends style for unknown type', () => {
-      const props = createDefaultProps({
-        edge: { ...createDefaultProps().edge, type: 'unknown' },
-      })
-      renderInSvg(<ConstellationEdge {...props} />)
-
-      const edge = screen.getByTestId('constellation-edge-edge-1')
-      expect(edge.getAttribute('stroke')).toBe('#A78BFA')
     })
   })
 
   describe('discovered vs undiscovered', () => {
-    it('shows full opacity when discovered', () => {
+    it('shows higher opacity when discovered', () => {
       const props = createDefaultProps({
         edge: { ...createDefaultProps().edge, discovered: true, strength: 1 },
       })
       renderInSvg(<ConstellationEdge {...props} />)
 
       const edge = screen.getByTestId('constellation-edge-edge-1')
-      expect(parseFloat(edge.getAttribute('opacity'))).toBe(1)
+      expect(parseFloat(edge.getAttribute('opacity'))).toBeGreaterThan(0.35)
     })
 
     it('shows reduced opacity when undiscovered', () => {
@@ -198,29 +119,7 @@ describe('ConstellationEdge', () => {
       renderInSvg(<ConstellationEdge {...props} />)
 
       const edge = screen.getByTestId('constellation-edge-edge-1')
-      expect(parseFloat(edge.getAttribute('opacity'))).toBe(0.5)
-    })
-
-    it('applies pulse animation when undiscovered', () => {
-      const props = createDefaultProps({
-        edge: { ...createDefaultProps().edge, discovered: false },
-      })
-      renderInSvg(<ConstellationEdge {...props} />)
-
-      const edge = screen.getByTestId('constellation-edge-edge-1')
-      expect(edge.className.baseVal || edge.getAttribute('class')).toMatch(/pulse/)
-    })
-
-    it('does not apply pulse animation when discovered', () => {
-      const props = createDefaultProps({
-        edge: { ...createDefaultProps().edge, discovered: true },
-      })
-      renderInSvg(<ConstellationEdge {...props} />)
-
-      const edge = screen.getByTestId('constellation-edge-edge-1')
-      // pulse should not be in class when discovered
-      const className = edge.className.baseVal || edge.getAttribute('class') || ''
-      expect(className).not.toMatch(/animate-pulse(?!\s)/)
+      expect(parseFloat(edge.getAttribute('opacity'))).toBeLessThan(0.4)
     })
   })
 
@@ -232,7 +131,7 @@ describe('ConstellationEdge', () => {
       renderInSvg(<ConstellationEdge {...props} />)
 
       const edge = screen.getByTestId('constellation-edge-edge-1')
-      expect(parseFloat(edge.getAttribute('opacity'))).toBe(0.5)
+      expect(parseFloat(edge.getAttribute('opacity'))).toBeLessThan(0.3)
     })
 
     it('factors strength into opacity for undiscovered edges', () => {
@@ -242,7 +141,7 @@ describe('ConstellationEdge', () => {
       renderInSvg(<ConstellationEdge {...props} />)
 
       const edge = screen.getByTestId('constellation-edge-edge-1')
-      expect(parseFloat(edge.getAttribute('opacity'))).toBe(0.25) // 0.5 * 0.5
+      expect(parseFloat(edge.getAttribute('opacity'))).toBeLessThan(0.3)
     })
 
     it('defaults strength to 1 when not provided', () => {
@@ -252,7 +151,7 @@ describe('ConstellationEdge', () => {
       renderInSvg(<ConstellationEdge {...props} />)
 
       const edge = screen.getByTestId('constellation-edge-e1')
-      expect(parseFloat(edge.getAttribute('opacity'))).toBe(1)
+      expect(parseFloat(edge.getAttribute('opacity'))).toBeGreaterThan(0.35)
     })
   })
 

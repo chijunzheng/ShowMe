@@ -52,6 +52,7 @@ const CLUSTER_CONFIG = {
   technology: { icon: '\u{1F4BB}', color: '#6366F1' },
   astronomy: { icon: '\u{1F30C}', color: '#7C3AED' },
   nature: { icon: '\u{1F33F}', color: '#22C55E' },
+  'marine biology': { icon: '\u{1F433}', color: '#0EA5E9' },
   civilization: { icon: '\u{1F3DB}\u{FE0F}', color: '#F59E0B' },
   arcane: { icon: '\u{1F52E}', color: '#8B5CF6' },
   general: { icon: '\u{1F4A1}', color: '#64748B' },
@@ -265,13 +266,18 @@ export function determineCategory(topic) {
   // Category inference based on keywords
   // Order matters - more specific patterns first to avoid false matches
   // (e.g., "software" matches before "war" in history)
-  if (/\b(tech|computer|program|code|software|internet|robot)\b/.test(name)) {
+  if (/\b(tech|computer|program|code|software|internet|robot|ai|ml|llm)\b/.test(name)
+    || /\b(artificial intelligence|machine learning|deep learning|neural network|model training)\b/.test(name)) {
     return 'technology'
   }
   if (/\b(math|number|calcul|algebra|geometry|arithmetic|equation)\b/.test(name)) {
     return 'mathematics'
   }
-  if (/\b(science|physics|biology|molecule|cell)\b|chem|atom/.test(name)) {
+  if (
+    /\b(science|physics|biology|molecule|cell)\b|chem|atom/.test(name) ||
+    /\b(ferment|fermentation|yeast|microbe|microbial|biochem|biochemistry|enzyme|enzymatic|metabolism)\b/.test(name) ||
+    (/\b(bread|dough)\b/.test(name) && /\b(rise|rising|ferment|yeast|starter)\b/.test(name))
+  ) {
     return 'science'
   }
   if (/\b(history|ancient|civilization|empire|dynasty|medieval)\b|\bwar\b/.test(name)) {
@@ -288,6 +294,9 @@ export function determineCategory(topic) {
   }
   if (/\b(space|planet|star|galaxy|universe|asteroid|comet|orbit)\b/.test(name)) {
     return 'astronomy'
+  }
+  if (/\b(marine|ocean|sea|whale|dolphin|reef|coral|cetacean|plankton|krill|tide|tidal)\b/.test(name)) {
+    return 'marine biology'
   }
   if (/\b(animal|plant|nature|environment|ecosystem|forest|ocean)\b/.test(name)) {
     return 'nature'
@@ -468,7 +477,7 @@ export function createInitialClusters(nodes) {
 
   nodes.forEach((node) => {
     if (!node) return
-    const category = node.category || 'general'
+    const category = String(node.category || 'general').toLowerCase()
     if (!categoryMap.has(category)) {
       categoryMap.set(category, [])
     }
@@ -478,9 +487,15 @@ export function createInitialClusters(nodes) {
   const clusters = []
   categoryMap.forEach((nodeIds, category) => {
     const config = CLUSTER_CONFIG[category] || CLUSTER_CONFIG.general
+    const clusterId = `cluster_${category.replace(/\s+/g, '_')}`
+    const clusterName = category
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ')
     clusters.push({
-      id: `cluster_${category}`,
-      name: category.charAt(0).toUpperCase() + category.slice(1),
+      id: clusterId,
+      name: clusterName,
       icon: config.icon,
       nodeIds,
       color: config.color,

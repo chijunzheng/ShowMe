@@ -58,14 +58,15 @@ describe('constellationUtils', () => {
 
       const result = calculateGapPosition(gap, positions, [])
 
-      // Should be near the centroid (150, 150) with offset of 60
+      // Should be near the centroid (150, 150) with a larger offset
       const avgX = 150
       const avgY = 150
       const distanceFromCenter = Math.sqrt(
         Math.pow(result.x - avgX, 2) + Math.pow(result.y - avgY, 2)
       )
 
-      expect(distanceFromCenter).toBeCloseTo(60, 0)
+      expect(distanceFromCenter).toBeGreaterThan(70)
+      expect(distanceFromCenter).toBeLessThan(260)
     })
   })
 

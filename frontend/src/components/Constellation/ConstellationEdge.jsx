@@ -2,54 +2,17 @@
  * ConstellationEdge Component
  *
  * SVG line connecting two topic stars in the constellation.
- * Visual style varies by relationship type, with different colors
- * and stroke patterns for each edge type.
- *
- * Edge types:
- * - prerequisite: solid blue - indicates foundational knowledge
- * - extends: dashed purple - indicates topic extension
- * - contrasts: dotted pink - indicates contrasting concepts
- * - applies: solid green - indicates practical application
- * - bridges: thick gold - indicates cross-domain connection
+ * Visual style is intentionally minimal to reduce clutter in dense graphs.
+ * Relationship types are kept in data but share a single muted style.
  */
 
 import { useMemo, useCallback } from 'react'
 
-/**
- * Stroke style configurations for each edge type
- */
-const STROKE_STYLES = {
-  prerequisite: {
-    stroke: '#60A5FA', // blue-400
-    strokeWidth: 2,
-    strokeDasharray: 'none',
-  },
-  extends: {
-    stroke: '#A78BFA', // violet-400
-    strokeWidth: 1.5,
-    strokeDasharray: '4 4',
-  },
-  contrasts: {
-    stroke: '#F472B6', // pink-400
-    strokeWidth: 1,
-    strokeDasharray: '2 2',
-  },
-  applies: {
-    stroke: '#34D399', // emerald-400
-    strokeWidth: 2,
-    strokeDasharray: 'none',
-  },
-  bridges: {
-    stroke: '#FBBF24', // amber-400
-    strokeWidth: 3,
-    strokeDasharray: 'none',
-  },
+const EDGE_STYLE = {
+  stroke: 'rgba(148, 163, 184, 0.65)',
+  strokeWidth: 1.25,
+  strokeDasharray: 'none',
 }
-
-/**
- * Default stroke style for unknown edge types
- */
-const DEFAULT_STROKE_STYLE = STROKE_STYLES.extends
 
 /**
  * ConstellationEdge - Line connecting two stars
@@ -68,19 +31,12 @@ const DEFAULT_STROKE_STYLE = STROKE_STYLES.extends
  */
 export default function ConstellationEdge({ edge, fromPos, toPos, onTap }) {
   /**
-   * Get stroke style based on edge type
-   */
-  const style = useMemo(() => {
-    return STROKE_STYLES[edge.type] || DEFAULT_STROKE_STYLE
-  }, [edge.type])
-
-  /**
    * Calculate opacity based on discovered status and strength
    */
   const opacity = useMemo(() => {
-    const baseOpacity = edge.discovered ? 1 : 0.5
+    const baseOpacity = edge.discovered ? 0.45 : 0.32
     const strength = edge.strength || 1
-    return baseOpacity * strength
+    return Math.max(0.18, baseOpacity * strength)
   }, [edge.discovered, edge.strength])
 
   /**
@@ -114,16 +70,15 @@ export default function ConstellationEdge({ edge, fromPos, toPos, onTap }) {
       y1={fromPos.y}
       x2={toPos.x}
       y2={toPos.y}
-      stroke={style.stroke}
-      strokeWidth={style.strokeWidth}
-      strokeDasharray={style.strokeDasharray}
+      stroke={EDGE_STYLE.stroke}
+      strokeWidth={EDGE_STYLE.strokeWidth}
+      strokeDasharray={EDGE_STYLE.strokeDasharray}
       strokeLinecap="round"
       opacity={opacity}
       className={`
         cursor-pointer
         hover:opacity-100
         transition-opacity duration-200
-        ${!edge.discovered ? 'animate-pulse' : ''}
       `}
       onClick={handleClick}
       onKeyDown={handleKeyDown}

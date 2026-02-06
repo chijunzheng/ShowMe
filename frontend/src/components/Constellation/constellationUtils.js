@@ -35,8 +35,9 @@ const BRIGHTNESS_THRESHOLDS = {
  * @returns {{x: number, y: number}} Calculated position
  */
 export function calculateGapPosition(gap, nodePositions, _nodes) {
+  const connectIds = gap.connectsTo || gap.relatedNodeIds || []
   // Default position if no connections specified
-  if (!gap.connectsTo || gap.connectsTo.length === 0) {
+  if (!connectIds || connectIds.length === 0) {
     return {
       x: 300 + Math.random() * 200,
       y: 200 + Math.random() * 200,
@@ -44,7 +45,7 @@ export function calculateGapPosition(gap, nodePositions, _nodes) {
   }
 
   // Get positions of connected nodes
-  const connectedPositions = gap.connectsTo
+  const connectedPositions = connectIds
     .map((id) => nodePositions.get(id))
     .filter(Boolean)
 
@@ -57,14 +58,69 @@ export function calculateGapPosition(gap, nodePositions, _nodes) {
   const avgX = connectedPositions.reduce((sum, p) => sum + p.x, 0) / connectedPositions.length
   const avgY = connectedPositions.reduce((sum, p) => sum + p.y, 0) / connectedPositions.length
 
-  // Add random offset to avoid overlap
-  const angle = Math.random() * 2 * Math.PI
-  const offset = 60
+  const allPositions = Array.from(nodePositions.values())
+  const graphCenter = allPositions.length
+    ? {
+        x: allPositions.reduce((sum, p) => sum + p.x, 0) / allPositions.length,
+        y: allPositions.reduce((sum, p) => sum + p.y, 0) / allPositions.length,
+      }
+    : { x: avgX, y: avgY }
 
-  return {
-    x: avgX + Math.cos(angle) * offset,
-    y: avgY + Math.sin(angle) * offset,
+  const hashToUnit = (value) => {
+    const str = String(value || '')
+    let hash = 0
+    for (let i = 0; i < str.length; i += 1) {
+      hash = (hash << 5) - hash + str.charCodeAt(i)
+      hash |= 0
+    }
+    return Math.abs(hash % 1000) / 1000
   }
+
+  const seed = hashToUnit(gap.id || gap.suggestedTopic)
+  const dirX = avgX - graphCenter.x
+  const dirY = avgY - graphCenter.y
+  const dirLength = Math.hypot(dirX, dirY)
+  const baseAngle = dirLength > 1 ? Math.atan2(dirY, dirX) : seed * 2 * Math.PI
+  const jitter = (seed - 0.5) * 0.6
+  const baseRadius = 90 + Math.min(80, connectedPositions.length * 22) + seed * 30
+  const maxRadius = 240
+  const minNodeDistance = 70
+  const minConnectedDistance = 55
+
+  let bestCandidate = null
+  let bestScore = -Infinity
+
+  for (let i = 0; i < 12; i += 1) {
+    const radius = Math.min(maxRadius, baseRadius + i * 18)
+    const angle = baseAngle + jitter + i * 0.55
+    const candidate = {
+      x: avgX + Math.cos(angle) * radius,
+      y: avgY + Math.sin(angle) * radius,
+    }
+
+    let minAll = Infinity
+    let minConnected = Infinity
+    allPositions.forEach((pos) => {
+      const dist = Math.hypot(candidate.x - pos.x, candidate.y - pos.y)
+      minAll = Math.min(minAll, dist)
+    })
+    connectedPositions.forEach((pos) => {
+      const dist = Math.hypot(candidate.x - pos.x, candidate.y - pos.y)
+      minConnected = Math.min(minConnected, dist)
+    })
+
+    if (minAll >= minNodeDistance && minConnected >= minConnectedDistance) {
+      return candidate
+    }
+
+    const score = minAll - radius * 0.15
+    if (score > bestScore) {
+      bestScore = score
+      bestCandidate = candidate
+    }
+  }
+
+  return bestCandidate || { x: avgX, y: avgY }
 }
 
 /**

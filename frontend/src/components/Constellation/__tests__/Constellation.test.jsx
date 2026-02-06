@@ -87,11 +87,44 @@ describe('Constellation', () => {
       expect(screen.getByTestId('constellation-edge-e2')).toBeInTheDocument()
     })
 
-    it('renders cluster labels', () => {
+    it('renders cross-cluster edges as curved paths', () => {
+      const nodes = [
+        { id: 'n1', name: 'Alpha', mastery: 0.4, brightness: 'glow' },
+        { id: 'n2', name: 'Beta', mastery: 0.6, brightness: 'bright' },
+      ]
+      const clusters = [
+        { id: 'c1', name: 'Cluster A', icon: 'A', color: '#22C55E', nodeIds: ['n1'] },
+        { id: 'c2', name: 'Cluster B', icon: 'B', color: '#60A5FA', nodeIds: ['n2'] },
+      ]
+      const edges = [
+        { id: 'e1', from: 'n1', to: 'n2', type: 'bridges', strength: 0.8, discovered: true },
+      ]
+
+      const props = createDefaultProps({ nodes, clusters, edges, gaps: [] })
+      render(<Constellation {...props} />)
+
+      const crossEdge = screen.getByTestId('constellation-cross-edge-e1')
+      expect(crossEdge).toBeInTheDocument()
+      expect(crossEdge.getAttribute('stroke-dasharray')).toBe('none')
+      expect(screen.queryByTestId('constellation-edge-e1')).not.toBeInTheDocument()
+    })
+
+    it('hides category labels on the map by default', () => {
       const props = createDefaultProps()
       render(<Constellation {...props} />)
 
-      expect(screen.getByTestId('constellation-cluster-c1')).toBeInTheDocument()
+      expect(screen.queryByTestId('constellation-cluster-c1')).not.toBeInTheDocument()
+    })
+
+    it('renders a collapsible category legend', () => {
+      const props = createDefaultProps()
+      render(<Constellation {...props} />)
+
+      const toggle = screen.getByRole('button', { name: /categories/i })
+      expect(toggle).toBeInTheDocument()
+      expect(screen.queryByText('Earth Science')).not.toBeInTheDocument()
+
+      fireEvent.click(toggle)
       expect(screen.getByText('Earth Science')).toBeInTheDocument()
     })
 
@@ -193,6 +226,13 @@ describe('Constellation', () => {
 
       expect(() => fireEvent.click(zoomIn)).not.toThrow()
       expect(() => fireEvent.click(zoomOut)).not.toThrow()
+    })
+
+    it('renders fullscreen toggle button', () => {
+      const props = createDefaultProps()
+      render(<Constellation {...props} />)
+
+      expect(screen.getByLabelText('Toggle fullscreen')).toBeInTheDocument()
     })
   })
 
@@ -320,6 +360,29 @@ describe('Constellation', () => {
         clusters: [{ id: 'c1', name: 'Empty', icon: '?', color: '#888', nodeIds: ['missing1', 'missing2'] }],
       })
       expect(() => render(<Constellation {...props} />)).not.toThrow()
+    })
+  })
+
+  describe('fullscreen', () => {
+    it('requests fullscreen when toggle clicked', () => {
+      const requestFullscreen = vi.fn().mockResolvedValue()
+      Object.defineProperty(HTMLElement.prototype, 'requestFullscreen', {
+        configurable: true,
+        value: requestFullscreen,
+      })
+      Object.defineProperty(document, 'fullscreenElement', {
+        configurable: true,
+        writable: true,
+        value: null,
+      })
+
+      const props = createDefaultProps()
+      render(<Constellation {...props} />)
+
+      const button = screen.getByLabelText('Toggle fullscreen')
+      fireEvent.click(button)
+
+      expect(requestFullscreen).toHaveBeenCalledTimes(1)
     })
   })
 })

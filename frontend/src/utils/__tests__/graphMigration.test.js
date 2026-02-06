@@ -347,6 +347,8 @@ describe('determineCategory', () => {
       expect(determineCategory({ name: 'Cell biology' })).toBe('science')
       expect(determineCategory({ topicName: 'Chemical reactions' })).toBe('science')
       expect(determineCategory({ name: 'Atomic structure' })).toBe('science')
+      expect(determineCategory({ name: 'Bread dough rise' })).toBe('science')
+      expect(determineCategory({ name: 'Yeast metabolism' })).toBe('science')
     })
 
     it('infers history from keywords', () => {
@@ -365,6 +367,11 @@ describe('determineCategory', () => {
       expect(determineCategory({ name: 'Computer programming' })).toBe('technology')
       expect(determineCategory({ topicName: 'Robot design' })).toBe('technology')
       expect(determineCategory({ name: 'Software engineering' })).toBe('technology')
+    })
+
+    it('infers marine biology from keywords', () => {
+      expect(determineCategory({ name: 'Whale songs' })).toBe('marine biology')
+      expect(determineCategory({ topicName: 'Coral reef ecosystems' })).toBe('marine biology')
     })
   })
 
