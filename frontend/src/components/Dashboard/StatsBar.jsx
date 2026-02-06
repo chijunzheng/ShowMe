@@ -111,7 +111,9 @@ export default function StatsBar({
   const rankInfo = getExplorerRank(safeTopics, safeXP)
   const isMaxRank = rankInfo.level === MAX_RANK_LEVEL
   const rankDisplayIcon = rankIcon || rankInfo.icon
-  const labelClass = 'text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400'
+  const labelClass = compact
+    ? 'text-[10px] uppercase tracking-wider text-slate-500'
+    : 'text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400'
 
   return (
     <div
@@ -120,10 +122,9 @@ export default function StatsBar({
         flex items-center justify-around gap-3
         ${compact ? 'p-2 text-sm compact' : 'p-3'}
         ${compact
-          ? 'border-2 border-black dark:border-slate-600 shadow-[2px_2px_0_0_#000] dark:shadow-[2px_2px_0_0_#475569]'
-          : 'bg-slate-100 dark:bg-slate-800'
+          ? 'bg-white dark:bg-slate-800 border-2 border-black dark:border-slate-600 shadow-[2px_2px_0_0_#000] dark:shadow-[2px_2px_0_0_#475569]'
+          : 'bg-white dark:bg-slate-800 bg-slate-100 dark:bg-slate-800'
         }
-        bg-white dark:bg-slate-800
         rounded-xl
       `}
     >
@@ -137,12 +138,15 @@ export default function StatsBar({
           px-3 py-2
           rounded-lg
           cursor-pointer hover:scale-105 active:scale-95 transition-transform
-          ${safeStreak > 0 ? 'bg-orange-50 dark:bg-orange-900/30' : 'opacity-50 bg-slate-50 dark:bg-slate-700'}
+          ${safeStreak > 0
+            ? (compact ? 'bg-orange-50' : 'bg-orange-50 dark:bg-orange-900/30')
+            : 'opacity-50 bg-slate-50 dark:bg-slate-700'
+          }
           ${streakAnimating ? 'animate-pulse' : ''}
         `}
       >
         <span className="text-xl">{'\ud83d\udd25'}</span>
-        <span className="font-bold text-slate-800 dark:text-white">{safeStreak}</span>
+        <span className={`font-bold ${compact ? 'text-slate-800' : 'text-slate-800 dark:text-white'}`}>{safeStreak}</span>
         <span className={labelClass}>Streak</span>
       </button>
 
@@ -156,15 +160,14 @@ export default function StatsBar({
           px-3 py-2
           rounded-lg
           cursor-pointer hover:scale-105 active:scale-95 transition-transform
-          bg-slate-50 dark:bg-slate-700
+          ${compact ? 'bg-accent-50' : 'bg-accent-50 dark:bg-accent/10'}
           ${isMaxRank ? 'text-red-600 animate-pulse' : ''}
           ${xpAnimating ? 'animate-pulse' : ''}
         `}
       >
         <span className="text-xl">{rankDisplayIcon}</span>
-        <span className="font-bold text-slate-800 dark:text-white">{rankInfo.title}</span>
-        <span className="text-[10px] text-slate-500 dark:text-slate-400">{formatNumber(safeXP)} XP</span>
-        <span className={labelClass}>Rank</span>
+        <span className={`font-bold ${compact ? 'text-slate-800' : 'text-slate-800 dark:text-white'}`}>{rankInfo.title}</span>
+        <span className={labelClass}>{formatNumber(safeXP)} XP</span>
       </button>
 
       {/* Topics */}
@@ -172,10 +175,10 @@ export default function StatsBar({
         type="button"
         data-testid="stat-topics"
         onClick={() => onStatTap?.('topics')}
-        className="flex flex-col items-center px-3 py-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 cursor-pointer hover:scale-105 active:scale-95 transition-transform"
+        className={`flex flex-col items-center px-3 py-2 rounded-lg ${compact ? 'bg-primary-50' : 'bg-primary-50 dark:bg-primary/10'} cursor-pointer hover:scale-105 active:scale-95 transition-transform`}
       >
         <span className="text-xl">{'\ud83d\udcd6'}</span>
-        <span className="font-bold text-slate-800 dark:text-white">{safeTopics}</span>
+        <span className={`font-bold ${compact ? 'text-slate-800' : 'text-slate-800 dark:text-white'}`}>{safeTopics}</span>
         <span className={labelClass}>Topics</span>
       </button>
 
@@ -184,10 +187,10 @@ export default function StatsBar({
         type="button"
         data-testid="stat-trophies"
         onClick={() => onStatTap?.('trophies')}
-        className="flex flex-col items-center px-3 py-2 rounded-lg bg-yellow-50 dark:bg-yellow-900/30 cursor-pointer hover:scale-105 active:scale-95 transition-transform"
+        className={`flex flex-col items-center px-3 py-2 rounded-lg ${compact ? 'bg-yellow-50' : 'bg-yellow-50 dark:bg-yellow-900/30'} cursor-pointer hover:scale-105 active:scale-95 transition-transform`}
       >
         <span className="text-xl">{'\ud83c\udfc6'}</span>
-        <span className="font-bold text-slate-800 dark:text-white">{safeTrophyCount}</span>
+        <span className={`font-bold ${compact ? 'text-slate-800' : 'text-slate-800 dark:text-white'}`}>{safeTrophyCount}</span>
         <span className={labelClass}>Trophies</span>
       </button>
     </div>

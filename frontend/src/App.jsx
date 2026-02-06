@@ -141,7 +141,7 @@ function App() {
     explorerRank,
     isLoading: graphIsLoading,
     addTopic: addTopicToGraph,
-    updateMastery: updateGraphMastery,
+    updateModeMastery: updateGraphMastery,
     addFollowUp: addGraphFollowUp,
     getNode: getGraphNode,
     getNodeByName: getGraphNodeByName,
@@ -1933,21 +1933,24 @@ function App() {
       }
     }
 
-    // Update mastery in Knowledge Graph based on quiz performance
+    // Update per-mode mastery in Knowledge Graph (Bloom's Taxonomy)
     if (result?.completed && topicId) {
-      // Calculate mastery score from result (default to 0.7 for completion without score)
       const masteryScore = typeof result?.score === 'number'
         ? result.score
         : (result?.correctCount && result?.totalCount)
           ? result.correctCount / result.totalCount
           : 0.7
 
-      // Find node by topic name and update mastery
+      // Map UI mode names to mastery score keys
+      const modeMap = { mystery: 'mystery', whatif: 'wonder', story: 'story' }
+      const masteryMode = modeMap[selectedLearningMode]
+
       const graphNode = getGraphNodeByName(topicName)
-      if (graphNode) {
-        updateGraphMastery(graphNode.id, masteryScore)
-        logger.info('GRAPH', 'Updated mastery in knowledge graph', {
+      if (graphNode && masteryMode) {
+        updateGraphMastery(graphNode.id, masteryMode, masteryScore)
+        logger.info('GRAPH', 'Updated mode mastery in knowledge graph', {
           topicName,
+          mode: masteryMode,
           masteryScore,
           nodeId: graphNode.id
         })
@@ -3427,13 +3430,14 @@ function App() {
           onQuickQuizTopic={(topic) => requestTopicQuiz(topic)}
           streakCount={userProgress?.streakCount || 0}
           totalXP={userProgress?.points || 0}
+
         />
       )}
 
       {/* Main content area */}
       <div className="flex-1 h-full flex flex-col items-center justify-center px-4 py-4 pb-24 md:pb-4 overflow-y-auto">
-        {/* F055: max-width 800px centered on desktop, F056: full-width on mobile */}
-        <main className="w-full max-w-4xl mx-auto">
+        {/* F055: center regular tabs, give Progress tab a wider canvas */}
+        <main className={`w-full mx-auto ${activeTab === 'progress' ? 'max-w-7xl' : 'max-w-4xl'}`}>
         {/* HOME screen - level selection + voice trigger */}
         {uiState === UI_STATE.HOME && activeTab === 'learn' && (
           <HomeScreen
@@ -3549,13 +3553,18 @@ function App() {
 
         {/* Progress Tab - consolidates World and Tree views */}
         {activeTab === 'progress' && (
-          <div className="w-full bg-cream-100 dark:bg-night-900">
+          <div className="w-full animate-fade-in">
             <ProgressTab
               topics={progressPieces}
               onReviewSlideshow={handleReviewSlideshowFromProgress}
               onLaunchMode={handleLaunchLearningMode}
               totalXP={userProgress?.points || 0}
-              streak={{ current: userProgress?.streakCount || 0, todayCompleted: false }}
+              streak={{
+                current: userProgress?.streakCount || 0,
+                longest: userProgress?.longestStreak || 0,
+                todayCompleted: false,
+                activeDates: userProgress?.activeDates || [],
+              }}
               trophies={earnedTrophies}
               trophiesLoading={isUserProgressLoading}
               onDiscoverSuggestions={refreshGraphGaps}

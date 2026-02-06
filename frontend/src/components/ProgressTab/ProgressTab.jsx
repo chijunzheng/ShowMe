@@ -58,6 +58,7 @@ export default function ProgressTab({
   const [isSuggestedSheetOpen, setIsSuggestedSheetOpen] = useState(false)
   const [activeStatSheet, setActiveStatSheet] = useState(null)
   const [isDiscovering, setIsDiscovering] = useState(false)
+  const [hasDiscoveredThisSession, setHasDiscoveredThisSession] = useState(false)
   const [discoverMessage, setDiscoverMessage] = useState('')
 
   // Knowledge graph state - use props if provided, otherwise use internal hook
@@ -67,7 +68,8 @@ export default function ProgressTab({
   const nodes = graphNodesProp ?? internalGraph.nodes
   const edges = graphEdgesProp ?? internalGraph.edges
   const clusters = graphClustersProp ?? internalGraph.clusters
-  const gaps = graphGapsProp ?? internalGraph.gaps
+  const rawGaps = graphGapsProp ?? internalGraph.gaps
+  const gaps = hasDiscoveredThisSession ? rawGaps : []
   const refreshGaps = onDiscoverSuggestions ?? internalGraph.refreshGaps
 
   const topicList = useMemo(() => (Array.isArray(topics) ? topics : []), [topics])
@@ -177,7 +179,11 @@ export default function ProgressTab({
     setIsDiscovering(true)
     setDiscoverMessage('')
     try {
-      const refreshedGaps = await refreshGaps()
+      const refreshedGaps = await refreshGaps({
+        targetCount: 5,
+        requireFreshSet: true,
+      })
+      setHasDiscoveredThisSession(true)
       if (!refreshedGaps || refreshedGaps.length === 0) {
         setDiscoverMessage('No suggestions yet. Try again after learning more.')
       }
@@ -216,7 +222,7 @@ export default function ProgressTab({
       </div>
 
       {/* Full-screen constellation */}
-      <div className="flex-1 min-h-0 mx-4 mb-4 mt-3 rounded-xl border-2 border-black dark:border-slate-600 shadow-[3px_3px_0_0_#000] dark:shadow-[3px_3px_0_0_#475569] overflow-hidden relative">
+      <div className="flex-1 min-h-0 mx-4 mb-4 mt-3 rounded-xl border-2 border-black dark:border-slate-600 shadow-[3px_3px_0_0_#000] dark:shadow-[3px_3px_0_0_#475569] bg-night-900 overflow-hidden relative">
         <Constellation
           nodes={nodes}
           edges={edges}

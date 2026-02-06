@@ -2,7 +2,7 @@
  * DiscoverButton Component
  *
  * Floating action button that triggers LLM-powered topic discovery.
- * Matches neobrutalism style of zoom controls.
+ * Uses translucent dark glass style to match the cosmic space theme.
  */
 
 /**
@@ -18,15 +18,16 @@ export default function DiscoverButton({ onClick, isLoading = false }) {
       onClick={onClick}
       disabled={isLoading}
       className={`
-        px-4 h-12 rounded-xl
-        bg-slate-800/90 border-2 border-black dark:border-slate-600
-        shadow-[3px_3px_0_0_#000] dark:shadow-[3px_3px_0_0_#475569]
-        hover:bg-slate-700/90
-        active:shadow-none active:translate-x-[3px] active:translate-y-[3px]
-        text-white text-sm font-bold
+        px-5 h-14 rounded-2xl
+        bg-stardust
+        border-2 border-stardust-100
+        ring-1 ring-white/40
+        shadow-[0_0_30px_rgba(255,216,102,0.65)]
+        hover:bg-stardust-500 hover:shadow-[0_0_40px_rgba(255,216,102,0.75)]
+        text-white text-base font-extrabold tracking-wide
         flex items-center justify-center gap-2
         transition-all duration-150
-        focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-950
+        focus:outline-none focus:ring-2 focus:ring-stardust/70 focus:ring-offset-2 focus:ring-offset-night-900
         disabled:opacity-70 disabled:cursor-not-allowed
         ${isLoading ? 'pointer-events-none animate-pulse' : ''}
       `}
