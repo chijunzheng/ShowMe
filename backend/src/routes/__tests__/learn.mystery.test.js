@@ -18,6 +18,14 @@ vi.mock('../../services/mysteryGenerator.js', () => ({
   evaluateMysteryTheory: vi.fn(),
 }))
 
+vi.mock('../../services/gemini.js', () => ({
+  generateWhatIfScenario: vi.fn(),
+  detectLanguage: vi.fn(() => 'en'),
+  generateStoryPrompt: vi.fn(),
+  extractStoryScene: vi.fn(),
+  generateEducationalImage: vi.fn(),
+}))
+
 vi.mock('../../utils/logger.js', () => ({
   default: {
     info: vi.fn(),
@@ -27,7 +35,8 @@ vi.mock('../../utils/logger.js', () => ({
 }))
 
 import learnRouter from '../learn.js'
-import { generateMystery } from '../../services/mysteryGenerator.js'
+import { generateMystery, evaluateMysteryTheory } from '../../services/mysteryGenerator.js'
+import { generateEducationalImage } from '../../services/gemini.js'
 
 function createMockRes() {
   const res = {
@@ -166,3 +175,176 @@ describe('Learn Routes - Mystery', () => {
   })
 })
 
+describe('Learn Routes - Mystery Image', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+  })
+
+  it('returns 400 when imagePrompt is missing', async () => {
+    const res = await testRequest('POST', '/mystery/image', {
+      body: {
+        topicName: 'Test Topic',
+      },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(res.body?.error).toBe('Missing or invalid imagePrompt')
+    expect(generateEducationalImage).not.toHaveBeenCalled()
+  })
+
+  it('returns 200 with imageUrl when image generation succeeds', async () => {
+    generateEducationalImage.mockResolvedValueOnce({ imageUrl: 'data:image/png;base64,abc' })
+
+    const res = await testRequest('POST', '/mystery/image', {
+      body: {
+        imagePrompt: 'A detective classroom scene',
+        topicName: 'Test Topic',
+        explanationLevel: 'standard',
+      },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toEqual({
+      success: true,
+      imageUrl: 'data:image/png;base64,abc',
+    })
+  })
+})
+
+describe('Learn Routes - Mystery Evaluate (Crime Scene Ops)', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+  })
+
+  it('evaluates scene-scan with required hotspots', async () => {
+    const res = await testRequest('POST', '/mystery/evaluate', {
+      body: {
+        solveMethod: 'scene-scan',
+        userAnswer: { foundHotspotIds: ['h1', 'h2', 'h3'] },
+        mysteryData: {
+          crimeScene: {
+            requiredHotspotCount: 3,
+            hotspots: [
+              { id: 'h1' },
+              { id: 'h2' },
+              { id: 'h3' },
+              { id: 'h4', bonus: true },
+            ],
+          },
+          verdict: { expectedConcepts: ['heat transfer'] },
+        },
+        explanationLevel: 'simple',
+      },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body?.isCorrect).toBe(true)
+    expect(res.body?.xpEarned).toBeGreaterThan(0)
+  })
+
+  it('requires contradiction handling in deep witness-room', async () => {
+    const res = await testRequest('POST', '/mystery/evaluate', {
+      body: {
+        solveMethod: 'witness-room',
+        userAnswer: { askedQuestionIds: ['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7'], resolvedContradictions: 0 },
+        mysteryData: {
+          witnesses: [
+            { id: 'w1', questionCards: ['q1', 'q2', 'q3'] },
+            { id: 'w2', questionCards: ['q4', 'q5'] },
+            { id: 'w3', questionCards: ['q6', 'q7'] },
+          ],
+          verdict: { expectedConcepts: ['convection'] },
+        },
+        explanationLevel: 'deep',
+      },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body?.isCorrect).toBe(false)
+    expect(String(res.body?.feedback || '')).toMatch(/contradiction/i)
+  })
+
+  it('evaluates timeline-rebuild order', async () => {
+    const res = await testRequest('POST', '/mystery/evaluate', {
+      body: {
+        solveMethod: 'timeline-rebuild',
+        userAnswer: {
+          orderedEventIds: ['t1', 't2', 't3', 't4'],
+          causalLinks: [{ from: 't1', to: 't2' }, { from: 't2', to: 't3' }],
+        },
+        mysteryData: {
+          timeline: {
+            events: [
+              { id: 't1', order: 1, text: 'a' },
+              { id: 't2', order: 2, text: 'b' },
+              { id: 't3', order: 3, text: 'c' },
+              { id: 't4', order: 4, text: 'd', isRedHerring: true },
+            ],
+            causalLinks: [{ from: 't1', to: 't2' }, { from: 't2', to: 't3' }],
+          },
+          verdict: { expectedConcepts: ['concept'] },
+        },
+        explanationLevel: 'standard',
+      },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body?.isCorrect).toBe(true)
+  })
+
+  it('requires rationale on deep warrant-decision', async () => {
+    const res = await testRequest('POST', '/mystery/evaluate', {
+      body: {
+        solveMethod: 'warrant-decision',
+        userAnswer: {
+          selectedIndex: 0,
+          confidence: 88,
+        },
+        mysteryData: {
+          verdict: {
+            options: ['A', 'B', 'C', 'D'],
+            correctIndex: 0,
+            expectedConcepts: ['concept1', 'concept2'],
+          },
+        },
+        explanationLevel: 'deep',
+      },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(res.body?.field).toBe('userAnswer.rationale')
+  })
+
+  it('uses rationale scoring for deep warrant-decision', async () => {
+    evaluateMysteryTheory.mockResolvedValueOnce({
+      result: 'solved',
+      matchedConcepts: ['concept1'],
+      xpEarned: 50,
+      hint: null,
+    })
+
+    const res = await testRequest('POST', '/mystery/evaluate', {
+      body: {
+        solveMethod: 'warrant-decision',
+        userAnswer: {
+          selectedIndex: 1,
+          confidence: 82,
+          rationale: 'I linked concept one with the observed outcome.',
+        },
+        mysteryData: {
+          verdict: {
+            options: ['A', 'B', 'C', 'D'],
+            correctIndex: 1,
+            expectedConcepts: ['concept1', 'concept2'],
+          },
+        },
+        explanationLevel: 'deep',
+      },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(evaluateMysteryTheory).toHaveBeenCalledTimes(1)
+    expect(res.body?.isCorrect).toBe(true)
+    expect(res.body?.xpEarned).toBeGreaterThan(0)
+  })
+})

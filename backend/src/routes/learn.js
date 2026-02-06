@@ -9,7 +9,7 @@
 import { Router } from 'express'
 import rateLimit from 'express-rate-limit'
 import { generateMystery, evaluateMysteryTheory } from '../services/mysteryGenerator.js'
-import { generateWhatIfScenario, evaluateWhatIfPrediction, detectLanguage, generateStoryPrompt, extractStoryScene, generateEducationalImage } from '../services/gemini.js'
+import { generateWhatIfScenario, detectLanguage, generateStoryPrompt, extractStoryScene, generateEducationalImage, generateTTS } from '../services/gemini.js'
 import logger from '../utils/logger.js'
 
 const router = Router()
@@ -222,168 +222,314 @@ router.post('/mystery/image', learnRateLimit, async (req, res) => {
  */
 router.post('/mystery/evaluate', learnRateLimit, async (req, res) => {
   try {
-    const { userTheory, expectedConcepts, solveMethod, userAnswer, mysteryData } = req.body
+    const { userTheory, expectedConcepts, solveMethod, userAnswer = {}, mysteryData = {}, explanationLevel } = req.body
 
-    // Validate expectedConcepts (required for all methods)
-    if (!Array.isArray(expectedConcepts) || expectedConcepts.length === 0) {
-      return res.status(400).json({
-        error: 'Missing or invalid expectedConcepts',
-        field: 'expectedConcepts'
+    const level = ['simple', 'standard', 'deep'].includes(explanationLevel)
+      ? explanationLevel
+      : 'standard'
+
+    const levelRules = {
+      simple: { hotspots: 3, questions: 3, requireConfidence: false, requireRationale: false, requireCausalLinks: false, requireContradictions: false },
+      standard: { hotspots: 5, questions: 5, requireConfidence: true, requireRationale: false, requireCausalLinks: false, requireContradictions: false },
+      deep: { hotspots: 7, questions: 7, requireConfidence: true, requireRationale: true, requireCausalLinks: true, requireContradictions: true },
+    }[level]
+
+    const mergedExpectedConcepts = Array.isArray(mysteryData?.verdict?.expectedConcepts) && mysteryData.verdict.expectedConcepts.length > 0
+      ? mysteryData.verdict.expectedConcepts
+      : (Array.isArray(expectedConcepts) ? expectedConcepts : [])
+
+    const toSet = (values) => new Set((Array.isArray(values) ? values : []).map((value) => String(value)))
+
+    const normalizeLink = (link) => {
+      const from = String(link?.from || '').trim()
+      const to = String(link?.to || '').trim()
+      if (!from || !to || from === to) return null
+      return `${from}->${to}`
+    }
+
+    if (solveMethod === 'scene-scan') {
+      const hotspots = Array.isArray(mysteryData?.crimeScene?.hotspots) ? mysteryData.crimeScene.hotspots : []
+      const requiredHotspotCount = Number.isFinite(Number(mysteryData?.crimeScene?.requiredHotspotCount))
+        ? Number(mysteryData.crimeScene.requiredHotspotCount)
+        : levelRules.hotspots
+
+      const requiredHotspots = hotspots
+        .filter((spot) => !spot?.bonus)
+        .slice(0, Math.min(requiredHotspotCount, hotspots.length))
+      const requiredIds = requiredHotspots.map((spot) => String(spot.id))
+      const foundIds = toSet(userAnswer?.foundHotspotIds)
+
+      const isCorrect = requiredIds.length > 0 && requiredIds.every((id) => foundIds.has(id))
+      const bonusCount = hotspots
+        .filter((spot) => spot?.bonus)
+        .filter((spot) => foundIds.has(String(spot.id)))
+        .length
+
+      return res.json({
+        isCorrect,
+        feedback: isCorrect
+          ? 'Evidence sweep complete. The scene is secured.'
+          : 'Keep scanning the scene. You missed critical evidence.',
+        identifiedConcepts: isCorrect ? mergedExpectedConcepts : [],
+        xpEarned: (isCorrect ? 35 : 10) + bonusCount * 5,
+        bonusXp: bonusCount * 5,
       })
     }
 
-    // Fast-path evaluation based on solveMethod
+    if (solveMethod === 'witness-room') {
+      const witnesses = Array.isArray(mysteryData?.witnesses) ? mysteryData.witnesses : []
+      const questionPool = new Set()
+      for (const witness of witnesses) {
+        const cards = Array.isArray(witness?.questionCards) ? witness.questionCards : []
+        cards.forEach((question) => questionPool.add(String(question)))
+      }
+
+      const askedIds = toSet(userAnswer?.askedQuestionIds)
+      const askedCount = askedIds.size
+      const requiredQuestions = Math.min(levelRules.questions, Math.max(1, questionPool.size || levelRules.questions))
+      const coverageSatisfied = askedCount >= requiredQuestions
+
+      const contradictionCount = Number.isFinite(Number(userAnswer?.resolvedContradictions))
+        ? Number(userAnswer.resolvedContradictions)
+        : (Array.isArray(userAnswer?.resolvedContradictionKeys) ? userAnswer.resolvedContradictionKeys.length : 0)
+
+      const contradictionSatisfied = !levelRules.requireContradictions || contradictionCount > 0
+      const isCorrect = coverageSatisfied && contradictionSatisfied
+      const bonusXp = askedCount > requiredQuestions ? (askedCount - requiredQuestions) * 2 : 0
+
+      return res.json({
+        isCorrect,
+        feedback: isCorrect
+          ? 'Interrogation complete. Statements are now consistent.'
+          : levelRules.requireContradictions && !contradictionSatisfied
+            ? 'A contradiction is still unresolved. Compare witness testimony again.'
+            : 'Ask more targeted questions to complete interrogation.',
+        identifiedConcepts: isCorrect ? mergedExpectedConcepts : [],
+        xpEarned: (isCorrect ? 40 : 10) + bonusXp,
+        bonusXp,
+      })
+    }
+
+    if (solveMethod === 'timeline-rebuild') {
+      const timelineEvents = Array.isArray(mysteryData?.timeline?.events) ? mysteryData.timeline.events : []
+      const expectedIds = timelineEvents
+        .filter((event) => !event?.isRedHerring)
+        .sort((a, b) => Number(a?.order || 0) - Number(b?.order || 0))
+        .map((event) => String(event.id))
+
+      const orderedEventIds = (Array.isArray(userAnswer?.orderedEventIds) ? userAnswer.orderedEventIds : []).map((id) => String(id))
+      const normalizedOrdered = orderedEventIds.filter((id) => expectedIds.includes(id))
+      const orderCorrect = expectedIds.length > 0 &&
+        expectedIds.length === normalizedOrdered.length &&
+        expectedIds.every((eventId, index) => normalizedOrdered[index] === eventId)
+
+      const expectedLinks = toSet((Array.isArray(mysteryData?.timeline?.causalLinks) ? mysteryData.timeline.causalLinks : []).map(normalizeLink).filter(Boolean))
+      const providedLinks = toSet((Array.isArray(userAnswer?.causalLinks) ? userAnswer.causalLinks : []).map(normalizeLink).filter(Boolean))
+
+      const linksCorrect = expectedLinks.size === 0 || [...expectedLinks].every((link) => providedLinks.has(link))
+      const isCorrect = orderCorrect && (!levelRules.requireCausalLinks || linksCorrect)
+
+      return res.json({
+        isCorrect,
+        feedback: isCorrect
+          ? 'Timeline reconstructed. Cause-and-effect chain confirmed.'
+          : levelRules.requireCausalLinks && !linksCorrect
+            ? 'Timeline order looks close, but causal links are incomplete.'
+            : 'Timeline order is not correct yet. Re-check event sequencing.',
+        identifiedConcepts: isCorrect ? mergedExpectedConcepts : [],
+        xpEarned: isCorrect ? 45 : 12,
+      })
+    }
+
+    if (solveMethod === 'warrant-decision') {
+      const verdict = mysteryData?.verdict || {}
+      const options = Array.isArray(verdict.options) ? verdict.options : []
+      const selectedIndex = Number(userAnswer?.selectedIndex)
+      const confidence = Number(userAnswer?.confidence)
+      const rationale = typeof userAnswer?.rationale === 'string'
+        ? userAnswer.rationale.trim()
+        : (typeof userTheory === 'string' ? userTheory.trim() : '')
+
+      if (!Number.isFinite(selectedIndex) || selectedIndex < 0 || selectedIndex >= options.length) {
+        return res.status(400).json({
+          error: 'Missing or invalid selectedIndex',
+          field: 'userAnswer.selectedIndex',
+        })
+      }
+
+      if (levelRules.requireConfidence && (!Number.isFinite(confidence) || confidence < 0 || confidence > 100)) {
+        return res.status(400).json({
+          error: 'Missing or invalid confidence',
+          field: 'userAnswer.confidence',
+        })
+      }
+
+      if (levelRules.requireRationale && !rationale) {
+        return res.status(400).json({
+          error: 'Missing rationale for deep level',
+          field: 'userAnswer.rationale',
+        })
+      }
+
+      const correctIndex = Number.isFinite(Number(verdict.correctIndex)) ? Number(verdict.correctIndex) : 0
+      const verdictCorrect = selectedIndex === correctIndex
+
+      let rationaleMatchedConcepts = []
+      let rationalePass = true
+      let rationaleHint = null
+      let rationaleXp = 0
+
+      if (levelRules.requireRationale && rationale) {
+        if (!Array.isArray(mergedExpectedConcepts) || mergedExpectedConcepts.length === 0) {
+          return res.status(400).json({
+            error: 'Missing expected concepts for rationale scoring',
+            field: 'expectedConcepts',
+          })
+        }
+
+        const rationaleResult = await evaluateMysteryTheory({
+          userTheory: rationale,
+          expectedConcepts: mergedExpectedConcepts,
+        })
+
+        if (rationaleResult.error) {
+          const errorStatusMap = {
+            API_NOT_AVAILABLE: 503,
+            RATE_LIMITED: 429,
+            INVALID_RESPONSE: 500,
+            PARSE_ERROR: 500,
+          }
+          return res.status(errorStatusMap[rationaleResult.error] || 500).json({ error: rationaleResult.error })
+        }
+
+        rationaleMatchedConcepts = rationaleResult.matchedConcepts || []
+        rationalePass = rationaleResult.result !== 'retry'
+        rationaleHint = rationaleResult.hint || null
+        rationaleXp = rationaleResult.xpEarned || 0
+      }
+
+      const confidenceBonus = Number.isFinite(confidence)
+        ? (confidence >= 70 && confidence <= 90 ? 10 : 0)
+        : 0
+      const isCorrect = verdictCorrect && rationalePass
+
+      return res.json({
+        isCorrect,
+        feedback: isCorrect
+          ? 'Warrant approved. The case is solved.'
+          : verdictCorrect
+            ? (rationaleHint || 'Your accusation is correct, but the rationale needs stronger evidence.')
+            : 'Warrant denied. Re-examine the case reconstruction.',
+        identifiedConcepts: rationaleMatchedConcepts.length > 0
+          ? rationaleMatchedConcepts
+          : (isCorrect ? mergedExpectedConcepts : []),
+        xpEarned: (isCorrect ? 60 : 15) + confidenceBonus + rationaleXp,
+        bonusXp: confidenceBonus + rationaleXp,
+      })
+    }
+
+    // Backward-compatible legacy methods
     if (solveMethod === 'mcq' && userAnswer && mysteryData?.theoryOptions) {
-      // Multiple choice evaluation
       const correctIndex = mysteryData.theoryOptions.correctIndex
       const options = mysteryData.theoryOptions.options || []
 
-      // Validate correctIndex is within bounds
-      if (typeof correctIndex !== 'number' || correctIndex < 0 || correctIndex >= options.length) {
-        logger.warn('LEARN', 'Invalid correctIndex in MCQ fast-path, falling through to LLM', {
-          correctIndex,
-          optionsLength: options.length
-        })
-        // Fall through to voice-text evaluation below
-      } else {
-        logger.info('LEARN', 'Evaluating mystery (MCQ)', {
-          selectedIndex: userAnswer.selectedIndex,
-          correctIndex
-        })
-
+      if (typeof correctIndex === 'number' && correctIndex >= 0 && correctIndex < options.length) {
         const isCorrect = userAnswer.selectedIndex === correctIndex
-        const xpEarned = isCorrect ? 50 : 10
-
         return res.json({
           isCorrect,
           feedback: isCorrect
             ? 'Excellent detective work! You identified the correct theory.'
             : 'Not quite. Review the clues and try again.',
-          identifiedConcepts: isCorrect ? expectedConcepts : [],
-          xpEarned
+          identifiedConcepts: isCorrect ? mergedExpectedConcepts : [],
+          xpEarned: isCorrect ? 50 : 10,
         })
       }
     }
 
     if (solveMethod === 'fill-blank' && userAnswer && mysteryData?.fillBlanks) {
-      // Fill-in-the-blank evaluation
-      // Case-insensitive array comparison
       const normalizeString = (str) => String(str).toLowerCase().trim()
       const userBlanksNormalized = (userAnswer.blanks || []).map(normalizeString)
       const expectedBlanksNormalized = (mysteryData.fillBlanks.blanks || []).map(normalizeString)
 
-      // Validate array lengths match before comparing
-      if (userBlanksNormalized.length !== expectedBlanksNormalized.length) {
-        logger.warn('LEARN', 'Mismatched array lengths in fill-blank fast-path, falling through to LLM', {
-          userLength: userBlanksNormalized.length,
-          expectedLength: expectedBlanksNormalized.length
-        })
-        // Fall through to voice-text evaluation below
-      } else {
-        logger.info('LEARN', 'Evaluating mystery (Fill Blank)', {
-          userBlanks: userAnswer.blanks,
-          expectedBlanks: mysteryData.fillBlanks.blanks
-        })
-
+      if (userBlanksNormalized.length === expectedBlanksNormalized.length) {
         const isCorrect = userBlanksNormalized.every((blank, index) => blank === expectedBlanksNormalized[index])
-        const xpEarned = isCorrect ? 50 : 10
-
         return res.json({
           isCorrect,
           feedback: isCorrect
             ? 'Perfect! You completed the solution correctly.'
             : 'Some words are incorrect. Check the clues again.',
-          identifiedConcepts: isCorrect ? expectedConcepts : [],
-          xpEarned
+          identifiedConcepts: isCorrect ? mergedExpectedConcepts : [],
+          xpEarned: isCorrect ? 50 : 10,
         })
       }
     }
 
     if (solveMethod === 'evidence-board' && userAnswer && mysteryData?.evidenceConnections) {
-      // Evidence board evaluation - check all expected connections are present
       const evidenceConnections = mysteryData.evidenceConnections
-
-      // Validate evidenceConnections is a non-empty array
-      if (!Array.isArray(evidenceConnections) || evidenceConnections.length === 0) {
-        logger.warn('LEARN', 'Invalid evidenceConnections in evidence-board fast-path, falling through to LLM', {
-          evidenceConnections
-        })
-        // Fall through to voice-text evaluation below
-      } else {
-        logger.info('LEARN', 'Evaluating mystery (Evidence Board)', {
-          userConnections: userAnswer.connections,
-          expectedConnections: evidenceConnections
-        })
-
+      if (Array.isArray(evidenceConnections) && evidenceConnections.length > 0) {
         const userConnections = userAnswer.connections || []
-
-        // Check if all expected connections are present in user's answer
-        const allConnectionsPresent = evidenceConnections.every(expected => {
-          return userConnections.some(userConn =>
+        const allConnectionsPresent = evidenceConnections.every((expected) =>
+          userConnections.some((userConn) =>
             userConn.clueIndex === expected.clueIndex &&
             String(userConn.concept).toLowerCase().trim() === String(expected.concept).toLowerCase().trim()
           )
-        })
-
-        const isCorrect = allConnectionsPresent
-        const xpEarned = isCorrect ? 50 : 10
+        )
 
         return res.json({
-          isCorrect,
-          feedback: isCorrect
+          isCorrect: allConnectionsPresent,
+          feedback: allConnectionsPresent
             ? 'Brilliant! You connected all the evidence correctly.'
             : 'Some connections are missing or incorrect. Review the clues.',
-          identifiedConcepts: isCorrect ? expectedConcepts : [],
-          xpEarned
+          identifiedConcepts: allConnectionsPresent ? mergedExpectedConcepts : [],
+          xpEarned: allConnectionsPresent ? 50 : 10,
         })
       }
     }
 
-    // Fall through to voice-text evaluation (backward compatible)
-    // Validate userTheory for voice-text method
     if (!userTheory || typeof userTheory !== 'string' || userTheory.trim() === '') {
       return res.status(400).json({
         error: 'Missing or invalid userTheory',
-        field: 'userTheory'
+        field: 'userTheory',
+      })
+    }
+
+    if (!Array.isArray(mergedExpectedConcepts) || mergedExpectedConcepts.length === 0) {
+      return res.status(400).json({
+        error: 'Missing or invalid expectedConcepts',
+        field: 'expectedConcepts',
       })
     }
 
     logger.info('LEARN', 'Evaluating mystery theory (voice-text)', {
       theoryLength: userTheory.length,
-      conceptCount: expectedConcepts.length
+      conceptCount: mergedExpectedConcepts.length,
     })
 
     const result = await evaluateMysteryTheory({
       userTheory,
-      expectedConcepts
+      expectedConcepts: mergedExpectedConcepts,
     })
 
     if (result.error) {
       logger.error('LEARN', 'Mystery evaluation failed', { error: result.error })
 
       const errorStatusMap = {
-        'API_NOT_AVAILABLE': 503,
-        'RATE_LIMITED': 429,
-        'INVALID_RESPONSE': 500,
+        API_NOT_AVAILABLE: 503,
+        RATE_LIMITED: 429,
+        INVALID_RESPONSE: 500,
+        PARSE_ERROR: 500,
       }
 
       const statusCode = errorStatusMap[result.error] || 500
       return res.status(statusCode).json({ error: result.error })
     }
 
-    logger.info('LEARN', 'Mystery theory evaluated', {
-      result: result.result,
-      xpEarned: result.xpEarned,
-      matchedCount: result.matchedConcepts?.length || 0
-    })
-
-    // Transform result to match new response format
     const isCorrect = result.result === 'solved'
-    res.json({
+    return res.json({
       isCorrect,
       feedback: result.hint || (isCorrect ? 'Great detective work!' : 'Keep investigating!'),
       identifiedConcepts: result.matchedConcepts || [],
-      xpEarned: result.xpEarned
+      xpEarned: result.xpEarned,
     })
   } catch (error) {
     logger.error('LEARN', 'Mystery evaluation error', {
@@ -470,10 +616,11 @@ router.post('/whatif', learnRateLimit, async (req, res) => {
 
     return res.json({
       scenario: result.scenario,
-      imagePrompt: result.imagePrompt,
-      thinkAboutHints: result.thinkAboutHints,
-      expectedConsequences: result.expectedConsequences,
-      bonusFact: result.bonusFact
+      scenarioImagePrompt: result.scenarioImagePrompt,
+      predictionCards: result.predictionCards,
+      scenarioNarration: result.scenarioNarration,
+      bonusFact: result.bonusFact,
+      bonusFactNarration: result.bonusFactNarration
     })
   } catch (error) {
     logger.error('LEARN', 'Unexpected error in What If generation', { error: error.message })
@@ -482,77 +629,149 @@ router.post('/whatif', learnRateLimit, async (req, res) => {
 })
 
 /**
- * POST /api/learn/whatif/evaluate
- * Evaluate user's prediction against expected consequences (non-judgmental)
+ * POST /api/learn/whatif/reveal-assets
+ * Generate images and TTS narration for correct consequence reveals
  *
  * Request body:
- * - userPrediction: string - User's transcribed prediction
- * - expectedConsequences: array - Expected outcomes from generation
- * - language: string - 'en' or 'zh' (optional)
+ * - consequences: array - Array of {id, revealNarration, revealImagePrompt}
+ * - scenarioNarration: string - Scenario introduction narration
+ * - bonusFactNarration: string - Bonus fact narration
+ * - topicName: string - Topic name for context
+ * - explanationLevel: string - 'simple' | 'standard' | 'deep'
  *
  * Response:
- * - matchedPredictions: array - Predictions that aligned { concept, userPhrase, feedback }
- * - missedConsequences: array - Consequences not mentioned { concept, reveal }
- * - xpEarned: number - Encouragement-based XP (always positive: 10-50)
+ * - scenarioAudioUrl: string - Base64 audio URL for scenario narration
+ * - revealAssets: array - Array of {id, imageUrl, audioUrl} for each consequence
+ * - bonusFactAudioUrl: string - Base64 audio URL for bonus fact
  */
-router.post('/whatif/evaluate', learnRateLimit, async (req, res) => {
+router.post('/whatif/reveal-assets', learnRateLimit, async (req, res) => {
   const startTime = Date.now()
 
   try {
-    const { userPrediction, expectedConsequences, language } = req.body
+    const { consequences, scenarioNarration, bonusFactNarration, topicName, explanationLevel } = req.body
 
     // Validate required fields
-    if (!Array.isArray(expectedConsequences) || expectedConsequences.length === 0) {
+    if (!Array.isArray(consequences) || consequences.length === 0) {
       return res.status(400).json({
-        error: 'Missing or invalid expectedConsequences array',
-        field: 'expectedConsequences'
+        error: 'Missing or invalid consequences array',
+        field: 'consequences'
       })
     }
 
-    const predictionText = typeof userPrediction === 'string' ? userPrediction.trim() : ''
-
-    // Auto-detect language from expected consequences if not provided
-    const detectedLanguage = language || detectLanguage(expectedConsequences[0]?.consequence || '')
-
-    logger.info('LEARN', 'Evaluating What If prediction', {
-      predictionLength: predictionText.length,
-      expectedCount: expectedConsequences.length,
-      language: detectedLanguage
-    })
-
-    const result = await evaluateWhatIfPrediction({
-      userPrediction: predictionText,
-      expectedConsequences,
-      language: detectedLanguage
-    })
-
-    if (result.error) {
-      logger.error('LEARN', 'What If evaluation failed', { error: result.error })
-      const errorStatusMap = {
-        API_NOT_AVAILABLE: 503,
-        RATE_LIMITED: 429,
-        PARSE_ERROR: 502,
-        INVALID_RESPONSE: 502,
-      }
-      const statusCode = errorStatusMap[result.error] || 500
-      return res.status(statusCode).json({ error: result.error })
+    if (!scenarioNarration || typeof scenarioNarration !== 'string') {
+      return res.status(400).json({
+        error: 'Missing or invalid scenarioNarration',
+        field: 'scenarioNarration'
+      })
     }
 
+    if (!bonusFactNarration || typeof bonusFactNarration !== 'string') {
+      return res.status(400).json({
+        error: 'Missing or invalid bonusFactNarration',
+        field: 'bonusFactNarration'
+      })
+    }
+
+    if (!topicName || typeof topicName !== 'string') {
+      return res.status(400).json({
+        error: 'Missing or invalid topicName',
+        field: 'topicName'
+      })
+    }
+
+    const normalizedLevel = ['simple', 'standard', 'deep'].includes(explanationLevel)
+      ? explanationLevel
+      : 'standard'
+
+    logger.info('LEARN', 'Generating reveal assets', {
+      topicName,
+      consequenceCount: consequences.length,
+      level: normalizedLevel
+    })
+
+    // Generate all assets in parallel with graceful degradation
+    const allResults = await Promise.all([
+      // Scenario audio
+      (async () => {
+        try {
+          return await generateTTS(scenarioNarration)
+        } catch (error) {
+          logger.error('LEARN', 'Scenario audio generation failed', { error: error.message })
+          return null
+        }
+      })(),
+      // Consequence images and audio in parallel
+      ...consequences.map((consequence) =>
+        Promise.all([
+          // Image
+          (async () => {
+            try {
+              const result = await generateEducationalImage(consequence.revealImagePrompt, {
+                topic: topicName,
+                explanationLevel: normalizedLevel
+              })
+              return result.error ? null : result.imageUrl
+            } catch (error) {
+              logger.error('LEARN', 'Consequence image generation failed', {
+                id: consequence.id,
+                error: error.message
+              })
+              return null
+            }
+          })(),
+          // Audio
+          (async () => {
+            try {
+              return await generateTTS(consequence.revealNarration)
+            } catch (error) {
+              logger.error('LEARN', 'Consequence audio generation failed', {
+                id: consequence.id,
+                error: error.message
+              })
+              return null
+            }
+          })()
+        ]).then(([imageUrl, audioUrl]) => ({
+          id: consequence.id,
+          imageUrl,
+          audioUrl
+        }))
+      ),
+      // Bonus fact audio
+      (async () => {
+        try {
+          return await generateTTS(bonusFactNarration)
+        } catch (error) {
+          logger.error('LEARN', 'Bonus fact audio generation failed', { error: error.message })
+          return null
+        }
+      })()
+    ])
+
+    // Extract results: first=scenario audio, last=bonus audio, middle=consequence assets
+    const scenarioAudioResult = allResults[0]
+    const bonusFactAudioResult = allResults[allResults.length - 1]
+    const consequenceResults = allResults.slice(1, -1)
+
     const elapsed = Date.now() - startTime
-    logger.info('LEARN', 'What If evaluation complete', {
+    logger.info('LEARN', 'Reveal assets generated', {
       elapsed,
-      matchedCount: result.matchedPredictions.length,
-      xpEarned: result.xpEarned
+      scenarioAudio: !!scenarioAudioResult,
+      consequenceCount: consequenceResults.length,
+      bonusAudio: !!bonusFactAudioResult
     })
 
     return res.json({
-      matchedPredictions: result.matchedPredictions,
-      missedConsequences: result.missedConsequences,
-      xpEarned: result.xpEarned
+      scenarioAudioUrl: scenarioAudioResult,
+      revealAssets: consequenceResults,
+      bonusFactAudioUrl: bonusFactAudioResult
     })
   } catch (error) {
-    logger.error('LEARN', 'Unexpected error in What If evaluation', { error: error.message })
-    return res.status(500).json({ error: 'Internal server error' })
+    logger.error('LEARN', 'Reveal assets generation error', {
+      error: error.message,
+      stack: error.stack
+    })
+    return res.status(500).json({ error: 'REVEAL_ASSETS_GENERATION_FAILED' })
   }
 })
 
