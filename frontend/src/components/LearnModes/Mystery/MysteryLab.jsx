@@ -28,7 +28,9 @@ const READINESS_TIMEOUT_MS = 12000
 const REVEAL_NARRATION_TIMEOUT_MS = 12000
 const STAGE_ROTATE_MS = 2500
 const FACT_FETCH_DELAY_MS = 900
-const LOADER_FACT_TTS_CACHE_KEY = 'loader-fun-fact'
+const FACT_REQUEST_TIMEOUT_MS = 1800
+const LOADER_FACT_TTS_CACHE_KEY_PREFIX = 'loader-fun-fact:'
+const DEFAULT_FACT_QUERY = 'science detective mystery'
 
 const FRIENDLY_MYSTERY_ERRORS = {
   TOO_LARGE: 'Lesson content is too large to process. Try a shorter lesson or fewer details.',
@@ -296,7 +298,7 @@ export default function MysteryLab({
   const fallbackLoaderFacts = useMemo(() => getMysteryLoaderFacts(explanationLevel), [explanationLevel])
   const loadRequestIdRef = useRef(0)
   const revealNarrationTimeoutRef = useRef(null)
-  const hasNarratedLoaderFactRef = useRef(false)
+  const narratedLoaderFactTextRef = useRef('')
 
   const currentStep = STAGE_ORDER.includes(state.currentState)
     ? STAGE_ORDER.indexOf(state.currentState) + 1
@@ -340,7 +342,7 @@ export default function MysteryLab({
     setLoaderStageIndex(0)
     setLoaderFunFact(normalizeFunFact(fallbackLoaderFacts[0]))
     setShowFunFact(false)
-    hasNarratedLoaderFactRef.current = false
+    narratedLoaderFactTextRef.current = ''
   }, [state.currentState, fallbackLoaderFacts])
 
   useEffect(() => {
@@ -356,21 +358,100 @@ export default function MysteryLab({
   useEffect(() => {
     if (state.currentState !== STATE.LOADING) return
 
+    const controller = new AbortController()
+    let requestTimeoutId = null
+    let selectedFactLocked = false
+    let apiFact = null
+    const fallbackFact = normalizeFunFact(fallbackLoaderFacts[0])
+
+    const fetchApiFact = async () => {
+      const queryCandidate = topicName || state.mystery?.mysteryTitle || DEFAULT_FACT_QUERY
+      const query = typeof queryCandidate === 'string' && queryCandidate.trim()
+        ? queryCandidate.trim()
+        : DEFAULT_FACT_QUERY
+
+      try {
+        requestTimeoutId = setTimeout(() => controller.abort(), FACT_REQUEST_TIMEOUT_MS)
+
+        const response = await fetch(`${API_BASE}/api/generate/engagement`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query,
+            explanationLevel,
+          }),
+          signal: controller.signal,
+        })
+
+        if (!response.ok) {
+          throw new Error(`Engagement API error: ${response.status}`)
+        }
+
+        const payload = await response.json()
+        const resolvedFact = normalizeFunFact(payload?.funFact)
+
+        if (!resolvedFact) {
+          throw new Error('Missing fun fact payload')
+        }
+
+        apiFact = resolvedFact
+
+        if (!selectedFactLocked && !controller.signal.aborted) {
+          logger.debug('MYSTERY', 'Loader fun fact ready before display delay', {
+            source: 'api',
+            query,
+            explanationLevel,
+          })
+        }
+
+        logger.debug('MYSTERY', 'Loader fun fact resolved', {
+          source: 'api',
+          query,
+          explanationLevel,
+        })
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          logger.warn('MYSTERY', 'Loader fun fact request timed out', {
+            timeoutMs: FACT_REQUEST_TIMEOUT_MS,
+          })
+          return
+        }
+
+        logger.warn('MYSTERY', 'Loader fun fact request failed; using fallback', {
+          error: error.message,
+        })
+      } finally {
+        if (requestTimeoutId) clearTimeout(requestTimeoutId)
+      }
+    }
+
+    void fetchApiFact()
+
     const delayedFetchId = setTimeout(() => {
+      if (controller.signal.aborted) return
+
+      selectedFactLocked = true
+      setLoaderFunFact(apiFact || fallbackFact)
       setShowFunFact(true)
     }, FACT_FETCH_DELAY_MS)
 
     return () => {
       clearTimeout(delayedFetchId)
+      if (requestTimeoutId) clearTimeout(requestTimeoutId)
+      controller.abort()
     }
-  }, [state.currentState])
+  }, [state.currentState, topicName, explanationLevel, state.mystery?.mysteryTitle, fallbackLoaderFacts])
 
   useEffect(() => {
     if (state.currentState !== STATE.LOADING || !showFunFact) return
-    if (!loaderFunFact?.text || hasNarratedLoaderFactRef.current) return
+    if (!loaderFunFact?.text) return
+    if (narratedLoaderFactTextRef.current === loaderFunFact.text) return
 
-    hasNarratedLoaderFactRef.current = true
-    void narrate(`Fun fact: ${loaderFunFact.text}`, LOADER_FACT_TTS_CACHE_KEY)
+    narratedLoaderFactTextRef.current = loaderFunFact.text
+    void narrate(
+      `Fun fact: ${loaderFunFact.text}`,
+      `${LOADER_FACT_TTS_CACHE_KEY_PREFIX}${loaderFunFact.text}`
+    )
   }, [state.currentState, showFunFact, loaderFunFact, narrate])
 
   useEffect(() => {

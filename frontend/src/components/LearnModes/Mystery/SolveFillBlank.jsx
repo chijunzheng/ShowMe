@@ -16,8 +16,9 @@ import { vibrateShort } from '../../../utils/haptics'
  * @param {string[]} props.fillBlanks.blanks - Expected answers (for ordering)
  * @param {string[]} props.fillBlanks.wordBank - Available words to choose from
  * @param {Function} props.onSubmit - Callback with userBlanks array
+ * @param {boolean} props.disabled - Prevents interaction when true
  */
-export default function SolveFillBlank({ fillBlanks, onSubmit }) {
+export default function SolveFillBlank({ fillBlanks, onSubmit, disabled = false }) {
   const { sentence = '', blanks = [], wordBank = [] } = fillBlanks || {}
 
   // Array of selected words for each blank position
@@ -28,12 +29,14 @@ export default function SolveFillBlank({ fillBlanks, onSubmit }) {
   const parts = sentence.split('___')
 
   const handleSelectBlank = useCallback((index) => {
+    if (disabled) return
     vibrateShort()
     setSelectedBlankIndex((prev) => (prev === index ? null : index))
-  }, [])
+  }, [disabled])
 
   const handleSelectWord = useCallback(
     (word) => {
+      if (disabled) return
       if (selectedBlankIndex === null) return
 
       // Check if word is already used
@@ -51,10 +54,11 @@ export default function SolveFillBlank({ fillBlanks, onSubmit }) {
       // Clear blank selection
       setSelectedBlankIndex(null)
     },
-    [selectedBlankIndex, selectedWords]
+    [selectedBlankIndex, selectedWords, disabled]
   )
 
   const handleRemoveWord = useCallback((index) => {
+    if (disabled) return
     vibrateShort()
 
     setSelectedWords((prev) => {
@@ -64,13 +68,14 @@ export default function SolveFillBlank({ fillBlanks, onSubmit }) {
     })
 
     setSelectedBlankIndex(null)
-  }, [])
+  }, [disabled])
 
   const handleSubmit = useCallback(() => {
+    if (disabled) return
     if (selectedWords.some((word) => word === null)) return
 
     onSubmit?.(selectedWords)
-  }, [selectedWords, onSubmit])
+  }, [selectedWords, onSubmit, disabled])
 
   const allFilled = selectedWords.every((word) => word !== null)
 
@@ -112,6 +117,7 @@ export default function SolveFillBlank({ fillBlanks, onSubmit }) {
                       ? handleRemoveWord(index)
                       : handleSelectBlank(index)
                   }
+                  disabled={disabled}
                   className={`inline-flex items-center justify-center px-4 py-2 rounded-lg font-medium min-w-[120px] min-h-[44px] transition-all duration-200 ${
                     selectedWords[index]
                       ? 'bg-purple-600 text-white hover:bg-purple-700'
@@ -161,7 +167,7 @@ export default function SolveFillBlank({ fillBlanks, onSubmit }) {
       {/* Submit Button */}
       <button
         onClick={handleSubmit}
-        disabled={!allFilled}
+        disabled={disabled || !allFilled}
         className="w-full py-3 rounded-full font-medium bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed enabled:hover:shadow-xl enabled:transform enabled:hover:scale-105 enabled:active:scale-95"
       >
         {allFilled ? 'Check Answer' : `Fill ${selectedWords.filter((w) => w === null).length} more blank${selectedWords.filter((w) => w === null).length !== 1 ? 's' : ''}`}

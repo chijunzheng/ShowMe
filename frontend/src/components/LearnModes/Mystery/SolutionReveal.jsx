@@ -18,6 +18,7 @@ import { vibrateShort } from '../../../utils/haptics'
  * @param {string[]} props.evaluationResult.matchedConcepts - Array of matched concepts
  * @param {number} props.evaluationResult.xpEarned - XP earned
  * @param {string} props.evaluationResult.feedback - Additional feedback text
+ * @param {boolean} props.isNarrating - Whether reveal narration is actively loading/playing
  * @param {Function} props.onCelebrate - "Continue" button callback
  */
 export default function SolutionReveal({
@@ -25,6 +26,7 @@ export default function SolutionReveal({
   revealNarration: _revealNarration, // Reserved for future TTS integration
   sceneImage = null,
   evaluationResult = null,
+  isNarrating = false,
   onCelebrate,
 }) {
   const [showXp, setShowXp] = useState(false)
@@ -151,12 +153,22 @@ export default function SolutionReveal({
         <div className="flex justify-center pt-4">
           <button
             onClick={handleContinue}
-            className="px-8 py-4 rounded-full font-medium text-lg bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-lg hover:shadow-xl transform hover:scale-105 active:scale-95 transition-all duration-200"
+            disabled={isNarrating}
+            className="px-8 py-4 rounded-full font-medium text-lg bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-lg hover:shadow-xl transform hover:scale-105 active:scale-95 transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
           >
             Continue ✨
           </button>
         </div>
       </div>
+
+      {isNarrating && (
+        <div className="absolute inset-0 z-20 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
+          <div className="w-12 h-12 border-4 border-purple-200 dark:border-purple-700 border-t-purple-600 dark:border-t-purple-400 rounded-full animate-spin" />
+          <p className="text-sm font-medium text-purple-700 dark:text-purple-300">
+            Narrating case conclusion...
+          </p>
+        </div>
+      )}
     </div>
   )
 }

@@ -5,10 +5,7 @@
  * - Multiple Choice (MCQ)
  * - Evidence Board (connect clues to concepts)
  * - Fill in the Blanks
- * - Voice/Text (free-form explanation)
- *
- * Delegates to specialized sub-components and transforms their output
- * into a unified format for the parent component.
+ * - Voice/Text (optional bonus)
  */
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
@@ -16,6 +13,13 @@ import SolveMCQ from './SolveMCQ'
 import SolveEvidenceBoard from './SolveEvidenceBoard'
 import SolveFillBlank from './SolveFillBlank'
 import SolveVoiceText from './SolveVoiceText'
+
+const METHOD_LABELS = {
+  mcq: 'Multiple Choice',
+  'evidence-board': 'Evidence Board',
+  'fill-blank': 'Fill in Blanks',
+  'voice-text': 'Voice/Text',
+}
 
 /**
  * @param {Object} props
@@ -25,6 +29,8 @@ import SolveVoiceText from './SolveVoiceText'
  * @param {Object|null} props.fillBlanks - Fill-blank data {sentence, blanks, wordBank}
  * @param {string[]} props.clues - Clue text array for evidence board
  * @param {Array|null} props.evidenceConnections - Expected connections for evidence board
+ * @param {Object} props.methodStatus - Method status map {method: 'pending'|'passed'|'retry'}
+ * @param {Object} props.methodAttempts - Method attempt counters
  * @param {Function} props.onSubmit - Callback with {solveMethod, userAnswer}
  * @param {boolean} props.disabled - Prevents interaction when true
  */
@@ -35,8 +41,10 @@ export default function TheorySolver({
   fillBlanks = null,
   clues = [],
   evidenceConnections = null,
+  methodStatus = {},
+  methodAttempts = {},
   onSubmit,
-  disabled = false
+  disabled = false,
 }) {
   const [activeMethod, setActiveMethod] = useState(null)
 
@@ -44,23 +52,20 @@ export default function TheorySolver({
   const availableMethods = useMemo(() => {
     const methods = []
 
-    // MCQ: requires theoryOptions
     if (theoryOptions && theoryOptions.options && theoryOptions.options.length > 0) {
       methods.push('mcq')
     }
 
-    // Evidence Board: requires evidenceConnections array
     if (evidenceConnections && Array.isArray(evidenceConnections) && evidenceConnections.length > 0) {
-      methods.push('evidence')
+      methods.push('evidence-board')
     }
 
-    // Fill-Blank: requires fillBlanks
     if (fillBlanks && fillBlanks.sentence && fillBlanks.wordBank && fillBlanks.wordBank.length > 0) {
-      methods.push('fillblank')
+      methods.push('fill-blank')
     }
 
-    // Voice/Text: always available as fallback
-    methods.push('voice')
+    // Voice/Text is optional bonus and always available.
+    methods.push('voice-text')
 
     return methods
   }, [theoryOptions, evidenceConnections, fillBlanks])
@@ -72,20 +77,11 @@ export default function TheorySolver({
     }
   }, [availableMethods, activeMethod])
 
-  // Method selector data
-  const methodLabels = {
-    mcq: 'Multiple Choice',
-    evidence: 'Evidence Board',
-    fillblank: 'Fill in Blanks',
-    voice: 'Voice/Text'
-  }
-
-  // Wrapper handlers that transform sub-component output to unified format
   const handleMCQSubmit = useCallback(
     (selectedIndex) => {
       onSubmit?.({
         solveMethod: 'mcq',
-        userAnswer: { selectedIndex }
+        userAnswer: { selectedIndex },
       })
     },
     [onSubmit]
@@ -95,7 +91,7 @@ export default function TheorySolver({
     (connections) => {
       onSubmit?.({
         solveMethod: 'evidence-board',
-        userAnswer: { connections }
+        userAnswer: { connections },
       })
     },
     [onSubmit]
@@ -105,7 +101,7 @@ export default function TheorySolver({
     (blanks) => {
       onSubmit?.({
         solveMethod: 'fill-blank',
-        userAnswer: { blanks }
+        userAnswer: { blanks },
       })
     },
     [onSubmit]
@@ -115,70 +111,89 @@ export default function TheorySolver({
     ({ theory }) => {
       onSubmit?.({
         solveMethod: 'voice-text',
-        userAnswer: { theory }
+        userAnswer: { theory },
       })
     },
     [onSubmit]
   )
 
-  // Don't render until we have an active method
   if (!activeMethod || availableMethods.length === 0) {
     return null
   }
+
+  const currentStatus = methodStatus[activeMethod] || 'pending'
+  const isCurrentMethodPassed = currentStatus === 'passed'
+  const currentMethodAttempt = methodAttempts[activeMethod] || 0
 
   return (
     <div className="space-y-4">
       {/* Method Selector Pills */}
       {availableMethods.length > 1 && (
         <div className="flex flex-wrap gap-2 justify-center">
-          {availableMethods.map((method) => (
-            <button
-              key={method}
-              onClick={() => setActiveMethod(method)}
-              disabled={disabled}
-              className={`px-4 py-2 rounded-full text-sm font-medium min-h-[44px] transition-all duration-200 ${
-                activeMethod === method
-                  ? 'bg-purple-600 text-white shadow-md'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-              } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              {methodLabels[method]}
-            </button>
-          ))}
+          {availableMethods.map((method) => {
+            const status = methodStatus[method] || 'pending'
+            const statusSuffix = status === 'passed' ? ' ✓' : status === 'retry' ? ' ↺' : ''
+
+            return (
+              <button
+                key={method}
+                onClick={() => setActiveMethod(method)}
+                disabled={disabled}
+                className={`px-4 py-2 rounded-full text-sm font-medium min-h-[44px] transition-all duration-200 ${
+                  activeMethod === method
+                    ? 'bg-purple-600 text-white shadow-md'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                {METHOD_LABELS[method]}{statusSuffix}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {isCurrentMethodPassed && (
+        <div className="p-3 rounded-xl bg-green-100 dark:bg-green-900/20 border border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 text-sm">
+          This task is completed. You can review it, but no further submission is needed.
         </div>
       )}
 
       {/* Active Method Component */}
       {activeMethod === 'mcq' && (
         <SolveMCQ
+          key={`mcq-${currentMethodAttempt}`}
           theoryOptions={theoryOptions}
           onSubmit={handleMCQSubmit}
-          disabled={disabled}
+          disabled={disabled || isCurrentMethodPassed}
         />
       )}
 
-      {activeMethod === 'evidence' && (
+      {activeMethod === 'evidence-board' && (
         <SolveEvidenceBoard
+          key={`evidence-board-${currentMethodAttempt}`}
           clues={clues}
           expectedConcepts={expectedConcepts}
           onSubmit={handleEvidenceSubmit}
-          disabled={disabled}
+          disabled={disabled || isCurrentMethodPassed}
         />
       )}
 
-      {activeMethod === 'fillblank' && (
+      {activeMethod === 'fill-blank' && (
         <SolveFillBlank
+          key={`fill-blank-${currentMethodAttempt}`}
           fillBlanks={fillBlanks}
           onSubmit={handleFillBlankSubmit}
+          disabled={disabled || isCurrentMethodPassed}
         />
       )}
 
-      {activeMethod === 'voice' && (
+      {activeMethod === 'voice-text' && (
         <SolveVoiceText
+          key={`voice-text-${currentMethodAttempt}`}
           topicName={topicName}
           expectedConcepts={expectedConcepts}
           onSubmit={handleVoiceTextSubmit}
-          disabled={disabled}
+          disabled={disabled || isCurrentMethodPassed}
         />
       )}
     </div>

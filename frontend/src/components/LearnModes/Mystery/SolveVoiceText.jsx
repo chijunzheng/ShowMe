@@ -24,8 +24,8 @@ const MAX_RECORDING_DURATION = 60
  * @param {boolean} props.disabled - Prevents interaction when true
  */
 export default function SolveVoiceText({
-  topicName,
-  expectedConcepts = [],
+  topicName: _topicName,
+  expectedConcepts: _expectedConcepts = [],
   onSubmit,
   disabled = false
 }) {
@@ -79,13 +79,6 @@ export default function SolveVoiceText({
       textareaRef.current.focus()
     }
   }, [isVoiceMode])
-
-  // Auto-stop recording at max duration
-  useEffect(() => {
-    if (isRecording && recordingDuration >= MAX_RECORDING_DURATION) {
-      stopRecording()
-    }
-  }, [recordingDuration, isRecording, stopRecording])
 
   /**
    * Toggle between voice and text mode
@@ -193,6 +186,13 @@ export default function SolveVoiceText({
       setIsRecording(false)
     }
   }, [])
+
+  // Auto-stop recording at max duration
+  useEffect(() => {
+    if (isRecording && recordingDuration >= MAX_RECORDING_DURATION) {
+      stopRecording()
+    }
+  }, [recordingDuration, isRecording, stopRecording])
 
   /**
    * Transcribe audio blob

@@ -23,22 +23,30 @@ const COLORS = [
  * @param {string[]} props.clues - Array of clue texts
  * @param {string[]} props.expectedConcepts - Array of concept names
  * @param {Function} props.onSubmit - Callback with connections array [{clueIndex, concept}]
+ * @param {boolean} props.disabled - Prevents interaction when true
  */
-export default function SolveEvidenceBoard({ clues = [], expectedConcepts = [], onSubmit }) {
+export default function SolveEvidenceBoard({
+  clues = [],
+  expectedConcepts = [],
+  onSubmit,
+  disabled = false,
+}) {
   // Map<clueIndex, concept>
   const [connections, setConnections] = useState(new Map())
   const [selectedClueIndex, setSelectedClueIndex] = useState(null)
 
   const handleSelectClue = useCallback(
     (index) => {
+      if (disabled) return
       vibrateShort()
       setSelectedClueIndex((prev) => (prev === index ? null : index))
     },
-    []
+    [disabled]
   )
 
   const handleSelectConcept = useCallback(
     (concept) => {
+      if (disabled) return
       if (selectedClueIndex === null) return
 
       vibrateShort()
@@ -53,10 +61,11 @@ export default function SolveEvidenceBoard({ clues = [], expectedConcepts = [], 
       // Clear selection
       setSelectedClueIndex(null)
     },
-    [selectedClueIndex]
+    [selectedClueIndex, disabled]
   )
 
   const handleRemoveConnection = useCallback((clueIndex, e) => {
+    if (disabled) return
     e.stopPropagation()
     vibrateShort()
 
@@ -65,9 +74,10 @@ export default function SolveEvidenceBoard({ clues = [], expectedConcepts = [], 
       newMap.delete(clueIndex)
       return newMap
     })
-  }, [])
+  }, [disabled])
 
   const handleSubmit = useCallback(() => {
+    if (disabled) return
     if (connections.size !== clues.length) return
 
     // Convert Map to array format
@@ -79,7 +89,7 @@ export default function SolveEvidenceBoard({ clues = [], expectedConcepts = [], 
     )
 
     onSubmit?.(connectionsArray)
-  }, [connections, clues.length, onSubmit])
+  }, [connections, clues.length, onSubmit, disabled])
 
   const getConceptColor = (concept) => {
     const index = expectedConcepts.indexOf(concept)
@@ -141,9 +151,10 @@ export default function SolveEvidenceBoard({ clues = [], expectedConcepts = [], 
               <button
                 key={index}
                 onClick={() => handleSelectClue(index)}
+                disabled={disabled}
                 className={`w-full flex flex-col gap-2 p-4 rounded-xl min-h-[80px] transition-all duration-200 text-left ${getClueStyle(
                   index
-                )}`}
+                )} ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
               >
                 <p className="text-gray-800 dark:text-gray-100 leading-relaxed">
                   {clue}
@@ -156,6 +167,7 @@ export default function SolveEvidenceBoard({ clues = [], expectedConcepts = [], 
                       {connection}
                       <button
                         onClick={(e) => handleRemoveConnection(index, e)}
+                        disabled={disabled}
                         className="hover:scale-110 transition-transform"
                         aria-label="Remove connection"
                       >
@@ -178,7 +190,7 @@ export default function SolveEvidenceBoard({ clues = [], expectedConcepts = [], 
         <div className="flex flex-wrap gap-2">
           {expectedConcepts.map((concept, index) => {
             const color = COLORS[index % COLORS.length]
-            const isDisabled = selectedClueIndex === null
+            const isDisabled = disabled || selectedClueIndex === null
 
             return (
               <button
@@ -201,7 +213,7 @@ export default function SolveEvidenceBoard({ clues = [], expectedConcepts = [], 
       {/* Submit Button */}
       <button
         onClick={handleSubmit}
-        disabled={!allConnected}
+        disabled={disabled || !allConnected}
         className="w-full py-3 rounded-full font-medium bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed enabled:hover:shadow-xl enabled:transform enabled:hover:scale-105 enabled:active:scale-95"
       >
         {allConnected ? 'Submit Evidence' : `Connect ${clues.length - connections.size} more clue${clues.length - connections.size !== 1 ? 's' : ''}`}

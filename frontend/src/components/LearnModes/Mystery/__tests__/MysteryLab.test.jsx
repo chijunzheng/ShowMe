@@ -334,13 +334,20 @@ describe('MysteryLab - Crime Scene Ops', () => {
     expect(image.getAttribute('src')).toContain('late-scene.png')
   })
 
-  it('shows one fallback fun fact and keeps it stable while loading', async () => {
+  it('shows one API fun fact and keeps it stable while loading', async () => {
     vi.useFakeTimers()
-    const fallbackFacts = getMysteryLoaderFacts('simple')
+    const apiFactText = 'Detective notebooks evolved into modern incident timelines.'
 
     const fetchMock = vi.fn((url, options = {}) => {
       if (String(url).includes('/api/learn/mystery')) {
         return pendingWithAbort(options.signal)
+      }
+
+      if (String(url).includes('/api/generate/engagement')) {
+        return mockJsonResponse(200, {
+          funFact: { emoji: '🕵️', text: apiFactText },
+          suggestedQuestions: [],
+        })
       }
 
       return Promise.reject(new Error(`Unexpected URL: ${url}`))
@@ -351,7 +358,7 @@ describe('MysteryLab - Crime Scene Ops', () => {
     render(
       <MysteryLab
         slides={[{ subtitle: 'Heat moves from warm to cold' }]}
-        topicName="Heat Transfer"
+        topicName="Orbital Mechanics"
         explanationLevel="simple"
       />
     )
@@ -364,8 +371,17 @@ describe('MysteryLab - Crime Scene Ops', () => {
       await Promise.resolve()
     })
 
-    expect(screen.getByText(fallbackFacts[0].text)).toBeInTheDocument()
-    expect(mockNarrate).toHaveBeenCalledWith(`Fun fact: ${fallbackFacts[0].text}`, 'loader-fun-fact')
+    expect(screen.getByText(apiFactText)).toBeInTheDocument()
+    expect(mockNarrate).toHaveBeenCalledWith(
+      `Fun fact: ${apiFactText}`,
+      `loader-fun-fact:${apiFactText}`
+    )
+
+    const engagementCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/api/generate/engagement'))
+    expect(engagementCall).toBeTruthy()
+    const requestBody = JSON.parse(engagementCall[1].body)
+    expect(requestBody.explanationLevel).toBe('simple')
+    expect(requestBody.query).toBe('Orbital Mechanics')
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(15000)
@@ -375,17 +391,21 @@ describe('MysteryLab - Crime Scene Ops', () => {
       await Promise.resolve()
     })
 
-    expect(screen.getByText(fallbackFacts[0].text)).toBeInTheDocument()
+    expect(screen.getByText(apiFactText)).toBeInTheDocument()
     expect(mockNarrate).toHaveBeenCalledTimes(1)
   })
 
-  it('narrates loader fact once even if timers continue advancing', async () => {
+  it('falls back to local fact when engagement request fails and narrates once', async () => {
     vi.useFakeTimers()
     const fallbackFacts = getMysteryLoaderFacts('deep')
 
     const fetchMock = vi.fn((url, options = {}) => {
       if (String(url).includes('/api/learn/mystery')) {
         return pendingWithAbort(options.signal)
+      }
+
+      if (String(url).includes('/api/generate/engagement')) {
+        return Promise.reject(new Error('engagement unavailable'))
       }
 
       return Promise.reject(new Error(`Unexpected URL: ${url}`))
@@ -410,7 +430,10 @@ describe('MysteryLab - Crime Scene Ops', () => {
     })
 
     expect(screen.getByText(fallbackFacts[0].text)).toBeInTheDocument()
-    expect(mockNarrate).toHaveBeenCalledWith(`Fun fact: ${fallbackFacts[0].text}`, 'loader-fun-fact')
+    expect(mockNarrate).toHaveBeenCalledWith(
+      `Fun fact: ${fallbackFacts[0].text}`,
+      `loader-fun-fact:${fallbackFacts[0].text}`
+    )
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30000)
@@ -418,6 +441,70 @@ describe('MysteryLab - Crime Scene Ops', () => {
     })
 
     expect(mockNarrate).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not swap displayed fact after it is shown when API resolves late', async () => {
+    vi.useFakeTimers()
+    const fallbackFacts = getMysteryLoaderFacts('standard')
+    const lateApiFact = 'Late API fact should not replace displayed fallback.'
+
+    const fetchMock = vi.fn((url, options = {}) => {
+      if (String(url).includes('/api/learn/mystery')) {
+        return pendingWithAbort(options.signal)
+      }
+
+      if (String(url).includes('/api/generate/engagement')) {
+        return new Promise((resolve, reject) => {
+          if (options.signal?.aborted) {
+            reject(createAbortError())
+            return
+          }
+
+          const timerId = setTimeout(() => {
+            resolve({
+              ok: true,
+              status: 200,
+              json: () => Promise.resolve({
+                funFact: { emoji: '💡', text: lateApiFact },
+                suggestedQuestions: [],
+              }),
+            })
+          }, 2000)
+
+          options.signal?.addEventListener('abort', () => {
+            clearTimeout(timerId)
+            reject(createAbortError())
+          }, { once: true })
+        })
+      }
+
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MysteryLab
+        slides={[{ subtitle: 'Heat moves from warm to cold' }]}
+        topicName="Heat Transfer"
+        explanationLevel="standard"
+      />
+    )
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(901)
+      await Promise.resolve()
+    })
+
+    expect(screen.getByText(fallbackFacts[0].text)).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+      await Promise.resolve()
+    })
+
+    expect(screen.getByText(fallbackFacts[0].text)).toBeInTheDocument()
+    expect(screen.queryByText(lateApiFact)).not.toBeInTheDocument()
   })
 
   it('cleans loader timers and requests on unmount without state warnings', async () => {
