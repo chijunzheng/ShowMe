@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Plans
+After using the planning feature, use /create-features agent skills first before actual implementation.
+
 ## Responses
 - Only respond with short and concise answers
 

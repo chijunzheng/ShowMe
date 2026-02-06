@@ -177,6 +177,47 @@ export function getExplorerRank(topicCount, totalXP = 0) {
 }
 
 /**
+ * Get rank info based on topics only (ignores XP gating)
+ *
+ * @param {number} topicCount - Number of topics learned
+ * @returns {Object} Current rank with progress info (topics-only)
+ */
+export function getExplorerRankByTopics(topicCount) {
+  let count = topicCount
+
+  if (typeof count === 'string') {
+    count = parseFloat(count)
+  }
+
+  if (count === null || count === undefined || Number.isNaN(count)) {
+    count = 0
+  }
+
+  count = Math.floor(count)
+  if (count < 0) {
+    count = 0
+  }
+
+  let currentRank = EXPLORER_RANKS[0]
+  let nextRank = EXPLORER_RANKS[1] || null
+
+  for (let i = EXPLORER_RANKS.length - 1; i >= 0; i--) {
+    const rank = EXPLORER_RANKS[i]
+    if (count >= rank.minTopics) {
+      currentRank = rank
+      nextRank = EXPLORER_RANKS[i + 1] || null
+      break
+    }
+  }
+
+  return {
+    ...currentRank,
+    topicsToNextRank: nextRank ? Math.max(0, nextRank.minTopics - count) : 0,
+    nextRank,
+  }
+}
+
+/**
  * Check if a rank up occurred
  *
  * @param {number} oldTopicCount - Previous topic count
@@ -225,6 +266,27 @@ export function getRankProgress(topicCount, totalXP = 0) {
   const combinedProgress = Math.min(topicsProgress, xpProgress)
 
   return Math.min(100, Math.round(combinedProgress * 100))
+}
+
+/**
+ * Get progress percentage toward next rank using topics only
+ *
+ * @param {number} topicCount - Current topic count
+ * @returns {number} 0-100 percentage toward next rank
+ */
+export function getRankProgressByTopics(topicCount) {
+  const rank = getExplorerRankByTopics(topicCount)
+
+  if (!rank.nextRank) {
+    return 100
+  }
+
+  const currentTopicsMin = rank.minTopics
+  const nextTopicsMin = rank.nextRank.minTopics
+  const topicsRange = Math.max(1, nextTopicsMin - currentTopicsMin)
+  const topicsProgress = Math.min(1, Math.max(0, (topicCount - currentTopicsMin) / topicsRange))
+
+  return Math.min(100, Math.round(topicsProgress * 100))
 }
 
 /**

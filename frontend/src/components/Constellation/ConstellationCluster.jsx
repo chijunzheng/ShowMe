@@ -37,21 +37,16 @@ export default function ConstellationCluster({ cluster, nodePositions }) {
 
     // Calculate average x for horizontal centering
     const x = positions.reduce((sum, p) => sum + p.x, 0) / positions.length
-    // Find minimum y (topmost node) and position label 30px above
+    // Find minimum y (topmost node) and position label 55px above
     const minY = Math.min(...positions.map((p) => p.y))
 
-    return { x, y: minY - 30 }
+    return { x, y: minY - 55 }
   }, [cluster.nodeIds, nodePositions])
 
   // Don't render if no valid position
   if (!labelPosition) {
     return null
   }
-
-  /**
-   * Generate background color with transparency
-   */
-  const backgroundColor = cluster.color ? `${cluster.color}30` : 'rgba(100, 100, 100, 0.2)'
 
   return (
     <div
@@ -64,9 +59,8 @@ export default function ConstellationCluster({ cluster, nodePositions }) {
       aria-hidden="true"
     >
       <div
-        className="px-3 py-1 rounded-full text-sm font-medium opacity-60"
+        className="text-[11px] font-medium opacity-40"
         style={{
-          backgroundColor,
           color: cluster.color || '#9CA3AF',
           textShadow: '0 1px 4px rgba(0,0,0,0.6)',
         }}

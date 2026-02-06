@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
-import { getExplorerRank, getRankProgress } from './ExplorerRank/explorerRankUtils'
+import { getExplorerRankByTopics, getRankProgressByTopics } from './ExplorerRank/explorerRankUtils'
 
 /**
  * TopicSidebar Component (CORE016 & CORE017)
@@ -37,8 +37,8 @@ function TopicSidebar({
   totalXP = 0,
 }) {
   // Calculate explorer rank based on topics
-  const explorerRank = getExplorerRank(topics.length, totalXP)
-  const rankProgress = getRankProgress(topics.length, totalXP)
+  const explorerRank = getExplorerRankByTopics(topics.length)
+  const rankProgress = getRankProgressByTopics(topics.length)
 
   const MENU_GAP = 8
   const MENU_MARGIN = 8
@@ -380,7 +380,7 @@ function TopicSidebar({
               </span>
             )}
           </div>
-          {/* Rank Progress bar + Streak row */}
+          {/* Rank Progress bar + XP + Streak row */}
           <div className="flex items-center gap-2">
             {/* Rank Progress bar */}
             <div className="flex-1 h-1.5 bg-indigo-100 dark:bg-indigo-900/30 rounded-full overflow-hidden">
@@ -389,6 +389,10 @@ function TopicSidebar({
                 style={{ width: `${rankProgress}%` }}
               />
             </div>
+            {/* XP */}
+            <span className="text-xs flex items-center gap-0.5 text-indigo-500">
+              ⭐ {totalXP.toLocaleString()}
+            </span>
             {/* Streak */}
             <span className={`text-xs flex items-center gap-0.5 ${streakCount > 0 ? 'text-orange-500' : 'text-gray-400'}`}>
               🔥 {streakCount}

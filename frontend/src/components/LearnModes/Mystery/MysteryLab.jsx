@@ -1,40 +1,140 @@
 /**
- * MysteryLab - Detective-style learning mode
+ * MysteryLab - Detective-style learning mode (7-state machine)
  *
- * Kids solve mysteries using knowledge from their lesson.
- * State machine manages flow: loading → scene → recording → result → celebration
+ * State flow: LOADING → INTRO → INVESTIGATE → SOLVE → EVALUATING → REVEAL → CELEBRATION
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react'
-import MysteryScene from './MysteryScene'
-import CluePanel from './CluePanel'
+import { useReducer, useEffect, useRef } from 'react'
+import useMysteryNarration from './useMysteryNarration'
+import MysteryIntro from './MysteryIntro'
+import ClueInvestigation from './ClueInvestigation'
 import TheorySolver from './TheorySolver'
+import SolutionReveal from './SolutionReveal'
 import DetectiveReward from './DetectiveReward'
 import logger from '../../../utils/logger'
 import { vibrateSuccess, vibrateShort } from '../../../utils/haptics'
 import { playCorrectSound, playPartialSound, playIncorrectSound } from '../../../utils/soundEffects'
 import { buildLearnSlidesPayload } from '../../../utils/learnSlidesPayload'
 
-// API base URL for backend calls
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
 
-// Mystery Lab states
-const MYSTERY_STATE = {
-  LOADING: 'loading',
-  SCENE: 'scene',
-  RECORDING: 'recording',
-  EVALUATING: 'evaluating',
-  RESULT: 'result',
-  CELEBRATION: 'celebration',
+// State machine states
+const STATE = {
+  LOADING: 'LOADING',
+  INTRO: 'INTRO',
+  INVESTIGATE: 'INVESTIGATE',
+  SOLVE: 'SOLVE',
+  EVALUATING: 'EVALUATING',
+  REVEAL: 'REVEAL',
+  CELEBRATION: 'CELEBRATION',
+}
+
+// Action types
+const ACTION = {
+  MYSTERY_LOADED: 'MYSTERY_LOADED',
+  IMAGE_LOADED: 'IMAGE_LOADED',
+  START_INVESTIGATION: 'START_INVESTIGATION',
+  NEXT_CLUE: 'NEXT_CLUE',
+  READY_TO_SOLVE: 'READY_TO_SOLVE',
+  SUBMIT_ANSWER: 'SUBMIT_ANSWER',
+  EVALUATION_COMPLETE: 'EVALUATION_COMPLETE',
+  CONTINUE_TO_CELEBRATION: 'CONTINUE_TO_CELEBRATION',
+  ERROR: 'ERROR',
+  RETRY: 'RETRY',
+}
+
+// Initial state
+const initialState = {
+  currentState: STATE.LOADING,
+  mystery: null,
+  sceneImage: null,
+  currentClueIndex: 0,
+  userAnswer: null,
+  evaluationResult: null,
+  error: null,
+}
+
+// Reducer function
+function mysteryReducer(state, action) {
+  switch (action.type) {
+    case ACTION.MYSTERY_LOADED:
+      return {
+        ...state,
+        mystery: action.payload,
+        currentState: STATE.INTRO,
+      }
+
+    case ACTION.IMAGE_LOADED:
+      return {
+        ...state,
+        sceneImage: action.payload,
+      }
+
+    case ACTION.START_INVESTIGATION:
+      return {
+        ...state,
+        currentState: STATE.INVESTIGATE,
+        currentClueIndex: 0,
+      }
+
+    case ACTION.NEXT_CLUE:
+      return {
+        ...state,
+        currentClueIndex: Math.min(
+          state.currentClueIndex + 1,
+          (state.mystery?.clues?.length ?? 1) - 1
+        ),
+      }
+
+    case ACTION.READY_TO_SOLVE:
+      return {
+        ...state,
+        currentState: STATE.SOLVE,
+      }
+
+    case ACTION.SUBMIT_ANSWER:
+      return {
+        ...state,
+        userAnswer: action.payload,
+        currentState: STATE.EVALUATING,
+      }
+
+    case ACTION.EVALUATION_COMPLETE:
+      return {
+        ...state,
+        evaluationResult: action.payload,
+        currentState: STATE.REVEAL,
+      }
+
+    case ACTION.CONTINUE_TO_CELEBRATION:
+      return {
+        ...state,
+        currentState: STATE.CELEBRATION,
+      }
+
+    case ACTION.ERROR:
+      return {
+        ...state,
+        error: action.payload,
+      }
+
+    case ACTION.RETRY:
+      return {
+        ...initialState,
+      }
+
+    default:
+      return state
+  }
 }
 
 /**
  * @param {Object} props
- * @param {Array} props.slides - Content slides from the lesson
- * @param {string} props.topicName - Name of the topic learned
- * @param {string} props.explanationLevel - 'simple' | 'standard' | 'deep'
- * @param {Function} props.onComplete - Callback when mystery is solved or skipped
- * @param {Function} props.onExit - Callback to exit mystery lab
+ * @param {Array} props.slides - Context from current topic
+ * @param {string} props.topicName - Current topic name
+ * @param {string} props.explanationLevel - User's preference
+ * @param {Function} props.onComplete - Return to Learn Mode selection
+ * @param {Function} props.onExit - Return to Learn Mode selection
  */
 export default function MysteryLab({
   slides = [],
@@ -43,190 +143,242 @@ export default function MysteryLab({
   onComplete,
   onExit,
 }) {
-  const [mysteryState, setMysteryState] = useState(MYSTERY_STATE.LOADING)
-  const [mysteryData, setMysteryData] = useState(null)
-  const [userTheory, setUserTheory] = useState('')
-  const [evaluationResult, setEvaluationResult] = useState(null)
-  const [error, setError] = useState(null)
-  const [retryCount, setRetryCount] = useState(0)
-
+  const [state, dispatch] = useReducer(mysteryReducer, initialState)
+  const { narrate, stop, prefetch, isPlaying } = useMysteryNarration()
   const abortControllerRef = useRef(null)
 
-  // Load mystery on mount
+  // Parallel data fetching on mount
   useEffect(() => {
-    loadMystery()
+    const controller = new AbortController()
+    abortControllerRef.current = controller
 
-    // Cleanup on unmount
+    const fetchMystery = async () => {
+      try {
+        logger.info('MYSTERY', 'Loading mystery', { topicName, slideCount: slides.length })
+
+        const response = await fetch(`${API_BASE}/api/learn/mystery`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            slides: buildLearnSlidesPayload(slides),
+            topicName,
+            explanationLevel,
+          }),
+          signal: controller.signal,
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}))
+          throw new Error(errorData.error || 'Failed to load mystery')
+        }
+
+        const data = await response.json()
+        logger.info('MYSTERY', 'Mystery loaded', { title: data.mysteryTitle })
+        return data
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          logger.info('MYSTERY', 'Mystery load aborted')
+          return null
+        }
+        throw err
+      }
+    }
+
+    const fetchImage = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/learn/mystery/image`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ topicName }),
+          signal: controller.signal,
+        })
+
+        if (!response.ok) {
+          throw new Error('Image generation failed')
+        }
+
+        const data = await response.json()
+        return data.imageUrl
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          return null
+        }
+        logger.warn('MYSTERY', 'Image load failed, using placeholder', { error: err.message })
+        return null
+      }
+    }
+
+    Promise.allSettled([fetchMystery(), fetchImage()])
+      .then(([mysteryResult, imageResult]) => {
+        if (mysteryResult.status === 'rejected') {
+          dispatch({
+            type: ACTION.ERROR,
+            payload: mysteryResult.reason.message || 'Failed to load mystery',
+          })
+          return
+        }
+
+        if (mysteryResult.value) {
+          dispatch({ type: ACTION.MYSTERY_LOADED, payload: mysteryResult.value })
+        }
+
+        if (imageResult.status === 'fulfilled' && imageResult.value) {
+          dispatch({ type: ACTION.IMAGE_LOADED, payload: imageResult.value })
+        }
+      })
+
     return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort()
+      controller.abort()
+      stop()
+    }
+  }, [slides, topicName, explanationLevel, stop])
+
+  // Auto-narrate mystery setup in INTRO state
+  useEffect(() => {
+    if (state.currentState === STATE.INTRO && state.mystery) {
+      narrate(state.mystery.mysterySetup, 'intro-setup')
+    }
+  }, [state.currentState, state.mystery, narrate])
+
+  // Auto-narrate clue in INVESTIGATE state
+  useEffect(() => {
+    if (state.currentState === STATE.INVESTIGATE && state.mystery) {
+      const clue = state.mystery.clues[state.currentClueIndex]
+      if (clue && clue.narratorText) {
+        narrate(clue.narratorText, `clue-${state.currentClueIndex}`)
+
+        // Prefetch next clue if available
+        const nextClue = state.mystery.clues[state.currentClueIndex + 1]
+        if (nextClue && nextClue.narratorText) {
+          prefetch(nextClue.narratorText, `clue-${state.currentClueIndex + 1}`)
+        }
       }
     }
-  }, [])
+  }, [state.currentState, state.currentClueIndex, state.mystery, narrate, prefetch])
 
-  /**
-   * Fetch mystery from backend
-   */
-  const loadMystery = async () => {
-    setMysteryState(MYSTERY_STATE.LOADING)
-    setError(null)
-
-    // Cancel any in-flight requests
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
+  // Auto-narrate reveal in REVEAL state
+  useEffect(() => {
+    if (state.currentState === STATE.REVEAL && state.mystery) {
+      narrate(state.mystery.revealNarration, 'reveal')
     }
-    abortControllerRef.current = new AbortController()
+  }, [state.currentState, state.mystery, narrate])
 
-    try {
-      logger.info('MYSTERY', 'Loading mystery', { topicName, slideCount: slides.length })
-
-      const response = await fetch(`${API_BASE}/api/learn/mystery`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          slides: buildLearnSlidesPayload(slides),
-          topicName,
-          explanationLevel,
-        }),
-        signal: abortControllerRef.current.signal,
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.error || 'Failed to load mystery')
-      }
-
-      const data = await response.json()
-
-      logger.info('MYSTERY', 'Mystery loaded', {
-        title: data.mysteryTitle,
-        clueCount: data.clues?.length || 0
-      })
-
-      setMysteryData(data)
-      setMysteryState(MYSTERY_STATE.SCENE)
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        logger.info('MYSTERY', 'Mystery load aborted')
-        return
-      }
-
-      logger.error('MYSTERY', 'Failed to load mystery', { error: err.message })
-      setError(err.message || 'Failed to load mystery. Please try again.')
-      setMysteryState(MYSTERY_STATE.SCENE) // Allow retry even on error
+  // Evaluation API call in EVALUATING state
+  useEffect(() => {
+    if (state.currentState !== STATE.EVALUATING || !state.userAnswer || !state.mystery) {
+      return
     }
+
+    const controller = new AbortController()
+
+    const evaluateAnswer = async () => {
+      try {
+        logger.info('MYSTERY', 'Evaluating answer')
+
+        const response = await fetch(`${API_BASE}/api/learn/mystery/evaluate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...state.userAnswer,
+            expectedConcepts: state.mystery.expectedConcepts,
+          }),
+          signal: controller.signal,
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}))
+          throw new Error(errorData.error || 'Failed to evaluate')
+        }
+
+        const result = await response.json()
+        logger.info('MYSTERY', 'Evaluation complete', { result: result.result })
+
+        // Map backend result to SolutionReveal format
+        const mappedResult = {
+          isCorrect: result.result === 'solved',
+          matchedConcepts: result.matchedConcepts || [],
+          xpEarned: result.xpEarned || 0,
+          feedback: result.hint || '',
+        }
+
+        // Play sound effects
+        if (result.result === 'solved') {
+          vibrateSuccess()
+          playCorrectSound()
+        } else if (result.result === 'partial') {
+          vibrateShort()
+          playPartialSound()
+        } else {
+          vibrateShort()
+          playIncorrectSound()
+        }
+
+        dispatch({ type: ACTION.EVALUATION_COMPLETE, payload: mappedResult })
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          return
+        }
+        logger.error('MYSTERY', 'Evaluation failed', { error: err.message })
+        dispatch({ type: ACTION.ERROR, payload: err.message })
+      }
+    }
+
+    evaluateAnswer()
+
+    return () => {
+      controller.abort()
+    }
+  }, [state.currentState, state.userAnswer, state.mystery])
+
+  // Handlers
+  const handleStartInvestigation = () => {
+    stop()
+    dispatch({ type: ACTION.START_INVESTIGATION })
   }
 
-  /**
-   * Handle user submitting their theory
-   */
-  const handleTheorySubmit = async (theory) => {
-    if (!theory || !mysteryData) return
-
-    setUserTheory(theory)
-    setMysteryState(MYSTERY_STATE.EVALUATING)
-    setError(null)
-
-    try {
-      logger.info('MYSTERY', 'Evaluating theory', { theoryLength: theory.length })
-
-      const response = await fetch(`${API_BASE}/api/learn/mystery/evaluate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userTheory: theory,
-          expectedConcepts: mysteryData.expectedConcepts,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.error || 'Failed to evaluate theory')
-      }
-
-      const result = await response.json()
-
-      logger.info('MYSTERY', 'Theory evaluated', {
-        result: result.result,
-        xpEarned: result.xpEarned,
-        matchedCount: result.matchedConcepts?.length || 0
-      })
-
-      setEvaluationResult(result)
-      setMysteryState(MYSTERY_STATE.RESULT)
-
-      // Play sound based on result
-      if (result.result === 'solved') {
-        vibrateSuccess()
-        playCorrectSound()
-      } else if (result.result === 'partial') {
-        vibrateShort()
-        playPartialSound()
-      } else {
-        vibrateShort()
-        playIncorrectSound()
-      }
-
-      // If solved, move to celebration after a delay
-      if (result.result === 'solved') {
-        setTimeout(() => {
-          setMysteryState(MYSTERY_STATE.CELEBRATION)
-        }, 2000)
-      }
-    } catch (err) {
-      logger.error('MYSTERY', 'Failed to evaluate theory', { error: err.message })
-      setError(err.message || 'Failed to evaluate theory. Please try again.')
-      setMysteryState(MYSTERY_STATE.SCENE)
-    }
+  const handleNextClue = () => {
+    dispatch({ type: ACTION.NEXT_CLUE })
   }
 
-  /**
-   * Handle retry after partial/wrong result
-   */
-  const handleRetry = useCallback(() => {
-    vibrateShort()
-    setRetryCount(prev => prev + 1)
-    setUserTheory('')
-    setEvaluationResult(null)
-    setMysteryState(MYSTERY_STATE.SCENE)
-  }, [])
+  const handleReadyToSolve = () => {
+    stop()
+    dispatch({ type: ACTION.READY_TO_SOLVE })
+  }
 
-  /**
-   * Handle viewing solution (gives up)
-   */
-  const handleViewSolution = useCallback(() => {
-    vibrateShort()
-    setMysteryState(MYSTERY_STATE.CELEBRATION)
-    // Set a result that shows the solution
-    setEvaluationResult({
-      result: 'viewed_solution',
-      xpEarned: 5,
-      matchedConcepts: []
-    })
-  }, [])
+  const handleSubmitAnswer = (submission) => {
+    dispatch({ type: ACTION.SUBMIT_ANSWER, payload: submission })
+  }
 
-  /**
-   * Handle completing the mystery
-   */
-  const handleComplete = useCallback(() => {
-    vibrateShort()
+  const handleCelebrate = () => {
+    stop()
+    dispatch({ type: ACTION.CONTINUE_TO_CELEBRATION })
+  }
+
+  const handleContinue = () => {
+    stop()
     onComplete?.({
-      completed: evaluationResult?.result === 'solved',
-      xpEarned: evaluationResult?.xpEarned || 0,
-      retryCount
+      completed: state.evaluationResult?.isCorrect || false,
+      xpEarned: state.evaluationResult?.xpEarned || 0,
     })
-  }, [evaluationResult, retryCount, onComplete])
+  }
 
-  /**
-   * Handle exiting early
-   */
-  const handleExit = useCallback(() => {
-    vibrateShort()
+  const handleBack = () => {
+    const needsConfirmation = state.currentState === STATE.INVESTIGATE || state.currentState === STATE.SOLVE
+    if (needsConfirmation) {
+      const confirmed = window.confirm('Are you sure you want to exit? Your progress will be lost.')
+      if (!confirmed) return
+    }
+    stop()
     onExit?.()
-  }, [onExit])
+  }
 
-  // Loading state
-  if (mysteryState === MYSTERY_STATE.LOADING) {
+  const handleRetry = () => {
+    stop()
+    dispatch({ type: ACTION.RETRY })
+  }
+
+  // Render states
+  if (state.currentState === STATE.LOADING) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen px-6 py-12 bg-gradient-to-br from-purple-50 via-white to-indigo-50 dark:from-gray-900 dark:via-gray-800 dark:to-purple-950">
         <div className="flex flex-col items-center gap-4">
@@ -239,8 +391,7 @@ export default function MysteryLab({
     )
   }
 
-  // Error state
-  if (error && !mysteryData) {
+  if (state.error && !state.mystery) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen px-6 py-12 bg-gradient-to-br from-purple-50 via-white to-indigo-50 dark:from-gray-900 dark:via-gray-800 dark:to-purple-950">
         <div className="text-center max-w-md">
@@ -248,18 +399,16 @@ export default function MysteryLab({
           <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-100 mb-2">
             Oops! Something went wrong
           </h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-6">
-            {error}
-          </p>
+          <p className="text-gray-600 dark:text-gray-400 mb-6">{state.error}</p>
           <div className="flex gap-3 justify-center">
             <button
-              onClick={loadMystery}
+              onClick={handleRetry}
               className="px-6 py-3 rounded-full font-medium bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
             >
               Try Again
             </button>
             <button
-              onClick={handleExit}
+              onClick={handleBack}
               className="px-6 py-3 rounded-full font-medium bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
             >
               Exit
@@ -270,161 +419,96 @@ export default function MysteryLab({
     )
   }
 
-  // Celebration state (solved or viewed solution)
-  if (mysteryState === MYSTERY_STATE.CELEBRATION) {
+  if (state.currentState === STATE.CELEBRATION) {
     return (
       <DetectiveReward
-        solved={evaluationResult?.result === 'solved'}
-        xpEarned={evaluationResult?.xpEarned || 5}
-        solutionExplanation={mysteryData?.solutionExplanation}
-        onContinue={handleComplete}
+        solved={state.evaluationResult?.isCorrect || false}
+        xpEarned={state.evaluationResult?.xpEarned || 0}
+        solutionExplanation={state.mystery?.solutionExplanation}
+        onContinue={handleContinue}
       />
     )
   }
 
-  // Main mystery interface
-  return (
-    <div className="flex flex-col min-h-screen bg-gradient-to-br from-purple-50 via-white to-indigo-50 dark:from-gray-900 dark:via-gray-800 dark:to-purple-950">
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm border-b border-gray-200 dark:border-gray-700">
-        <div className="flex items-center gap-3">
-          <span className="text-3xl">🔍</span>
-          <div>
-            <h1 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
-              Mystery Lab
-            </h1>
-            {mysteryData?.mysteryTitle && (
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                {mysteryData.mysteryTitle}
-              </p>
-            )}
-          </div>
-        </div>
+  if (state.currentState === STATE.INTRO) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-indigo-50 dark:from-gray-900 dark:via-gray-800 dark:to-purple-950">
+        <MysteryIntro
+          mysteryTitle={state.mystery?.mysteryTitle}
+          mysterySetup={state.mystery?.mysterySetup}
+          sceneImage={state.sceneImage}
+          isTtsPlaying={isPlaying}
+          onNext={handleStartInvestigation}
+        />
         <button
-          onClick={handleExit}
-          className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+          onClick={handleBack}
+          className="fixed top-4 left-4 px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
         >
-          Exit
+          ← Back
         </button>
       </div>
+    )
+  }
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-6 py-8">
-        <div className="max-w-3xl mx-auto space-y-6">
-          {/* Mystery Scene */}
-          {mysteryData && (
-            <MysteryScene
-              mysterySetup={mysteryData.mysterySetup}
-              imagePrompt={mysteryData.imagePrompt}
-            />
-          )}
-
-          {/* Clues Panel */}
-          {mysteryData?.clues && (
-            <CluePanel
-              clues={mysteryData.clues}
-              slides={slides}
-            />
-          )}
-
-          {/* Theory Solver - only show in scene/recording/evaluating states */}
-          {(mysteryState === MYSTERY_STATE.SCENE ||
-            mysteryState === MYSTERY_STATE.RECORDING ||
-            mysteryState === MYSTERY_STATE.EVALUATING) && (
-            <TheorySolver
-              isRecording={mysteryState === MYSTERY_STATE.RECORDING}
-              isEvaluating={mysteryState === MYSTERY_STATE.EVALUATING}
-              onTheorySubmit={handleTheorySubmit}
-              onStartRecording={() => setMysteryState(MYSTERY_STATE.RECORDING)}
-              onStopRecording={() => setMysteryState(MYSTERY_STATE.SCENE)}
-            />
-          )}
-
-          {/* Result Display */}
-          {mysteryState === MYSTERY_STATE.RESULT && evaluationResult && (
-            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 border-2 border-gray-200 dark:border-gray-700 shadow-lg animate-fade-in">
-              {evaluationResult.result === 'solved' ? (
-                <div className="text-center">
-                  <div className="text-6xl mb-4">🎉</div>
-                  <h2 className="text-2xl font-bold text-success-600 dark:text-success-400 mb-2">
-                    Case Solved!
-                  </h2>
-                  <p className="text-lg text-gray-600 dark:text-gray-400 mb-4">
-                    You cracked the mystery!
-                  </p>
-                  <div className="inline-flex items-center gap-2 px-4 py-2 bg-success-100 dark:bg-success-900/30 rounded-full">
-                    <span className="text-success-600 dark:text-success-400 font-bold text-lg">
-                      +{evaluationResult.xpEarned} XP
-                    </span>
-                  </div>
-                </div>
-              ) : evaluationResult.result === 'partial' ? (
-                <div className="text-center">
-                  <div className="text-6xl mb-4">🤔</div>
-                  <h2 className="text-2xl font-bold text-amber-600 dark:text-amber-400 mb-2">
-                    Getting Warmer!
-                  </h2>
-                  <p className="text-gray-600 dark:text-gray-400 mb-4">
-                    You're on the right track, but there's more to discover.
-                  </p>
-                  {evaluationResult.hint && (
-                    <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4 mb-4">
-                      <p className="text-sm text-amber-800 dark:text-amber-300">
-                        💡 Hint: {evaluationResult.hint}
-                      </p>
-                    </div>
-                  )}
-                  <div className="flex gap-3 justify-center">
-                    <button
-                      onClick={handleRetry}
-                      className="px-6 py-3 rounded-full font-medium bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
-                    >
-                      Try Again (+15 XP earned)
-                    </button>
-                    <button
-                      onClick={handleViewSolution}
-                      className="px-6 py-3 rounded-full font-medium bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                    >
-                      View Solution
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center">
-                  <div className="text-6xl mb-4">🤷</div>
-                  <h2 className="text-2xl font-bold text-gray-600 dark:text-gray-400 mb-2">
-                    Not Quite
-                  </h2>
-                  <p className="text-gray-600 dark:text-gray-400 mb-4">
-                    Think about what you learned in the lesson.
-                  </p>
-                  {evaluationResult.hint && (
-                    <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 mb-4">
-                      <p className="text-sm text-blue-800 dark:text-blue-300">
-                        💡 Hint: {evaluationResult.hint}
-                      </p>
-                    </div>
-                  )}
-                  <div className="flex gap-3 justify-center">
-                    <button
-                      onClick={handleRetry}
-                      className="px-6 py-3 rounded-full font-medium bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
-                    >
-                      Try Again (+5 XP earned)
-                    </button>
-                    <button
-                      onClick={handleViewSolution}
-                      className="px-6 py-3 rounded-full font-medium bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                    >
-                      View Solution
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+  if (state.currentState === STATE.INVESTIGATE) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-indigo-50 dark:from-gray-900 dark:via-gray-800 dark:to-purple-950">
+        <ClueInvestigation
+          clues={state.mystery?.clues || []}
+          slides={slides}
+          currentClueIndex={state.currentClueIndex}
+          isTtsPlaying={isPlaying}
+          onNextClue={handleNextClue}
+          onReadyToSolve={handleReadyToSolve}
+        />
+        <button
+          onClick={handleBack}
+          className="fixed top-4 left-4 px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+        >
+          ← Back
+        </button>
       </div>
-    </div>
-  )
+    )
+  }
+
+  if (state.currentState === STATE.SOLVE || state.currentState === STATE.EVALUATING) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-indigo-50 dark:from-gray-900 dark:via-gray-800 dark:to-purple-950 px-6 py-12">
+        <div className="max-w-3xl mx-auto">
+          <TheorySolver
+            topicName={topicName}
+            expectedConcepts={state.mystery?.expectedConcepts || []}
+            theoryOptions={state.mystery?.theoryOptions || null}
+            fillBlanks={state.mystery?.fillBlanks || null}
+            clues={state.mystery?.clues?.map(c => c.text) || []}
+            evidenceConnections={state.mystery?.evidenceConnections || null}
+            onSubmit={handleSubmitAnswer}
+            disabled={state.currentState === STATE.EVALUATING}
+          />
+        </div>
+        <button
+          onClick={handleBack}
+          className="fixed top-4 left-4 px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+        >
+          ← Back
+        </button>
+      </div>
+    )
+  }
+
+  if (state.currentState === STATE.REVEAL) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-indigo-50 dark:from-gray-900 dark:via-gray-800 dark:to-purple-950">
+        <SolutionReveal
+          solutionExplanation={state.mystery?.solutionExplanation}
+          revealNarration={state.mystery?.revealNarration}
+          sceneImage={state.sceneImage}
+          evaluationResult={state.evaluationResult}
+          onCelebrate={handleCelebrate}
+        />
+      </div>
+    )
+  }
+
+  return null
 }

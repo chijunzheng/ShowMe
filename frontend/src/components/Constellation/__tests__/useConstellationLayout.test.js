@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { renderHook } from '@testing-library/react'
-import useConstellationLayout from '../useConstellationLayout'
+import useConstellationLayout, { getAdaptiveLayoutConfig } from '../useConstellationLayout'
 
 describe('useConstellationLayout', () => {
 
@@ -198,6 +198,17 @@ describe('useConstellationLayout', () => {
 
       expect(result.current.size).toBe(1)
       expect(result.current.get('n1')).toBeDefined()
+    })
+  })
+
+  describe('adaptive spacing', () => {
+    it('scales repulsion and cluster repulsion with counts', () => {
+      const base = getAdaptiveLayoutConfig(4, 1)
+      const scaled = getAdaptiveLayoutConfig(40, 4)
+
+      expect(scaled.repulsion).toBeGreaterThan(base.repulsion)
+      expect(scaled.clusterRepulsion).toBeGreaterThan(base.clusterRepulsion)
+      expect(scaled.centerGravity).toBeLessThan(base.centerGravity)
     })
   })
 })

@@ -20,6 +20,7 @@ import {
   loadGraphFromStorage,
   saveGraphToStorage,
   determineCategory,
+  createInitialClusters,
 } from '../utils/graphMigration'
 import { getExplorerRank } from '../components/ExplorerRank/explorerRankUtils'
 import logger from '../utils/logger'
@@ -54,6 +55,16 @@ const MIN_NODES_FOR_GAPS = 3
 const MIN_NODES_FOR_CLUSTER = 2
 
 /**
+ * Recluster debounce in milliseconds
+ */
+export const RECLUSTER_DEBOUNCE_MS = 2500
+
+/**
+ * Node count limit for auto reclustering
+ */
+export const SMALL_GRAPH_RECLUSTER_LIMIT = 40
+
+/**
  * Cluster configuration for category-based grouping
  */
 const CLUSTER_CONFIG = {
@@ -66,6 +77,7 @@ const CLUSTER_CONFIG = {
   technology: { icon: '\u{1F4BB}', color: '#6366F1' }, // laptop
   astronomy: { icon: '\u{1F30C}', color: '#7C3AED' }, // milky way
   nature: { icon: '\u{1F33F}', color: '#22C55E' }, // herb
+  'marine biology': { icon: '\u{1F433}', color: '#0EA5E9' }, // whale
   civilization: { icon: '\u{1F3DB}\u{FE0F}', color: '#F59E0B' }, // classical building
   arcane: { icon: '\u{1F52E}', color: '#8B5CF6' }, // crystal ball
   general: { icon: '\u{1F4A1}', color: '#64748B' }, // light bulb
@@ -90,6 +102,43 @@ function generateId(prefix = 'id') {
 // ============================================================================
 
 /**
+ * Filter out gaps that do not have any valid connections.
+ *
+ * @param {Array} gaps
+ * @returns {Array}
+ */
+export function filterGapsWithConnections(gaps) {
+  return (gaps || []).filter((gap) => {
+    const connectsTo = Array.isArray(gap?.connectsTo) ? gap.connectsTo : []
+    const relatedIds = Array.isArray(gap?.relatedNodeIds) ? gap.relatedNodeIds : []
+    return connectsTo.length > 0 || relatedIds.length > 0
+  })
+}
+
+/**
+ * Decide whether to auto recluster based on size and debounce.
+ *
+ * @param {Object} params
+ * @param {number} params.nodeCount
+ * @param {number} params.lastReclusterAt
+ * @param {number} params.now
+ * @param {number} params.limit
+ * @param {number} params.debounceMs
+ * @returns {boolean}
+ */
+export function shouldAutoRecluster({
+  nodeCount,
+  lastReclusterAt,
+  now,
+  limit = SMALL_GRAPH_RECLUSTER_LIMIT,
+  debounceMs = RECLUSTER_DEBOUNCE_MS,
+}) {
+  if (nodeCount > limit) return false
+  if (now - lastReclusterAt < debounceMs) return false
+  return true
+}
+
+/**
  * Get cluster icon for a category
  *
  * @param {string} category - Category name
@@ -109,6 +158,97 @@ function getClusterIcon(category) {
 function getClusterColor(category) {
   const config = CLUSTER_CONFIG[category?.toLowerCase()]
   return config?.color || CLUSTER_CONFIG.general.color
+}
+
+/**
+ * Normalize a topic name for fuzzy matching.
+ *
+ * @param {string} name - Topic name
+ * @returns {string} Normalized name
+ */
+function normalizeTopicName(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+
+/**
+ * Normalize a category into a consistent cluster id
+ *
+ * @param {string} category - Category name
+ * @returns {string} Cluster id
+ */
+function toClusterId(category) {
+  const safeCategory = String(category || 'general')
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+  return `cluster_${safeCategory}`
+}
+
+/**
+ * Format category as a human-friendly cluster name
+ *
+ * @param {string} category - Category name
+ * @returns {string} Display name
+ */
+function formatClusterName(category) {
+  if (!category) return 'General'
+  return String(category)
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
+/**
+ * Normalize graph categories (e.g., for new mappings like marine biology)
+ *
+ * @param {Object} graphData - Graph data from storage
+ * @returns {Object} Normalized graph data
+ */
+function normalizeGraphCategories(graphData) {
+  if (!graphData || !Array.isArray(graphData.nodes)) {
+    return graphData
+  }
+
+  let changed = false
+
+  const updatedNodes = graphData.nodes.map((node) => {
+    if (!node) return node
+
+    const rawCategory = typeof node.category === 'string'
+      ? node.category.toLowerCase()
+      : ''
+    const hasKnownCategory = Boolean(CLUSTER_CONFIG[rawCategory])
+    const shouldRecompute = !rawCategory || !hasKnownCategory || rawCategory === 'general' || rawCategory === 'nature'
+
+    if (!shouldRecompute) {
+      return node
+    }
+
+    const derived = determineCategory({ name: node.name, topicName: node.name })
+    if (derived && derived !== rawCategory) {
+      changed = true
+      return { ...node, category: derived }
+    }
+
+    if (!rawCategory && derived) {
+      changed = true
+      return { ...node, category: derived }
+    }
+
+    return node
+  })
+
+  if (!changed) {
+    return graphData
+  }
+
+  return {
+    ...graphData,
+    nodes: updatedNodes,
+    clusters: createInitialClusters(updatedNodes),
+  }
 }
 
 /**
@@ -197,6 +337,9 @@ export default function useKnowledgeGraph() {
   // Debounced save timer
   const saveTimerRef = useRef(null)
 
+  // Track last recluster to avoid thrashing
+  const lastReclusterAtRef = useRef(0)
+
   // ============================================================================
   // STORAGE OPERATIONS
   // ============================================================================
@@ -254,10 +397,11 @@ export default function useKnowledgeGraph() {
           })
 
           // Recalculate explorer rank based on current node count
-          const explorerRank = getExplorerRank(existingGraph.nodes.length)
+          const normalizedGraph = normalizeGraphCategories(existingGraph)
+          const explorerRank = getExplorerRank(normalizedGraph.nodes.length)
 
           setGraph({
-            ...existingGraph,
+            ...normalizedGraph,
             explorerRank,
           })
         } else {
@@ -377,6 +521,45 @@ export default function useKnowledgeGraph() {
   // ============================================================================
 
   /**
+   * Re-cluster topics using a provided node list.
+   *
+   * @param {Array} nodesToCluster
+   */
+  const reclusterWithNodes = useCallback(async (nodesToCluster) => {
+    if (!nodesToCluster || nodesToCluster.length < MIN_NODES_FOR_CLUSTER) {
+      return
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/api/graph/cluster`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodes: nodesToCluster }),
+      })
+
+      if (!response.ok) {
+        logger.warn('STORAGE', 'Cluster API returned error', {
+          status: response.status,
+        })
+        return
+      }
+
+      const data = await response.json()
+
+      setGraph((prev) => ({
+        ...prev,
+        clusters: data.clusters || [],
+      }))
+
+      logger.info('STORAGE', 'Reclustered topics', {
+        clustersCount: data.clusters?.length || 0,
+      })
+    } catch (err) {
+      logger.warn('STORAGE', 'Recluster failed', { error: err.message })
+    }
+  }, [])
+
+  /**
    * Add a new topic node to the graph
    * Discovers relationships with existing topics via API
    *
@@ -388,8 +571,9 @@ export default function useKnowledgeGraph() {
       const { id, name, concepts = [], slides = [] } = topicData
 
       // Check if topic already exists (case-insensitive name match)
+      const normalizedName = normalizeTopicName(name)
       const existing = graph.nodes.find(
-        (n) => n.name.toLowerCase() === name.toLowerCase()
+        (n) => normalizeTopicName(n.name) === normalizedName
       )
       if (existing) {
         logger.debug('STORAGE', 'Topic already exists', { name })
@@ -444,10 +628,8 @@ export default function useKnowledgeGraph() {
           updatedClusters = [
             ...updatedClusters,
             {
-              id: `cluster_${clusterCategory}`,
-              name:
-                clusterCategory.charAt(0).toUpperCase() +
-                clusterCategory.slice(1),
+              id: toClusterId(clusterCategory),
+              name: formatClusterName(clusterCategory),
               icon: getClusterIcon(clusterCategory),
               nodeIds: [newNode.id],
               color: getClusterColor(clusterCategory),
@@ -473,10 +655,22 @@ export default function useKnowledgeGraph() {
         }
       })
 
+      const now = Date.now()
+      const nextNodeCount = graph.nodes.length + 1
+      if (shouldAutoRecluster({
+        nodeCount: nextNodeCount,
+        lastReclusterAt: lastReclusterAtRef.current,
+        now,
+      })) {
+        lastReclusterAtRef.current = now
+        void reclusterWithNodes([...graph.nodes, newNode])
+      }
+
       return newNode
     },
-    [graph.nodes, discoverRelationships]
+    [graph.nodes, discoverRelationships, reclusterWithNodes]
   )
+
 
   /**
    * Update mastery level for a topic after quiz
@@ -560,6 +754,102 @@ export default function useKnowledgeGraph() {
   }, [])
 
   /**
+   * Resolve a suggested gap after the topic is generated.
+   * Removes matching gaps and connects the new node to suggested sources.
+   *
+   * @param {Object} params
+   * @param {string} params.topicName - Newly created topic name
+   * @param {string} params.suggestedName - Suggested topic name from gap
+   * @param {string} params.nodeId - Created node id
+   * @param {string[]} params.connectsTo - Node IDs to connect
+   */
+  const resolveSuggestedGap = useCallback((params) => {
+    const {
+      topicName,
+      suggestedName,
+      nodeId,
+      connectsTo = [],
+    } = params || {}
+    if (!topicName && !suggestedName) return
+
+    const normalizedNames = [topicName, suggestedName]
+      .filter(Boolean)
+      .map((name) => normalizeTopicName(name))
+
+    setGraph((prev) => {
+      const updatedGaps = prev.gaps.filter((gap) => {
+        const normalizedGap = normalizeTopicName(gap.suggestedTopic)
+        return !normalizedNames.includes(normalizedGap)
+      })
+
+      if (!Array.isArray(connectsTo) || connectsTo.length === 0) {
+        return {
+          ...prev,
+          gaps: updatedGaps,
+        }
+      }
+
+      const targetNode =
+        (nodeId && prev.nodes.find((n) => n.id === nodeId)) ||
+        prev.nodes.find((n) =>
+          normalizedNames.includes(normalizeTopicName(n.name))
+        )
+
+      if (!targetNode) {
+        return {
+          ...prev,
+          gaps: updatedGaps,
+        }
+      }
+
+      const updatedNodes = prev.nodes.map((node) => {
+        if (node.id !== targetNode.id) return node
+        const nextFollowUps = Array.isArray(node.followUps)
+          ? node.followUps
+          : []
+        const nextSet = new Set(nextFollowUps)
+        connectsTo.forEach((sourceId) => {
+          if (sourceId && sourceId !== node.id) {
+            nextSet.add(sourceId)
+          }
+        })
+        return {
+          ...node,
+          followUps: Array.from(nextSet),
+        }
+      })
+
+      const updatedEdges = [...prev.edges]
+      connectsTo.forEach((sourceId) => {
+        if (!sourceId || sourceId === targetNode.id) return
+        const exists = updatedEdges.some(
+          (edge) =>
+            (edge.from === sourceId && edge.to === targetNode.id) ||
+            (edge.from === targetNode.id && edge.to === sourceId)
+        )
+        if (!exists) {
+          updatedEdges.push({
+            id: `edge_${sourceId}_${targetNode.id}`,
+            from: sourceId,
+            to: targetNode.id,
+            type: 'extends',
+            strength: 0.8,
+            discovered: true,
+            explanation: 'Suggested gap connection',
+          })
+        }
+      })
+
+      return {
+        ...prev,
+        gaps: updatedGaps,
+        nodes: updatedNodes,
+        edges: updatedEdges,
+      }
+    })
+  }, [])
+
+  /**
    * Delete a topic node from the graph
    * Removes the node, all connected edges, and updates clusters
    *
@@ -601,8 +891,13 @@ export default function useKnowledgeGraph() {
       })
 
       // Filter gaps that reference the deleted node
-      const updatedGaps = prev.gaps.filter(
-        (gap) => gap.relatedNodeIds?.every((id) => id !== nodeId) !== false
+      const gapRetainsNode = (ids) => {
+        if (!Array.isArray(ids) || ids.length === 0) return true
+        return ids.every((id) => id !== nodeId)
+      }
+
+      const updatedGaps = prev.gaps.filter((gap) =>
+        gapRetainsNode(gap.relatedNodeIds) && gapRetainsNode(gap.connectsTo)
       )
 
       return {
@@ -668,8 +963,13 @@ export default function useKnowledgeGraph() {
         .filter((cluster) => cluster.nodeIds.length > 0)
 
       // Clean up gaps that reference deleted nodes
+      const gapWithinNodes = (ids) => {
+        if (!Array.isArray(ids) || ids.length === 0) return true
+        return ids.every((id) => validNodeIds.has(id))
+      }
+
       const updatedGaps = prev.gaps.filter((gap) =>
-        gap.relatedNodeIds?.every((id) => validNodeIds.has(id))
+        gapWithinNodes(gap.relatedNodeIds) && gapWithinNodes(gap.connectsTo)
       )
 
       // Clean nodeId references from remaining nodes' followUps arrays
@@ -733,7 +1033,7 @@ export default function useKnowledgeGraph() {
         current: graph.nodes.length,
         required: MIN_NODES_FOR_GAPS,
       })
-      return
+      return []
     }
 
     try {
@@ -747,21 +1047,37 @@ export default function useKnowledgeGraph() {
         logger.warn('STORAGE', 'Gap analysis API returned error', {
           status: response.status,
         })
-        return
+        return []
       }
 
       const data = await response.json()
+      const existingNames = new Set(
+        graph.nodes.map((node) => normalizeTopicName(node.name))
+      )
+      const rawGaps = data.gaps || []
+      const dedupedGaps = rawGaps.filter((gap) => {
+        const normalized = normalizeTopicName(gap.suggestedTopic)
+        return normalized && !existingNames.has(normalized)
+      })
+      const filteredGaps = filterGapsWithConnections(dedupedGaps)
+      const skippedDuplicates = rawGaps.length - dedupedGaps.length
+      const skippedDisconnected = dedupedGaps.length - filteredGaps.length
 
       setGraph((prev) => ({
         ...prev,
-        gaps: data.gaps || [],
+        gaps: filteredGaps,
       }))
 
       logger.info('STORAGE', 'Refreshed knowledge gaps', {
-        gapsCount: data.gaps?.length || 0,
+        gapsCount: filteredGaps.length,
+        skippedDuplicates,
+        skippedDisconnected,
       })
+
+      return filteredGaps
     } catch (err) {
       logger.warn('STORAGE', 'Gap refresh failed', { error: err.message })
+      return []
     }
   }, [graph])
 
@@ -886,6 +1202,7 @@ export default function useKnowledgeGraph() {
     deleteTopic,
     deleteTopicByName,
     reconcileWithTopics,
+    resolveSuggestedGap,
 
     // Query methods
     getNode,

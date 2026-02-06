@@ -53,9 +53,9 @@ describe('StatsBar', () => {
       render(<StatsBar {...props} />)
 
       expect(screen.getByTestId('stat-streak')).toBeInTheDocument()
-      expect(screen.getByTestId('stat-xp')).toBeInTheDocument()
       expect(screen.getByTestId('stat-topics')).toBeInTheDocument()
       expect(screen.getByTestId('stat-rank')).toBeInTheDocument()
+      expect(screen.getByTestId('stat-trophies')).toBeInTheDocument()
     })
   })
 
@@ -108,49 +108,45 @@ describe('StatsBar', () => {
   })
 
   describe('XP display', () => {
-    it('displays total XP', () => {
+    it('displays total XP inside the rank stat', () => {
       const props = createDefaultProps({ totalXP: 1250 })
       render(<StatsBar {...props} />)
 
-      expect(screen.getByText(/1,?250/)).toBeInTheDocument()
+      const rankStat = screen.getByTestId('stat-rank')
+      expect(rankStat.textContent).toMatch(/1,?250/)
     })
 
     it('displays XP label', () => {
       const props = createDefaultProps({ totalXP: 500 })
       render(<StatsBar {...props} />)
 
-      expect(screen.getByText(/xp/i)).toBeInTheDocument()
+      const rankStat = screen.getByTestId('stat-rank')
+      expect(rankStat.textContent).toMatch(/xp/i)
     })
 
     it('formats large XP numbers with commas', () => {
       const props = createDefaultProps({ totalXP: 12500 })
       render(<StatsBar {...props} />)
 
-      expect(screen.getByText(/12,500/)).toBeInTheDocument()
+      const rankStat = screen.getByTestId('stat-rank')
+      expect(rankStat.textContent).toMatch(/12,500/)
     })
 
     it('formats very large XP with K suffix', () => {
       const props = createDefaultProps({ totalXP: 125000 })
       render(<StatsBar {...props} />)
 
+      const rankStat = screen.getByTestId('stat-rank')
       // Should show "125K" or "125,000"
-      expect(screen.getByText(/125[,K]/)).toBeInTheDocument()
+      expect(rankStat.textContent).toMatch(/125[,K]/)
     })
 
     it('shows 0 for no XP', () => {
       const props = createDefaultProps({ totalXP: 0 })
       render(<StatsBar {...props} />)
 
-      const xpStat = screen.getByTestId('stat-xp')
-      expect(xpStat.textContent).toMatch(/0/)
-    })
-
-    it('shows star/sparkle icon for XP', () => {
-      const props = createDefaultProps({ totalXP: 100 })
-      render(<StatsBar {...props} />)
-
-      const xpStat = screen.getByTestId('stat-xp')
-      expect(xpStat.textContent).toMatch(/\u2b50|\u2728|star|sparkle/)
+      const rankStat = screen.getByTestId('stat-rank')
+      expect(rankStat.textContent).toMatch(/0\s*XP/i)
     })
   })
 
@@ -280,8 +276,8 @@ describe('StatsBar', () => {
 
       rerender(<StatsBar {...props} totalXP={150} />)
 
-      const xpStat = screen.getByTestId('stat-xp')
-      expect(xpStat.className).toMatch(/animate|pulse|pop/)
+      const rankStat = screen.getByTestId('stat-rank')
+      expect(rankStat.className).toMatch(/animate|pulse|pop/)
     })
 
     it('animates streak increase', async () => {
@@ -375,8 +371,8 @@ describe('StatsBar', () => {
       render(<StatsBar {...props} />)
 
       // XP should be in a single element, not split
-      const xpStat = screen.getByTestId('stat-xp')
-      expect(xpStat.textContent).toMatch(/1,?250/)
+      const rankStat = screen.getByTestId('stat-rank')
+      expect(rankStat.textContent).toMatch(/1,?250/)
     })
   })
 
@@ -437,15 +433,14 @@ describe('StatsBar', () => {
       expect(statsBar.className).toMatch(/border-2|shadow/)
     })
 
-    it('hides labels in compact mode', () => {
+    it('shows labels in compact mode', () => {
       const props = createDefaultProps({ compact: true, streak: 5 })
       render(<StatsBar {...props} />)
 
-      // Should show number but hide label text in compact
+      // Labels like "Streak", "XP", "Topics" should appear
       expect(screen.getByText('5')).toBeInTheDocument()
-      // Labels like "Streak", "XP", "Topics" should not appear
-      expect(screen.queryByText('Streak')).not.toBeInTheDocument()
-      expect(screen.queryByText('XP')).not.toBeInTheDocument()
+      expect(screen.getByText('Streak')).toBeInTheDocument()
+      expect(screen.getByText(/XP/i)).toBeInTheDocument()
     })
 
     it('shows abbreviated rank title in compact mode', () => {

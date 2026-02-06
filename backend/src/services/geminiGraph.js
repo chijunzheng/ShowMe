@@ -9,7 +9,7 @@
  */
 
 import { GoogleGenAI } from '@google/genai'
-import { extractJSON } from '../utils/json.js'
+import { extractJSON, extractJSONSimple } from '../utils/json.js'
 import logger from '../utils/logger.js'
 
 // Model selection (matches gemini.js pattern)
@@ -18,6 +18,12 @@ const FAST_MODEL = 'gemini-2.5-flash-lite'
 
 // Reuse AI client pattern from gemini.js
 let aiClient = null
+
+function normalizeTopicName(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
 
 /**
  * Get or initialize the Gemini AI client
@@ -101,6 +107,104 @@ function completeJSONStructure(jsonStr) {
 }
 
 /**
+ * Normalize raw newlines inside JSON strings into escaped sequences.
+ * This prevents JSON.parse from failing on literal line breaks.
+ * @param {string} jsonStr
+ * @returns {string}
+ */
+function normalizeNewlinesInStrings(jsonStr) {
+  let result = ''
+  let inString = false
+  let escapeNext = false
+
+  for (let i = 0; i < jsonStr.length; i++) {
+    const char = jsonStr[i]
+
+    if (escapeNext) {
+      result += char
+      escapeNext = false
+      continue
+    }
+
+    if (char === '\\' && inString) {
+      result += char
+      escapeNext = true
+      continue
+    }
+
+    if (char === '"') {
+      inString = !inString
+      result += char
+      continue
+    }
+
+    if (inString && (char === '\n' || char === '\r')) {
+      result += '\\n'
+      // Skip paired \r\n
+      if (char === '\r' && jsonStr[i + 1] === '\n') {
+        i += 1
+      }
+      continue
+    }
+
+    result += char
+  }
+
+  return result
+}
+
+/**
+ * Insert missing commas between JSON values when LLM output omits separators.
+ * This is a heuristic to salvage near-valid JSON.
+ * @param {string} jsonStr
+ * @returns {string}
+ */
+function insertMissingCommas(jsonStr) {
+  let result = ''
+  let inString = false
+  let escapeNext = false
+  let lastSignificant = ''
+
+  for (let i = 0; i < jsonStr.length; i++) {
+    const char = jsonStr[i]
+
+    if (escapeNext) {
+      result += char
+      escapeNext = false
+      continue
+    }
+
+    if (char === '\\' && inString) {
+      result += char
+      escapeNext = true
+      continue
+    }
+
+    if (char === '"') {
+      if (!inString) {
+        if (lastSignificant && !['{', '[', ',', ':'].includes(lastSignificant)) {
+          result += ','
+        }
+      }
+      inString = !inString
+      result += char
+      if (!inString) {
+        lastSignificant = '"'
+      }
+      continue
+    }
+
+    if (!inString && !/\s/.test(char)) {
+      lastSignificant = char
+    }
+
+    result += char
+  }
+
+  return result
+}
+
+/**
  * Repair common JSON issues from LLM output
  * @param {string} jsonStr - JSON string that may have issues
  * @returns {string} Repaired JSON string
@@ -115,12 +219,18 @@ function repairJSON(jsonStr) {
   repaired = repaired.replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"')
   repaired = repaired.replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'")
 
-  // Remove trailing commas before ] or }
-  repaired = repaired.replace(/,(\s*[}\]])/g, '$1')
-
   // Remove JavaScript-style comments
   repaired = repaired.replace(/\/\/[^\n]*/g, '')
   repaired = repaired.replace(/\/\*[\s\S]*?\*\//g, '')
+
+  // Normalize literal newlines inside strings
+  repaired = normalizeNewlinesInStrings(repaired)
+
+  // Insert missing commas between values
+  repaired = insertMissingCommas(repaired)
+
+  // Remove trailing commas before ] or }
+  repaired = repaired.replace(/,(\s*[}\]])/g, '$1')
 
   // Complete truncated JSON by adding missing brackets/braces
   repaired = completeJSONStructure(repaired)
@@ -134,13 +244,21 @@ function repairJSON(jsonStr) {
  * @returns {Object} Parsed JSON object or empty object on failure
  */
 function safeParseJSON(text) {
-  try {
-    const jsonStr = repairJSON(extractJSON(text))
-    return JSON.parse(jsonStr)
-  } catch (error) {
-    logger.warn('GEMINI_GRAPH', 'JSON parse failed', { error: error.message })
-    return {}
+  const attempts = [
+    () => repairJSON(extractJSON(text)),
+    () => repairJSON(extractJSONSimple(text)),
+  ]
+
+  for (const getJson of attempts) {
+    try {
+      const jsonStr = getJson()
+      return JSON.parse(jsonStr)
+    } catch (error) {
+      logger.warn('GEMINI_GRAPH', 'JSON parse failed', { error: error.message })
+    }
   }
+
+  return {}
 }
 
 /**
@@ -347,7 +465,8 @@ export async function identifyKnowledgeGaps(graph) {
     return { gaps: [] }
   }
 
-  const prompt = `You are an educational advisor analyzing a student's knowledge map.
+  const existingTopicNames = graph.nodes.map((n) => n.name).slice(0, 40)
+  const basePrompt = `You are an educational advisor analyzing a student's knowledge map.
 
 LEARNED TOPICS (${graph.nodes.length} total):
 ${graph.nodes.slice(0, 30).map(n => `- ${n.name} (mastery: ${Math.round((n.mastery || 0) * 100)}%)`).join('\n')}
@@ -355,7 +474,7 @@ ${graph.nodes.slice(0, 30).map(n => `- ${n.name} (mastery: ${Math.round((n.maste
 EXISTING CLUSTERS:
 ${(graph.clusters || []).map(c => `- ${c.name}: ${c.nodeIds?.length || 0} topics`).join('\n') || 'No clusters yet'}
 
-Identify 3-5 knowledge gaps - topics the student should learn next. For each gap:
+Identify 6 knowledge gaps - topics the student should learn next. Ensure the suggestions span at least 2 different categories/clusters from the student's existing knowledge and avoid duplicating any existing topic names. For each gap:
 1. Suggest a specific topic name
 2. Classify the gap type:
    - "bridge": Connects two existing knowledge areas
@@ -363,6 +482,9 @@ Identify 3-5 knowledge gaps - topics the student should learn next. For each gap
    - "unlock": Opens a new valuable area of knowledge
 3. Explain reasoning
 4. Write an intriguing "curiosity hook" - a question that makes them want to learn it
+
+Existing topics to avoid re-suggesting:
+${existingTopicNames.map((name) => `- ${name}`).join('\n')}
 
 Output JSON:
 {
@@ -377,14 +499,25 @@ Output JSON:
   ]
 }
 
-Make suggestions interesting and relevant to their existing knowledge.`
+Make suggestions interesting and relevant to their existing knowledge.
+Keep reasoning and curiosity hook to a single short sentence each (max 120 characters).
+
+IMPORTANT:
+- Return exactly 6 gaps.
+- Each gap must include at least 1 valid entry in connectsTo.
+- connectsTo must only include topics from the list above.
+- Ensure at least 2 different categories are represented.`
+
+  const strictPrompt = `${basePrompt}
+
+IMPORTANT: Output ONLY valid JSON. Do not include explanations or markdown.`
 
   try {
     logger.time('GEMINI_GRAPH', 'identify-knowledge-gaps')
 
     const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: prompt,
+      model: FAST_MODEL,
+      contents: basePrompt,
       config: {
         temperature: 0.7,
         maxOutputTokens: 1024,
@@ -395,18 +528,97 @@ Make suggestions interesting and relevant to their existing knowledge.`
     logger.timeEnd('GEMINI_GRAPH', 'identify-knowledge-gaps')
 
     const text = response.text || ''
-    const result = safeParseJSON(text)
+    let result = safeParseJSON(text)
+    let didRetry = false
 
-    const gaps = (result.gaps || []).map((gap, index) => ({
+    const existingNames = new Set(
+      graph.nodes.map((node) => normalizeTopicName(node.name))
+    )
+    const nodeById = new Map(graph.nodes.map((node) => [node.id, node]))
+    const mapConnectIds = (gap) => {
+      const names = Array.isArray(gap.connectsTo) ? gap.connectsTo : []
+      return names
+        .map((name) =>
+          graph.nodes.find(
+            (node) => normalizeTopicName(node.name) === normalizeTopicName(name)
+          )?.id
+        )
+        .filter(Boolean)
+    }
+    const gapsArray = Array.isArray(result.gaps) ? result.gaps : []
+    const filteredInitial = gapsArray.filter((gap) => {
+      const normalized = normalizeTopicName(gap.suggestedTopic)
+      return normalized && !existingNames.has(normalized)
+    })
+    const initialMapped = filteredInitial.map((gap) => ({
+      gap,
+      connectsTo: mapConnectIds(gap),
+    }))
+    const categories = new Set(
+      initialMapped
+        .flatMap((item) => item.connectsTo)
+        .map((id) => nodeById.get(id)?.category || null)
+        .filter(Boolean)
+    )
+    const hasInvalidConnects = initialMapped.some((item) => item.connectsTo.length === 0)
+
+    if (filteredInitial.length < 6 || categories.size < 2 || hasInvalidConnects) {
+      logger.warn('GEMINI_GRAPH', 'Gap parse insufficient, retrying with strict prompt', {
+        gapCount: filteredInitial.length,
+        categoryCount: categories.size,
+        invalidConnects: hasInvalidConnects,
+      })
+      didRetry = true
+
+      const retryResponse = await ai.models.generateContent({
+        model: FAST_MODEL,
+        contents: strictPrompt,
+        config: {
+          temperature: 0.2,
+          maxOutputTokens: 1024,
+          responseMimeType: 'application/json'
+        }
+      })
+
+      const retryText = retryResponse.text || ''
+      result = safeParseJSON(retryText)
+    }
+
+    const retryGaps = Array.isArray(result.gaps) ? result.gaps : []
+    const filteredRetry = retryGaps.filter((gap) => {
+      const normalized = normalizeTopicName(gap.suggestedTopic)
+      return normalized && !existingNames.has(normalized)
+    })
+    const retryMapped = filteredRetry.map((gap) => ({
+      gap,
+      connectsTo: mapConnectIds(gap),
+    }))
+    const retryCategories = new Set(
+      retryMapped
+        .flatMap((item) => item.connectsTo)
+        .map((id) => nodeById.get(id)?.category || null)
+        .filter(Boolean)
+    )
+    const retryInvalidConnects = retryMapped.some((item) => item.connectsTo.length === 0)
+
+    if (didRetry && (filteredRetry.length < 6 || retryCategories.size < 2 || retryInvalidConnects)) {
+      logger.warn('GEMINI_GRAPH', 'Gap parse insufficient after retry', {
+        gapCount: filteredRetry.length,
+        categoryCount: retryCategories.size,
+        invalidConnects: retryInvalidConnects,
+      })
+    }
+
+    const finalMapped = didRetry ? retryMapped : initialMapped
+    const gaps = finalMapped
+      .filter((item) => item.connectsTo.length > 0)
+      .map((item, index) => ({
       id: `gap_${Date.now()}_${index}`,
-      suggestedTopic: gap.suggestedTopic,
-      type: gap.type || 'deepen',
-      connectsTo: (gap.connectsTo || []).map(name => {
-        const node = graph.nodes.find(n => n.name.toLowerCase() === name.toLowerCase())
-        return node?.id
-      }).filter(Boolean),
-      reasoning: gap.reasoning || '',
-      curiosityHook: gap.curiosityHook || `Learn about ${gap.suggestedTopic}!`
+      suggestedTopic: item.gap.suggestedTopic,
+      type: item.gap.type || 'deepen',
+      connectsTo: item.connectsTo,
+      reasoning: item.gap.reasoning || '',
+      curiosityHook: item.gap.curiosityHook || `Learn about ${item.gap.suggestedTopic}!`
     }))
 
     logger.info('GEMINI_GRAPH', 'Identified knowledge gaps', { gapCount: gaps.length })

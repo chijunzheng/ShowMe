@@ -146,8 +146,10 @@ function App() {
     getNode: getGraphNode,
     getNodeByName: getGraphNodeByName,
     topicCount: graphTopicCount,
+    refreshGaps: refreshGraphGaps,
     deleteTopicByName,
     reconcileWithTopics,
+    resolveSuggestedGap,
   } = useKnowledgeGraph()
 
   const [isWorldRegenerating, setIsWorldRegenerating] = useState(false)
@@ -2815,17 +2817,28 @@ function App() {
     if (!topicData?.name) return
 
     try {
-      await addTopicToGraph({
+      const createdNode = await addTopicToGraph({
         id: topicData.id,
         name: topicData.name,
         concepts: topicData.concepts || [],
         slides: topicData.slides || [],
       })
+
+      if (topicData.suggestedTopicMeta?.name) {
+        const { name, connectsTo } = topicData.suggestedTopicMeta
+        resolveSuggestedGap({
+          nodeId: createdNode?.id,
+          topicName: createdNode?.name,
+          suggestedName: name,
+          connectsTo,
+        })
+      }
+
       logger.info('GRAPH', 'Added topic to knowledge graph', { topicName: topicData.name })
     } catch (error) {
       logger.warn('GRAPH', 'Failed to add topic to knowledge graph', { error: error.message })
     }
-  }, [addTopicToGraph])
+  }, [addTopicToGraph, resolveSuggestedGap])
 
   // Use the question handler hook
   const { handleQuestion, handleQuestionRef: questionHandlerRef } = useQuestionHandler({
@@ -3545,10 +3558,27 @@ function App() {
               streak={{ current: userProgress?.streakCount || 0, todayCompleted: false }}
               trophies={earnedTrophies}
               trophiesLoading={isUserProgressLoading}
-              onSelectSuggestedTopic={(topicName) => {
+              onDiscoverSuggestions={refreshGraphGaps}
+              onSelectSuggestedTopic={(topicName, options = {}) => {
+                const {
+                  explanationLevel,
+                  source = 'progress_suggestion',
+                  gap,
+                } = options || {}
                 setActiveTab('learn')
-                handleQuestion(topicName, { source: 'progress_suggestion' })
+                if (explanationLevel) {
+                  setSelectedLevel(explanationLevel)
+                }
+                handleQuestion(topicName, {
+                  source,
+                  explanationLevel,
+                  suggestedTopicMeta: gap?.suggestedTopic
+                    ? { name: gap.suggestedTopic, connectsTo: gap.connectsTo || [] }
+                    : null,
+                })
               }}
+              selectedLevel={selectedLevel}
+              setSelectedLevel={setSelectedLevel}
               graphNodes={graphNodes}
               graphEdges={graphEdges}
               graphClusters={graphClusters}

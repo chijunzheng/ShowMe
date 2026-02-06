@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import ProgressTab from '../ProgressTab'
 
 vi.mock('../../../hooks/useKnowledgeGraph', () => ({
@@ -51,6 +51,7 @@ describe('ProgressTab trophy row', () => {
       />
     )
 
+    fireEvent.click(screen.getByTestId('stat-trophies'))
     expect(screen.getByText('Curious Mind')).toBeInTheDocument()
   })
 
@@ -73,6 +74,7 @@ describe('ProgressTab trophy row', () => {
       />
     )
 
+    fireEvent.click(screen.getByTestId('stat-trophies'))
     const overlay = screen.getByTestId('progress-overlay')
     const showcase = screen.getByTestId('trophy-showcase')
     expect(overlay).toContainElement(showcase)

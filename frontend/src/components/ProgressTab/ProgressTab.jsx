@@ -6,12 +6,13 @@
  * Tap stars to open TopicActionSheet with practice modes.
  */
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { StatsBar, StatDetailSheet } from '../Dashboard'
 import { getExplorerRank } from '../ExplorerRank/explorerRankUtils'
 import { Constellation } from '../Constellation'
 import useKnowledgeGraph from '../../hooks/useKnowledgeGraph'
 import TopicActionSheet from './TopicActionSheet'
+import SuggestedTopicSheet from './SuggestedTopicSheet'
 
 // ============================================================================
 // MAIN PROGRESS TAB COMPONENT
@@ -28,6 +29,9 @@ import TopicActionSheet from './TopicActionSheet'
  * @param {number|Object} props.streak - Streak count or streak object
  * @param {Array} props.trophies - Earned badge/trophy list
  * @param {Function} props.onSelectSuggestedTopic - Callback when suggested topic selected
+ * @param {Function} props.onDiscoverSuggestions - Callback when discover is triggered
+ * @param {string} props.selectedLevel - Selected explanation level
+ * @param {Function} props.setSelectedLevel - Setter for explanation level
  */
 export default function ProgressTab({
   topics = [],
@@ -37,6 +41,9 @@ export default function ProgressTab({
   streak = 0,
   trophies = [],
   onSelectSuggestedTopic,
+  onDiscoverSuggestions,
+  selectedLevel,
+  setSelectedLevel,
   // Graph props passed from parent (preferred) - uses internal hook as fallback
   graphNodes: graphNodesProp,
   graphEdges: graphEdgesProp,
@@ -47,7 +54,11 @@ export default function ProgressTab({
   // State for action sheet
   const [selectedTopic, setSelectedTopic] = useState(null)
   const [isActionSheetOpen, setIsActionSheetOpen] = useState(false)
+  const [selectedGap, setSelectedGap] = useState(null)
+  const [isSuggestedSheetOpen, setIsSuggestedSheetOpen] = useState(false)
   const [activeStatSheet, setActiveStatSheet] = useState(null)
+  const [isDiscovering, setIsDiscovering] = useState(false)
+  const [discoverMessage, setDiscoverMessage] = useState('')
 
   // Knowledge graph state - use props if provided, otherwise use internal hook
   const internalGraph = useKnowledgeGraph()
@@ -57,6 +68,7 @@ export default function ProgressTab({
   const edges = graphEdgesProp ?? internalGraph.edges
   const clusters = graphClustersProp ?? internalGraph.clusters
   const gaps = graphGapsProp ?? internalGraph.gaps
+  const refreshGaps = onDiscoverSuggestions ?? internalGraph.refreshGaps
 
   const topicList = useMemo(() => (Array.isArray(topics) ? topics : []), [topics])
   const trophyList = useMemo(() => (Array.isArray(trophies) ? trophies : []), [trophies])
@@ -139,10 +151,48 @@ export default function ProgressTab({
    * Suggests learning a new topic that fills a knowledge gap
    */
   const handleGapTap = useCallback((gap) => {
-    if (gap?.suggestedTopic) {
-      onSelectSuggestedTopic?.(gap.suggestedTopic)
+    if (!gap?.suggestedTopic) return
+    setSelectedGap(gap)
+    setIsSuggestedSheetOpen(true)
+  }, [])
+
+  const handleCloseSuggestedSheet = useCallback(() => {
+    setIsSuggestedSheetOpen(false)
+    setSelectedGap(null)
+  }, [])
+
+  const handleStartSuggestedTopic = useCallback((gap, level) => {
+    if (!gap?.suggestedTopic) return
+    handleCloseSuggestedSheet()
+    onSelectSuggestedTopic?.(gap.suggestedTopic, {
+      source: 'progress_suggestion',
+      explanationLevel: level,
+      gap,
+    })
+  }, [handleCloseSuggestedSheet, onSelectSuggestedTopic])
+
+  const handleDiscover = useCallback(async () => {
+    if (isDiscovering || !refreshGaps || topicList.length === 0) return
+
+    setIsDiscovering(true)
+    setDiscoverMessage('')
+    try {
+      const refreshedGaps = await refreshGaps()
+      if (!refreshedGaps || refreshedGaps.length === 0) {
+        setDiscoverMessage('No suggestions yet. Try again after learning more.')
+      }
+    } catch (err) {
+      // Silently fail - discover is non-critical
+    } finally {
+      setIsDiscovering(false)
     }
-  }, [onSelectSuggestedTopic])
+  }, [isDiscovering, refreshGaps, topicList.length])
+
+  useEffect(() => {
+    if (!discoverMessage) return
+    const timer = setTimeout(() => setDiscoverMessage(''), 3500)
+    return () => clearTimeout(timer)
+  }, [discoverMessage])
 
   // Extract streak value
   const streakValue = typeof streak === 'number' ? streak : streak?.current || 0
@@ -151,7 +201,7 @@ export default function ProgressTab({
   const earnedTrophyCount = trophyList.filter(t => !t.locked).length
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-7rem)] md:h-[calc(100dvh-2rem)]">
+    <div className="flex flex-col h-[calc(100dvh-7rem)] md:h-[calc(100dvh-5rem)]">
       {/* Compact stats header */}
       <div className="flex-shrink-0 px-4 pt-4">
         <StatsBar
@@ -175,8 +225,15 @@ export default function ProgressTab({
           onNodeTap={handleNodeTap}
           onEdgeTap={handleEdgeTap}
           onGapTap={handleGapTap}
+          onDiscover={handleDiscover}
+          isDiscovering={isDiscovering}
           className="w-full h-full"
         />
+        {discoverMessage && (
+          <div className="absolute bottom-20 left-6 z-20 rounded-lg bg-slate-900/90 px-3 py-2 text-xs text-white shadow-lg">
+            {discoverMessage}
+          </div>
+        )}
       </div>
 
       {/* Topic Action Sheet (modal overlay) */}
@@ -187,6 +244,16 @@ export default function ProgressTab({
         onReviewSlideshow={handleReviewFromSheet}
         onLaunchMode={handleLaunchFromSheet}
         onSelectRelatedTopic={handleSelectRelatedTopic}
+      />
+
+      <SuggestedTopicSheet
+        gap={selectedGap}
+        isOpen={isSuggestedSheetOpen}
+        onClose={handleCloseSuggestedSheet}
+        onStart={handleStartSuggestedTopic}
+        nodes={nodes}
+        selectedLevel={selectedLevel}
+        setSelectedLevel={setSelectedLevel}
       />
 
       {/* Stat Detail Sheet */}

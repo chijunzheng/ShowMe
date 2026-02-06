@@ -89,6 +89,11 @@ ${slideContent}
 4. 线索应该引导孩子使用他们学到的概念来解开谜题
 5. 确定2-4个关键概念，孩子应该在他们的理论中提到
 6. 提供完整的解决方案说明
+7. 为每条线索添加"narratorText"，使用侦探叙述者的声音（适合TTS朗读）
+8. 提供"theoryOptions"用于多选题模式（4个选项，1个正确答案）
+9. 提供"fillBlanks"用于填空模式（包含空格的句子和单词库）
+10. 提供"evidenceConnections"将线索与概念关联
+11. 提供"revealNarration"用于最终戏剧性揭示（侦探风格）
 
 返回JSON格式：
 {
@@ -96,11 +101,25 @@ ${slideContent}
   "mysterySetup": "谜题场景（2-3句话）",
   "imagePrompt": "用于生成谜题场景图像的英文描述",
   "clues": [
-    {"text": "线索文本", "slideRef": 1},
-    {"text": "线索文本", "slideRef": 2}
+    {"text": "线索文本", "slideRef": 1, "narratorText": "侦探叙述版本的线索"},
+    {"text": "线索文本", "slideRef": 2, "narratorText": "侦探叙述版本的线索"}
   ],
   "expectedConcepts": ["概念1", "概念2"],
-  "solutionExplanation": "完整的解决方案说明"
+  "solutionExplanation": "完整的解决方案说明",
+  "theoryOptions": {
+    "options": ["理论选项1", "理论选项2", "理论选项3", "理论选项4"],
+    "correctIndex": 0
+  },
+  "fillBlanks": {
+    "sentence": "包含___和___的句子",
+    "blanks": ["词1", "词2"],
+    "wordBank": ["词1", "词2", "干扰词1", "干扰词2"]
+  },
+  "evidenceConnections": [
+    {"clueIndex": 0, "concept": "概念1"},
+    {"clueIndex": 1, "concept": "概念2"}
+  ],
+  "revealNarration": "戏剧性的侦探风格揭示叙述"
 }`
       : `You are a children's education expert. Based on the following lesson content, create a detective-style mystery.
 
@@ -115,6 +134,16 @@ Requirements:
 4. Clues should guide the child to use concepts they learned to solve the mystery
 5. Identify 2-4 key concepts the child should mention in their theory
 6. Provide a full solution explanation
+7. Add "narratorText" for each clue using detective narrator voice (suitable for TTS)
+8. Provide "theoryOptions" for multiple-choice mode (4 options, 1 correct)
+9. Provide "fillBlanks" for fill-in-the-blank mode (sentence with blanks and word bank)
+10. Provide "evidenceConnections" linking clues to concepts
+11. Provide "revealNarration" for dramatic final reveal (detective style)
+
+Narrator voice guidelines:
+- Use detective storytelling style ("Notice the curious detail...", "The evidence suggests...")
+- Make it engaging and mysterious but age-appropriate
+- Keep narration concise and clear for TTS
 
 Return JSON format:
 {
@@ -122,11 +151,25 @@ Return JSON format:
   "mysterySetup": "The mystery scenario (2-3 sentences)",
   "imagePrompt": "Description for generating mystery scene image (in English)",
   "clues": [
-    {"text": "Clue text", "slideRef": 1},
-    {"text": "Clue text", "slideRef": 2}
+    {"text": "Clue text", "slideRef": 1, "narratorText": "Detective narrator version of clue"},
+    {"text": "Clue text", "slideRef": 2, "narratorText": "Detective narrator version of clue"}
   ],
   "expectedConcepts": ["concept1", "concept2"],
-  "solutionExplanation": "Full explanation of how the mystery is solved"
+  "solutionExplanation": "Full explanation of how the mystery is solved",
+  "theoryOptions": {
+    "options": ["Theory option 1", "Theory option 2", "Theory option 3", "Theory option 4"],
+    "correctIndex": 0
+  },
+  "fillBlanks": {
+    "sentence": "Sentence with ___ and ___ blanks",
+    "blanks": ["word1", "word2"],
+    "wordBank": ["word1", "word2", "distractor1", "distractor2"]
+  },
+  "evidenceConnections": [
+    {"clueIndex": 0, "concept": "concept1"},
+    {"clueIndex": 1, "concept": "concept2"}
+  ],
+  "revealNarration": "Dramatic detective-style reveal narration"
 }`
 
     logger.info('MYSTERY', 'Generating mystery with Gemini', {
@@ -187,6 +230,50 @@ Return JSON format:
     if (!Array.isArray(mystery.expectedConcepts) || mystery.expectedConcepts.length === 0) {
       logger.error('MYSTERY', 'Invalid expectedConcepts array')
       return { error: 'INVALID_RESPONSE' }
+    }
+
+    // Add fallback defaults for new fields if missing
+
+    // Add narratorText to each clue if missing
+    mystery.clues = mystery.clues.map(clue => ({
+      ...clue,
+      narratorText: clue.narratorText || clue.text
+    }))
+
+    // Add default theoryOptions if missing
+    if (!mystery.theoryOptions || !Array.isArray(mystery.theoryOptions?.options)) {
+      mystery.theoryOptions = {
+        options: isZh
+          ? ['这个理论看起来合理', '另一个可能的解释', '不太可能的解释', '不可能的解释']
+          : ['This theory seems reasonable', 'Another possible explanation', 'Unlikely explanation', 'Impossible explanation'],
+        correctIndex: 0
+      }
+    }
+
+    // Add default fillBlanks if missing
+    if (!mystery.fillBlanks || !mystery.fillBlanks.sentence) {
+      const firstConcept = mystery.expectedConcepts[0] || (isZh ? '概念' : 'concept')
+      const secondConcept = mystery.expectedConcepts[1] || (isZh ? '另一个概念' : 'another concept')
+      mystery.fillBlanks = {
+        sentence: isZh
+          ? `这个谜题涉及___和___。`
+          : `This mystery involves ___ and ___.`,
+        blanks: [firstConcept, secondConcept],
+        wordBank: [firstConcept, secondConcept, isZh ? '干扰词' : 'distractor']
+      }
+    }
+
+    // Add default evidenceConnections if missing
+    if (!Array.isArray(mystery.evidenceConnections) || mystery.evidenceConnections.length === 0) {
+      mystery.evidenceConnections = mystery.clues.map((clue, index) => ({
+        clueIndex: index,
+        concept: mystery.expectedConcepts[0] || (isZh ? '概念' : 'concept')
+      }))
+    }
+
+    // Add default revealNarration if missing
+    if (!mystery.revealNarration) {
+      mystery.revealNarration = mystery.solutionExplanation
     }
 
     logger.info('MYSTERY', 'Mystery generated successfully', {

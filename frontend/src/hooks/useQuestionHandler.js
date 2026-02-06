@@ -93,7 +93,8 @@ export default function useQuestionHandler({
   const handleQuestion = useCallback(async (query, options = {}) => {
     const trimmedQuery = query.trim()
     if (!trimmedQuery) return
-    const { source = 'text' } = options
+    const { source = 'text', explanationLevel, suggestedTopicMeta } = options
+    const effectiveLevel = explanationLevel || selectedLevelRef.current
 
     if (source !== 'voice' && uiState === UI_STATE.SLIDESHOW) {
       pauseAfterCurrentSlideRef.current = false
@@ -403,7 +404,7 @@ export default function useQuestionHandler({
       const engagementPromise = fetch('/api/generate/engagement', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: trimmedQuery, explanationLevel: selectedLevelRef.current }),
+        body: JSON.stringify({ query: trimmedQuery, explanationLevel: effectiveLevel }),
         signal,
       })
         .then((res) => {
@@ -458,7 +459,7 @@ export default function useQuestionHandler({
             topicId: activeTopic.id,
             conversationHistory: [],
             clientId: wsClientId,
-            explanationLevel: activeTopic.explanationLevel || selectedLevelRef.current,
+            explanationLevel: activeTopic.explanationLevel || effectiveLevel,
             complexity: classifyResult.complexity,
             parentId: followUpParentId,
           }),
@@ -494,7 +495,7 @@ export default function useQuestionHandler({
             topicId: null,
             conversationHistory: [],
             clientId: wsClientId,
-            explanationLevel: selectedLevelRef.current,
+            explanationLevel: effectiveLevel,
           }),
           signal,
         })
@@ -605,7 +606,7 @@ export default function useQuestionHandler({
       } else if (newTopicData && generateData.slides?.length > 0) {
         // Create new topic with header card
         const now = Date.now()
-        const initialLevel = selectedLevelRef.current
+        const initialLevel = effectiveLevel
 
         const newTopic = {
           id: newTopicData.id,
@@ -653,6 +654,7 @@ export default function useQuestionHandler({
             name: newTopic.name,
             concepts: generateData.concepts || [],
             slides: newTopic.slides,
+            suggestedTopicMeta,
           })
         }
 

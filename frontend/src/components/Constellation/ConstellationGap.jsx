@@ -20,7 +20,7 @@ import { useState, useCallback } from 'react'
  * @param {{x: number, y: number}} props.position - Position in layout coordinates
  * @param {Function} props.onTap - Handler when gap is tapped/clicked
  */
-export default function ConstellationGap({ gap, position, onTap }) {
+export default function ConstellationGap({ gap, position, onTap, showLabel = true }) {
   const [isHovered, setIsHovered] = useState(false)
 
   /**
@@ -43,6 +43,8 @@ export default function ConstellationGap({ gap, position, onTap }) {
     [onTap, gap]
   )
 
+  const shouldShowLabel = showLabel || isHovered
+
   return (
     <button
       data-testid={`constellation-gap-${gap.id}`}
@@ -54,10 +56,12 @@ export default function ConstellationGap({ gap, position, onTap }) {
       onBlur={() => setIsHovered(false)}
       className="
         absolute transform -translate-x-1/2 -translate-y-1/2
-        w-5 h-5 rounded-full
-        bg-slate-600 border-2 border-dashed border-slate-500
-        animate-pulse opacity-50
-        hover:opacity-80 focus:opacity-80
+        w-6 h-6 rounded-full
+        bg-slate-700/70 border border-cyan-200/60
+        ring-2 ring-cyan-300/40
+        shadow-[0_0_14px_rgba(56,189,248,0.4)]
+        animate-pulse opacity-70
+        hover:opacity-90 focus:opacity-90
         flex items-center justify-center
         transition-all duration-200 hover:scale-125 focus:scale-125
         focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 focus:ring-offset-slate-950
@@ -68,35 +72,45 @@ export default function ConstellationGap({ gap, position, onTap }) {
       }}
       aria-label={`Suggested topic: ${gap.suggestedTopic}`}
     >
-      {/* Question mark indicator */}
-      <span className="text-xs text-slate-400 font-bold" aria-hidden="true">
-        ?
-      </span>
+      <span className="w-1.5 h-1.5 rounded-full bg-cyan-100" aria-hidden="true" />
 
       {/* Tooltip on hover/focus */}
       {isHovered && (
         <div
           className="
             absolute left-1/2 top-full mt-2 -translate-x-1/2
-            p-2 rounded bg-slate-800 text-white text-xs
-            w-48 text-center pointer-events-none z-10
+            px-2 py-1 rounded bg-slate-800 text-white text-xs
+            whitespace-nowrap pointer-events-none z-10
             shadow-lg
           "
           role="tooltip"
         >
-          <div className="font-medium text-slate-100">
-            {gap.suggestedTopic}
-          </div>
-          {gap.curiosityHook && (
-            <div className="text-slate-400 mt-1 text-[11px]">
-              {gap.curiosityHook}
-            </div>
-          )}
-          {/* Tooltip arrow */}
+          {gap.suggestedTopic}
           <div
             className="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-slate-800"
             aria-hidden="true"
           />
+        </div>
+      )}
+
+      {/* Label */}
+      {shouldShowLabel && (
+        <div
+          className="
+            absolute left-1/2 top-full mt-1 -translate-x-1/2
+            px-2 py-0.5
+            rounded-full
+            bg-slate-900/70 border border-cyan-200/30
+            text-[11px] text-slate-100
+            whitespace-nowrap pointer-events-none
+            max-w-[120px] truncate text-center
+            shadow-[0_0_10px_rgba(15,23,42,0.6)]
+            backdrop-blur-sm
+          "
+          style={{ textShadow: '0 1px 2px rgba(15, 23, 42, 0.9)' }}
+          aria-hidden="true"
+        >
+          {gap.suggestedTopic}
         </div>
       )}
     </button>

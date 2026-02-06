@@ -10,8 +10,10 @@ import { describe, it, expect } from 'vitest'
 import {
   EXPLORER_RANKS,
   getExplorerRank,
+  getExplorerRankByTopics,
   checkRankUp,
   getRankProgress,
+  getRankProgressByTopics,
   getRankColors,
   getRankTailwindColors,
 } from '../explorerRankUtils'
@@ -244,6 +246,35 @@ describe('explorerRankUtils', () => {
     it('caps at 100%', () => {
       const progress = getRankProgress(1000, 20000)
       expect(progress).toBeLessThanOrEqual(100)
+    })
+  })
+
+  describe('getExplorerRankByTopics', () => {
+    it('promotes based on topics without XP gating', () => {
+      expect(getExplorerRankByTopics(3).id).toBe('cadet')
+      expect(getExplorerRankByTopics(8).id).toBe('navigator')
+    })
+
+    it('handles invalid inputs', () => {
+      expect(getExplorerRankByTopics(null).id).toBe('stargazer')
+      expect(getExplorerRankByTopics(-2).id).toBe('stargazer')
+    })
+  })
+
+  describe('getRankProgressByTopics', () => {
+    it('returns 0 at rank minimum', () => {
+      const progress = getRankProgressByTopics(0)
+      expect(progress).toBe(0)
+    })
+
+    it('returns 100 at max rank', () => {
+      const progress = getRankProgressByTopics(120)
+      expect(progress).toBe(100)
+    })
+
+    it('returns percentage within rank range', () => {
+      const progress = getRankProgressByTopics(1)
+      expect(progress).toBe(33)
     })
   })
 

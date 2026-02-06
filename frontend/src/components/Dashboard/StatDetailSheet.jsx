@@ -293,6 +293,7 @@ export default function StatDetailSheet({
 
   return (
     <div
+      data-testid="progress-overlay"
       className="
         fixed inset-0 z-50
         flex items-start justify-center

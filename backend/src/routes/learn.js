@@ -117,31 +117,114 @@ router.post('/mystery', learnRateLimit, async (req, res) => {
 })
 
 /**
+ * POST /api/learn/mystery/image
+ * Generate manga-style educational image for mystery scenario
+ *
+ * Request body:
+ * - imagePrompt: string - Description for image generation
+ * - topicName: string - Topic name for context
+ * - explanationLevel: string - 'simple' | 'standard' | 'deep'
+ *
+ * Response:
+ * - success: boolean
+ * - imageUrl: string - Generated image URL (base64 data URL)
+ */
+router.post('/mystery/image', learnRateLimit, async (req, res) => {
+  const startTime = Date.now()
+
+  try {
+    const { imagePrompt, topicName, explanationLevel } = req.body
+
+    // Validate imagePrompt
+    if (!imagePrompt || typeof imagePrompt !== 'string' || imagePrompt.trim() === '') {
+      return res.status(400).json({
+        error: 'Missing or invalid imagePrompt',
+        field: 'imagePrompt'
+      })
+    }
+
+    // Validate topicName
+    if (!topicName || typeof topicName !== 'string') {
+      return res.status(400).json({
+        error: 'Missing or invalid topicName',
+        field: 'topicName'
+      })
+    }
+
+    // Normalize explanation level
+    const normalizedLevel = ['simple', 'standard', 'deep'].includes(explanationLevel)
+      ? explanationLevel
+      : 'standard'
+
+    // Detect language
+    const language = detectLanguage(topicName)
+
+    // Prepend manga-style hint to prompt
+    const mangaPrompt = `Manga-style educational illustration: ${imagePrompt}`
+
+    logger.info('LEARN', 'Generating mystery image', {
+      topicName,
+      promptLength: mangaPrompt.length,
+      language
+    })
+
+    const result = await generateEducationalImage(mangaPrompt, {
+      topic: topicName,
+      explanationLevel: normalizedLevel,
+      language
+    })
+
+    if (result.error) {
+      logger.error('LEARN', 'Mystery image generation failed', { error: result.error })
+
+      const errorStatusMap = {
+        'API_NOT_AVAILABLE': 503,
+        'RATE_LIMITED': 429,
+        'IMAGE_GENERATION_FAILED': 500,
+      }
+
+      const statusCode = errorStatusMap[result.error] || 500
+      return res.status(statusCode).json({ error: result.error })
+    }
+
+    const duration = Date.now() - startTime
+    logger.info('LEARN', 'Mystery image generated', { duration })
+
+    res.json({
+      success: true,
+      imageUrl: result.imageUrl
+    })
+  } catch (error) {
+    logger.error('LEARN', 'Mystery image generation error', {
+      error: error.message,
+      stack: error.stack
+    })
+    res.status(500).json({ error: 'IMAGE_GENERATION_FAILED' })
+  }
+})
+
+/**
  * POST /api/learn/mystery/evaluate
  * Evaluate user's theory against expected concepts
  *
  * Request body:
  * - userTheory: string - The user's spoken/typed theory
  * - expectedConcepts: array - Array of key concepts to match against
+ * - solveMethod: string - 'mcq' | 'fill-blank' | 'evidence-board' | 'voice-text'
+ * - userAnswer: object - Answer data depending on solveMethod
+ * - mysteryData: object - Full mystery data (for fast-path validation)
  *
  * Response:
- * - result: string - 'solved' | 'partial' | 'retry'
- * - matchedConcepts: array - Array of concepts that were matched
- * - xpEarned: number - XP awarded (50 for solved, 15 for partial, 5 for retry)
- * - hint: string - Optional hint for retry cases
+ * - isCorrect: boolean - Whether answer is correct
+ * - feedback: string - Feedback message
+ * - identifiedConcepts: array - Concepts identified in answer
+ * - xpEarned: number - XP awarded (50 for correct, 10 for incorrect)
  */
 router.post('/mystery/evaluate', learnRateLimit, async (req, res) => {
   try {
-    const { userTheory, expectedConcepts } = req.body
+    const { userTheory, expectedConcepts, solveMethod, userAnswer, mysteryData } = req.body
 
-    // Validate inputs
-    if (!userTheory || typeof userTheory !== 'string' || userTheory.trim() === '') {
-      return res.status(400).json({
-        error: 'Missing or invalid userTheory',
-        field: 'userTheory'
-      })
-    }
-
+    // Validate expectedConcepts (required for all methods)
     if (!Array.isArray(expectedConcepts) || expectedConcepts.length === 0) {
       return res.status(400).json({
         error: 'Missing or invalid expectedConcepts',
@@ -149,7 +232,123 @@ router.post('/mystery/evaluate', learnRateLimit, async (req, res) => {
       })
     }
 
-    logger.info('LEARN', 'Evaluating mystery theory', {
+    // Fast-path evaluation based on solveMethod
+    if (solveMethod === 'mcq' && userAnswer && mysteryData?.theoryOptions) {
+      // Multiple choice evaluation
+      const correctIndex = mysteryData.theoryOptions.correctIndex
+      const options = mysteryData.theoryOptions.options || []
+
+      // Validate correctIndex is within bounds
+      if (typeof correctIndex !== 'number' || correctIndex < 0 || correctIndex >= options.length) {
+        logger.warn('LEARN', 'Invalid correctIndex in MCQ fast-path, falling through to LLM', {
+          correctIndex,
+          optionsLength: options.length
+        })
+        // Fall through to voice-text evaluation below
+      } else {
+        logger.info('LEARN', 'Evaluating mystery (MCQ)', {
+          selectedIndex: userAnswer.selectedIndex,
+          correctIndex
+        })
+
+        const isCorrect = userAnswer.selectedIndex === correctIndex
+        const xpEarned = isCorrect ? 50 : 10
+
+        return res.json({
+          isCorrect,
+          feedback: isCorrect
+            ? 'Excellent detective work! You identified the correct theory.'
+            : 'Not quite. Review the clues and try again.',
+          identifiedConcepts: isCorrect ? expectedConcepts : [],
+          xpEarned
+        })
+      }
+    }
+
+    if (solveMethod === 'fill-blank' && userAnswer && mysteryData?.fillBlanks) {
+      // Fill-in-the-blank evaluation
+      // Case-insensitive array comparison
+      const normalizeString = (str) => String(str).toLowerCase().trim()
+      const userBlanksNormalized = (userAnswer.blanks || []).map(normalizeString)
+      const expectedBlanksNormalized = (mysteryData.fillBlanks.blanks || []).map(normalizeString)
+
+      // Validate array lengths match before comparing
+      if (userBlanksNormalized.length !== expectedBlanksNormalized.length) {
+        logger.warn('LEARN', 'Mismatched array lengths in fill-blank fast-path, falling through to LLM', {
+          userLength: userBlanksNormalized.length,
+          expectedLength: expectedBlanksNormalized.length
+        })
+        // Fall through to voice-text evaluation below
+      } else {
+        logger.info('LEARN', 'Evaluating mystery (Fill Blank)', {
+          userBlanks: userAnswer.blanks,
+          expectedBlanks: mysteryData.fillBlanks.blanks
+        })
+
+        const isCorrect = userBlanksNormalized.every((blank, index) => blank === expectedBlanksNormalized[index])
+        const xpEarned = isCorrect ? 50 : 10
+
+        return res.json({
+          isCorrect,
+          feedback: isCorrect
+            ? 'Perfect! You completed the solution correctly.'
+            : 'Some words are incorrect. Check the clues again.',
+          identifiedConcepts: isCorrect ? expectedConcepts : [],
+          xpEarned
+        })
+      }
+    }
+
+    if (solveMethod === 'evidence-board' && userAnswer && mysteryData?.evidenceConnections) {
+      // Evidence board evaluation - check all expected connections are present
+      const evidenceConnections = mysteryData.evidenceConnections
+
+      // Validate evidenceConnections is a non-empty array
+      if (!Array.isArray(evidenceConnections) || evidenceConnections.length === 0) {
+        logger.warn('LEARN', 'Invalid evidenceConnections in evidence-board fast-path, falling through to LLM', {
+          evidenceConnections
+        })
+        // Fall through to voice-text evaluation below
+      } else {
+        logger.info('LEARN', 'Evaluating mystery (Evidence Board)', {
+          userConnections: userAnswer.connections,
+          expectedConnections: evidenceConnections
+        })
+
+        const userConnections = userAnswer.connections || []
+
+        // Check if all expected connections are present in user's answer
+        const allConnectionsPresent = evidenceConnections.every(expected => {
+          return userConnections.some(userConn =>
+            userConn.clueIndex === expected.clueIndex &&
+            String(userConn.concept).toLowerCase().trim() === String(expected.concept).toLowerCase().trim()
+          )
+        })
+
+        const isCorrect = allConnectionsPresent
+        const xpEarned = isCorrect ? 50 : 10
+
+        return res.json({
+          isCorrect,
+          feedback: isCorrect
+            ? 'Brilliant! You connected all the evidence correctly.'
+            : 'Some connections are missing or incorrect. Review the clues.',
+          identifiedConcepts: isCorrect ? expectedConcepts : [],
+          xpEarned
+        })
+      }
+    }
+
+    // Fall through to voice-text evaluation (backward compatible)
+    // Validate userTheory for voice-text method
+    if (!userTheory || typeof userTheory !== 'string' || userTheory.trim() === '') {
+      return res.status(400).json({
+        error: 'Missing or invalid userTheory',
+        field: 'userTheory'
+      })
+    }
+
+    logger.info('LEARN', 'Evaluating mystery theory (voice-text)', {
       theoryLength: userTheory.length,
       conceptCount: expectedConcepts.length
     })
@@ -178,7 +377,14 @@ router.post('/mystery/evaluate', learnRateLimit, async (req, res) => {
       matchedCount: result.matchedConcepts?.length || 0
     })
 
-    res.json(result)
+    // Transform result to match new response format
+    const isCorrect = result.result === 'solved'
+    res.json({
+      isCorrect,
+      feedback: result.hint || (isCorrect ? 'Great detective work!' : 'Keep investigating!'),
+      identifiedConcepts: result.matchedConcepts || [],
+      xpEarned: result.xpEarned
+    })
   } catch (error) {
     logger.error('LEARN', 'Mystery evaluation error', {
       error: error.message,
