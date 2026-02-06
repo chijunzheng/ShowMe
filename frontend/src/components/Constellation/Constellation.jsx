@@ -392,8 +392,6 @@ export default function Constellation({
     [clusters]
   )
 
-  const activeClusterId = legendClusterId || hoveredClusterId
-
   const legendClusters = useMemo(() => {
     return [...displayClusters]
       .filter((cluster) => (cluster.nodeIds || []).length > 0)
@@ -409,49 +407,6 @@ export default function Constellation({
     })
     return map
   }, [displayClusters])
-
-  /**
-   * Calculate nebula cloud data for each cluster
-   * Each cluster gets a soft radial gradient ellipse behind its nodes
-   */
-  const nebulaData = useMemo(() => {
-    if (!displayClusters || displayClusters.length === 0) return []
-
-    return displayClusters.map((cluster) => {
-      // Get positions of all nodes in this cluster
-      const clusterPositions = cluster.nodeIds
-        .map((id) => positions.get(id))
-        .filter(Boolean)
-
-      if (clusterPositions.length === 0) return null
-
-      // Calculate bounding box
-      const xs = clusterPositions.map((p) => p.x)
-      const ys = clusterPositions.map((p) => p.y)
-      const minX = Math.min(...xs)
-      const maxX = Math.max(...xs)
-      const minY = Math.min(...ys)
-      const maxY = Math.max(...ys)
-
-      // Center and radius with padding
-      const padding = 30 + clusterPositions.length * 6
-      const cx = (minX + maxX) / 2
-      const cy = (minY + maxY) / 2
-      const rx = Math.max(40, (maxX - minX) / 2 + padding)
-      const ry = Math.max(40, (maxY - minY) / 2 + padding)
-
-      const isActive = activeClusterId && cluster.id === activeClusterId
-      return {
-        id: cluster.id,
-        cx,
-        cy,
-        rx,
-        ry,
-        color: cluster.color || '#64748B',
-        isActive,
-      }
-    }).filter(Boolean)
-  }, [displayClusters, positions, activeClusterId])
 
   /**
    * Transform style for pan/zoom
@@ -564,43 +519,6 @@ export default function Constellation({
           />
         ))}
       </div>
-
-      {/* Nebula clouds behind clusters */}
-      {nebulaData.length > 0 && (
-        <svg
-          className="absolute inset-0 w-full h-full pointer-events-none"
-          style={{ ...transformStyle, mixBlendMode: 'screen' }}
-          aria-hidden="true"
-        >
-          <defs>
-            {nebulaData.map((nebula) => (
-              <radialGradient key={`grad-${nebula.id}`} id={`nebula-${nebula.id}`}>
-                <stop
-                  offset="0%"
-                  stopColor={nebula.color}
-                  stopOpacity={nebula.isActive ? '0.18' : '0.12'}
-                />
-                <stop
-                  offset="70%"
-                  stopColor={nebula.color}
-                  stopOpacity={nebula.isActive ? '0.08' : '0.05'}
-                />
-                <stop offset="100%" stopColor={nebula.color} stopOpacity="0" />
-              </radialGradient>
-            ))}
-          </defs>
-          {nebulaData.map((nebula) => (
-            <ellipse
-              key={nebula.id}
-              cx={nebula.cx}
-              cy={nebula.cy}
-              rx={nebula.rx}
-              ry={nebula.ry}
-              fill={`url(#nebula-${nebula.id})`}
-            />
-          ))}
-        </svg>
-      )}
 
       {/* SVG layer for edges */}
       <svg

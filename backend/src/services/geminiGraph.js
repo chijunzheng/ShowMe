@@ -283,6 +283,49 @@ function inferCluster(topicName) {
 }
 
 /**
+ * Categorize a topic using AI with existing categories as context
+ * @param {string} topicName - Topic to categorize
+ * @param {string[]} existingCategories - Categories already in the learner's graph
+ * @returns {Promise<{category: string, icon: string|null}>}
+ */
+export async function categorizeTopic(topicName, existingCategories = []) {
+  const ai = getAIClient()
+  if (!ai) return { category: inferCluster(topicName), icon: null }
+
+  const existingList = existingCategories.length > 0
+    ? `\nThe learner's existing categories: ${existingCategories.join(', ')}`
+    : ''
+
+  const prompt = `Classify this educational topic into a category.
+
+Topic: "${topicName}"
+${existingList}
+
+Rules:
+- Prefer an existing category if the topic fits well
+- If no existing category fits, suggest a new short category name (1-2 words, lowercase)
+- Be specific but not too narrow (e.g., "music" -> "arts", but "quantum physics" could be "physics" if that exists, or "science" otherwise)
+- Avoid "general" - almost every topic fits somewhere
+
+Return JSON: { "category": "category name", "icon": "single emoji" }`
+
+  try {
+    const response = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: prompt,
+      config: { temperature: 0, responseMimeType: 'application/json' },
+    })
+    const result = safeParseJSON(response?.text || '')
+    if (result?.category) {
+      return { category: result.category.toLowerCase().trim(), icon: result.icon || null }
+    }
+    return { category: inferCluster(topicName), icon: null }
+  } catch {
+    return { category: inferCluster(topicName), icon: null }
+  }
+}
+
+/**
  * Create default clusters by category (fallback when AI unavailable)
  * @param {Object[]} nodes - Array of knowledge nodes
  * @returns {Object[]} Array of cluster objects
@@ -303,17 +346,24 @@ function createDefaultClusters(nodes) {
     science: { icon: '\u{1F52C}', color: '#10B981' },
     history: { icon: '\u{1F4DC}', color: '#F59E0B' },
     geography: { icon: '\u{1F30D}', color: '#06B6D4' },
-    astronomy: { icon: '\u{1F30C}', color: '#7C3AED' },
-    nature: { icon: '\u{1F33F}', color: '#22C55E' },
+    astronomy: { icon: '\u{1F30C}', color: '#2DD4BF' },
+    nature: { icon: '\u{1F33F}', color: '#84CC16' },
     technology: { icon: '\u{1F4BB}', color: '#6366F1' },
     arts: { icon: '\u{1F3A8}', color: '#EC4899' },
-    language: { icon: '\u{1F4DA}', color: '#8B5CF6' },
+    language: { icon: '\u{1F4DA}', color: '#A855F7' },
+    'marine biology': { icon: '\u{1F433}', color: '#0EA5E9' },
     general: { icon: '\u{1F4A1}', color: '#64748B' }
   }
 
   const clusters = []
   categoryMap.forEach((nodeIds, category) => {
-    const cfg = config[category] || config.general
+    const cfg = config[category] || {
+      icon: '\u{1F4CC}',
+      color: ['#F97316', '#D946EF', '#2DD4BF', '#84CC16', '#A855F7',
+        '#FB923C', '#14B8A6', '#E879F9', '#FACC15', '#38BDF8'][
+        Math.abs(category.split('').reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0)) % 10
+      ],
+    }
     clusters.push({
       id: `cluster_${category}`,
       name: category.charAt(0).toUpperCase() + category.slice(1),
@@ -374,6 +424,8 @@ Analyze relationships between the new topic and existing topics. For each relati
 4. Provide a brief explanation of WHY they're related
 
 Also suggest which cluster/category this topic belongs to.
+Here are the learner's existing categories: ${existingNodes.map(n => n.category).filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'none yet'}.
+Prefer an existing category if it fits well, but suggest a new short category (1-2 words, lowercase) if nothing fits. Avoid "general" unless truly uncategorizable.
 
 Output JSON:
 {
@@ -538,11 +590,18 @@ IMPORTANT: Output ONLY valid JSON. Do not include explanations or markdown.`
     const mapConnectIds = (gap) => {
       const names = Array.isArray(gap.connectsTo) ? gap.connectsTo : []
       return names
-        .map((name) =>
-          graph.nodes.find(
-            (node) => normalizeTopicName(node.name) === normalizeTopicName(name)
-          )?.id
-        )
+        .map((name) => {
+          const normalized = normalizeTopicName(name)
+          const exact = graph.nodes.find(
+            (node) => normalizeTopicName(node.name) === normalized
+          )
+          if (exact) return exact.id
+          const fuzzy = graph.nodes.find((node) => {
+            const nodeNorm = normalizeTopicName(node.name)
+            return nodeNorm.includes(normalized) || normalized.includes(nodeNorm)
+          })
+          return fuzzy?.id || null
+        })
         .filter(Boolean)
     }
     const gapsArray = Array.isArray(result.gaps) ? result.gaps : []
@@ -560,7 +619,8 @@ IMPORTANT: Output ONLY valid JSON. Do not include explanations or markdown.`
         .map((id) => nodeById.get(id)?.category || null)
         .filter(Boolean)
     )
-    const hasInvalidConnects = initialMapped.some((item) => item.connectsTo.length === 0)
+    const invalidCount = initialMapped.filter((item) => item.connectsTo.length === 0).length
+    const hasInvalidConnects = invalidCount > initialMapped.length / 2
 
     if (filteredInitial.length < 6 || categories.size < 2 || hasInvalidConnects) {
       logger.warn('GEMINI_GRAPH', 'Gap parse insufficient, retrying with strict prompt', {
@@ -599,7 +659,8 @@ IMPORTANT: Output ONLY valid JSON. Do not include explanations or markdown.`
         .map((id) => nodeById.get(id)?.category || null)
         .filter(Boolean)
     )
-    const retryInvalidConnects = retryMapped.some((item) => item.connectsTo.length === 0)
+    const retryInvalidCount = retryMapped.filter((item) => item.connectsTo.length === 0).length
+    const retryInvalidConnects = retryInvalidCount > retryMapped.length / 2
 
     if (didRetry && (filteredRetry.length < 6 || retryCategories.size < 2 || retryInvalidConnects)) {
       logger.warn('GEMINI_GRAPH', 'Gap parse insufficient after retry', {
@@ -611,15 +672,19 @@ IMPORTANT: Output ONLY valid JSON. Do not include explanations or markdown.`
 
     const finalMapped = didRetry ? retryMapped : initialMapped
     const gaps = finalMapped
-      .filter((item) => item.connectsTo.length > 0)
-      .map((item, index) => ({
-      id: `gap_${Date.now()}_${index}`,
-      suggestedTopic: item.gap.suggestedTopic,
-      type: item.gap.type || 'deepen',
-      connectsTo: item.connectsTo,
-      reasoning: item.gap.reasoning || '',
-      curiosityHook: item.gap.curiosityHook || `Learn about ${item.gap.suggestedTopic}!`
-    }))
+      .map((item, index) => {
+        const connectsTo = item.connectsTo.length > 0
+          ? item.connectsTo
+          : graph.nodes.slice(0, 2).map(n => n.id)
+        return {
+          id: `gap_${Date.now()}_${index}`,
+          suggestedTopic: item.gap.suggestedTopic,
+          type: item.gap.type || 'deepen',
+          connectsTo,
+          reasoning: item.gap.reasoning || '',
+          curiosityHook: item.gap.curiosityHook || `Learn about ${item.gap.suggestedTopic}!`
+        }
+      })
 
     logger.info('GEMINI_GRAPH', 'Identified knowledge gaps', { gapCount: gaps.length })
 
@@ -918,5 +983,6 @@ export default {
   clusterKnowledge,
   determineFollowUpPlacement,
   suggestLearningPath,
-  isGeminiGraphAvailable
+  isGeminiGraphAvailable,
+  categorizeTopic
 }

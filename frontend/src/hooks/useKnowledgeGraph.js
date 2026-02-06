@@ -67,20 +67,43 @@ export const SMALL_GRAPH_RECLUSTER_LIMIT = 40
 /**
  * Cluster configuration for category-based grouping
  */
-const CLUSTER_CONFIG = {
+export const CLUSTER_CONFIG = {
   mathematics: { icon: '\u{1F522}', color: '#3B82F6' }, // number emoji
   science: { icon: '\u{1F52C}', color: '#10B981' }, // microscope
   history: { icon: '\u{1F4DC}', color: '#F59E0B' }, // scroll
   geography: { icon: '\u{1F30D}', color: '#06B6D4' }, // globe
-  language: { icon: '\u{1F4DA}', color: '#8B5CF6' }, // books
+  language: { icon: '\u{1F4DA}', color: '#A855F7' }, // books
   arts: { icon: '\u{1F3A8}', color: '#EC4899' }, // palette
   technology: { icon: '\u{1F4BB}', color: '#6366F1' }, // laptop
-  astronomy: { icon: '\u{1F30C}', color: '#7C3AED' }, // milky way
-  nature: { icon: '\u{1F33F}', color: '#22C55E' }, // herb
+  astronomy: { icon: '\u{1F30C}', color: '#2DD4BF' }, // milky way
+  nature: { icon: '\u{1F33F}', color: '#84CC16' }, // herb
   'marine biology': { icon: '\u{1F433}', color: '#0EA5E9' }, // whale
-  civilization: { icon: '\u{1F3DB}\u{FE0F}', color: '#F59E0B' }, // classical building
-  arcane: { icon: '\u{1F52E}', color: '#8B5CF6' }, // crystal ball
+  civilization: { icon: '\u{1F3DB}\u{FE0F}', color: '#F97316' }, // classical building
   general: { icon: '\u{1F4A1}', color: '#64748B' }, // light bulb
+}
+
+// Color pool for dynamically assigned categories (max hue separation)
+const DYNAMIC_COLOR_POOL = [
+  '#F97316', '#D946EF', '#2DD4BF', '#84CC16', '#A855F7',
+  '#FB923C', '#14B8A6', '#E879F9', '#FACC15', '#38BDF8',
+]
+
+function hashString(str) {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i)
+    hash |= 0
+  }
+  return Math.abs(hash)
+}
+
+export function getClusterStyle(category) {
+  const key = (category || 'general').toLowerCase()
+  if (CLUSTER_CONFIG[key]) return CLUSTER_CONFIG[key]
+  return {
+    icon: '\u{1F4CC}',
+    color: DYNAMIC_COLOR_POOL[hashString(key) % DYNAMIC_COLOR_POOL.length],
+  }
 }
 
 // ============================================================================
@@ -265,6 +288,33 @@ function getBrightness(mastery) {
 }
 
 /**
+ * Compute base mastery from per-mode scores (Bloom's Taxonomy)
+ * Each mode contributes 25% max
+ *
+ * @param {Object} masteryScores - Per-mode scores
+ * @returns {number} Base mastery 0-1
+ */
+export function computeMastery(masteryScores) {
+  const { slideshow = 0, mystery = 0, wonder = 0, story = 0 } = masteryScores || {}
+  return (slideshow + mystery + wonder + story) * 0.25
+}
+
+/**
+ * Compute displayed mastery with spaced repetition decay
+ * Decay rate: 0.98/day, floor: 20%
+ *
+ * @param {Object} masteryScores - Per-mode scores
+ * @param {number} lastReviewedAt - Timestamp of last review
+ * @returns {number} Displayed mastery 0-1 (with decay applied)
+ */
+export function computeDisplayedMastery(masteryScores, lastReviewedAt) {
+  const baseMastery = computeMastery(masteryScores)
+  const daysSince = (Date.now() - (lastReviewedAt || Date.now())) / (1000 * 60 * 60 * 24)
+  const decayFactor = Math.max(0.2, Math.pow(0.98, daysSince))
+  return baseMastery * decayFactor
+}
+
+/**
  * Extract concepts from slide content
  * Used as fallback when concepts array is empty
  *
@@ -340,6 +390,9 @@ export default function useKnowledgeGraph() {
   // Track last recluster to avoid thrashing
   const lastReclusterAtRef = useRef(0)
 
+  // Track in-flight addTopic calls to prevent duplicate API requests
+  const pendingTopicsRef = useRef(new Set())
+
   // ============================================================================
   // STORAGE OPERATIONS
   // ============================================================================
@@ -400,10 +453,65 @@ export default function useKnowledgeGraph() {
           const normalizedGraph = normalizeGraphCategories(existingGraph)
           const explorerRank = getExplorerRank(normalizedGraph.nodes.length)
 
+          // Migrate old mastery numbers to masteryScores
+          const migratedNodes = normalizedGraph.nodes.map((node) => {
+            if (node.masteryScores) return node
+            const oldMastery = node.mastery || 0.25
+            const slideshowScore = Math.min(1.0, oldMastery / 0.25)
+            const { mastery: _removed, ...rest } = node
+            return {
+              ...rest,
+              masteryScores: { slideshow: slideshowScore, mystery: 0, wonder: 0, story: 0 },
+              brightness: getBrightness(computeDisplayedMastery(
+                { slideshow: slideshowScore, mystery: 0, wonder: 0, story: 0 },
+                node.lastReviewedAt
+              )),
+            }
+          })
+
           setGraph({
             ...normalizedGraph,
+            nodes: migratedNodes,
             explorerRank,
           })
+
+          // Re-categorize "general" nodes via AI
+          const generalNodes = migratedNodes.filter(n => !n.category || n.category === 'general')
+          if (generalNodes.length > 0) {
+            const existingCategories = [...new Set(
+              migratedNodes.map(n => n.category).filter(c => c && c !== 'general')
+            )]
+            fetch(`${API_BASE}/api/graph/categorize`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                topics: generalNodes.map(n => ({ id: n.id, name: n.name })),
+                existingCategories,
+              }),
+            })
+              .then(r => {
+                if (!r.ok) throw new Error(`Categorize API returned ${r.status}`)
+                return r.json()
+              })
+              .then(data => {
+                if (data.results) {
+                  setGraph(prev => {
+                    const updatedNodes = prev.nodes.map(node => {
+                      const match = data.results.find(r => r.id === node.id)
+                      return match ? { ...node, category: match.category } : node
+                    })
+                    return {
+                      ...prev,
+                      nodes: updatedNodes,
+                      clusters: createInitialClusters(updatedNodes),
+                    }
+                  })
+                }
+              })
+              .catch(err => {
+                logger.warn('GRAPH', 'Failed to re-categorize general nodes', { error: err.message })
+              })
+          }
         } else {
           // Try to migrate from old format
           logger.debug('STORAGE', 'No existing graph, checking for migration')
@@ -446,10 +554,7 @@ export default function useKnowledgeGraph() {
       return
     }
 
-    // Only save if we have data
-    if (graph.nodes.length > 0) {
-      saveToStorage(graph)
-    }
+    saveToStorage(graph)
   }, [graph, isLoading, saveToStorage])
 
   // Cleanup save timer on unmount
@@ -580,14 +685,21 @@ export default function useKnowledgeGraph() {
         return existing
       }
 
+      // Skip if another call is already adding this topic
+      if (pendingTopicsRef.current.has(normalizedName)) {
+        logger.debug('STORAGE', 'Topic add already in-flight', { name })
+        return null
+      }
+      pendingTopicsRef.current.add(normalizedName)
+
       // Create new node
       const newNode = {
         id: id || generateId('node'),
         name,
         concepts:
           concepts.length > 0 ? concepts : extractConceptsFromSlides(slides),
-        mastery: 0.25, // Initial mastery from viewing content
-        brightness: 'dim',
+        masteryScores: { slideshow: 1.0, mystery: 0, wonder: 0, story: 0 },
+        brightness: getBrightness(0.25),
         position: null, // Will be set by layout algorithm
         followUps: [],
         unlockedAt: Date.now(),
@@ -606,6 +718,14 @@ export default function useKnowledgeGraph() {
 
       // Update graph state immutably
       setGraph((prev) => {
+        // Re-check for duplicates (concurrent call protection)
+        const alreadyExists = prev.nodes.find(
+          (n) => normalizeTopicName(n.name) === normalizedName
+        )
+        if (alreadyExists) {
+          return prev
+        }
+
         const updatedNodes = [...prev.nodes, newNode]
         const updatedEdges = [...prev.edges, ...relationships]
 
@@ -655,6 +775,9 @@ export default function useKnowledgeGraph() {
         }
       })
 
+      // Clear in-flight tracker
+      pendingTopicsRef.current.delete(normalizedName)
+
       const now = Date.now()
       const nextNodeCount = graph.nodes.length + 1
       if (shouldAutoRecluster({
@@ -673,32 +796,40 @@ export default function useKnowledgeGraph() {
 
 
   /**
-   * Update mastery level for a topic after quiz
+   * Update mastery score for a specific learning mode
+   * Only updates if new score > existing (best score kept)
    *
    * @param {string} nodeId - Node ID
-   * @param {number} score - Quiz score (0-1)
+   * @param {'mystery' | 'wonder' | 'story'} mode - Learning mode
+   * @param {number} score - Score 0-1
    */
-  const updateMastery = useCallback((nodeId, score) => {
+  const updateModeMastery = useCallback((nodeId, mode, score) => {
     setGraph((prev) => ({
       ...prev,
       nodes: prev.nodes.map((node) => {
         if (node.id !== nodeId) return node
 
-        // Weighted average with existing mastery
-        // 60% existing + 40% new score for gradual progression
-        const newMastery = Math.min(1, node.mastery * 0.6 + score * 0.4)
+        const scores = node.masteryScores || { slideshow: 0, mystery: 0, wonder: 0, story: 0 }
+        const currentScore = scores[mode] || 0
 
-        logger.debug('STORAGE', 'Updated mastery', {
+        // Best score kept - only update if new score is higher
+        if (score <= currentScore) return node
+
+        const updatedScores = { ...scores, [mode]: score }
+        const displayed = computeDisplayedMastery(updatedScores, Date.now())
+
+        logger.debug('STORAGE', 'Updated mode mastery', {
           nodeId,
-          oldMastery: node.mastery,
-          newMastery,
-          score,
+          mode,
+          oldScore: currentScore,
+          newScore: score,
+          displayedMastery: displayed,
         })
 
         return {
           ...node,
-          mastery: newMastery,
-          brightness: getBrightness(newMastery),
+          masteryScores: updatedScores,
+          brightness: getBrightness(displayed),
           lastReviewedAt: Date.now(),
         }
       }),
@@ -1194,7 +1325,7 @@ export default function useKnowledgeGraph() {
 
     // Mutation methods
     addTopic,
-    updateMastery,
+    updateModeMastery,
     addFollowUp,
     discoverEdge,
     refreshGaps,
