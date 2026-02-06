@@ -9,9 +9,8 @@ Wonder Lab presents counterfactual scenarios that require understanding the less
 ```
 WhatIf/
 ├── WonderLab.jsx           # Main orchestrator component
-├── WhatIfScene.jsx         # Displays scenario with dramatic visual
-├── ThinkPrompts.jsx        # Shows guiding thinking prompts
-├── PredictionRecorder.jsx  # Voice recording interface
+├── SceneIntro.jsx          # Displays scenario with dramatic visual
+├── PredictionCards.jsx     # Interactive card selection interface
 ├── ConsequenceReveal.jsx   # Displays evaluation results
 └── BonusFactCard.jsx       # Shows bonus educational fact
 ```
