@@ -102,6 +102,15 @@ export default function StoryPlayback({
       {/* Slideshow */}
       <div className="flex-1 flex flex-col items-center justify-center p-6">
         <div className="w-full max-w-3xl">
+          {/* Chapter Title */}
+          {currentScene?.chapterTitle && (
+            <div className="text-center mb-3">
+              <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-300">
+                {currentScene.chapterTitle}
+              </h2>
+            </div>
+          )}
+
           {/* Scene Image */}
           <div className="aspect-video bg-white dark:bg-slate-800 rounded-2xl border-2 border-gray-200 dark:border-slate-700 overflow-hidden shadow-2xl mb-6">
             {currentScene?.imageUrl ? (

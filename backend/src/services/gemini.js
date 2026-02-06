@@ -24,8 +24,15 @@ const IMAGE_MODEL_FALLBACKS = [
 
 const FAST_MODEL = 'gemini-2.5-flash-lite'
 
-// GenAI TTS: Use pro TTS model with responseModalities: ['AUDIO']
-const GENAI_TTS_MODEL = 'gemini-2.5-pro-preview-tts'
+// GenAI TTS model chain (primary -> fallback(s))
+// Defaults prefer Pro quality first, then Flash Preview as GenAI fallback.
+const GENAI_TTS_PRIMARY_MODEL = process.env.GENAI_TTS_PRIMARY_MODEL || 'gemini-2.5-pro-preview-tts'
+const GENAI_TTS_FALLBACK_MODELS = (process.env.GENAI_TTS_FALLBACK_MODELS || 'gemini-2.5-flash-preview-tts')
+  .split(',')
+  .map((model) => model.trim())
+  .filter(Boolean)
+
+const GENAI_TTS_MODELS = [...new Set([GENAI_TTS_PRIMARY_MODEL, ...GENAI_TTS_FALLBACK_MODELS])]
 
 // Cloud TTS fallback config (used when GenAI fails)
 // Uses Gemini TTS voice through Cloud Text-to-Speech API (150 QPM)
@@ -769,52 +776,79 @@ export async function generateTTS(text, options = {}) {
     : 'Read the following in a clear, engaging, and natural way, as if teaching a curious student:'
 
   const fullPrompt = `${stylePrompt}\n\n${text}`
+  const genAiErrors = []
 
-  console.log('[TTS] GenAI request:', { model: GENAI_TTS_MODEL, voice, textLength: text.length })
+  for (let i = 0; i < GENAI_TTS_MODELS.length; i += 1) {
+    const model = GENAI_TTS_MODELS[i]
+    const hasMoreGenAiFallbacks = i < GENAI_TTS_MODELS.length - 1
 
-  try {
-    const response = await ai.models.generateContent({
-      model: GENAI_TTS_MODEL,
-      contents: fullPrompt,
-      config: {
-        responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: {
-              voiceName: voice,
+    console.log('[TTS] GenAI request:', { model, voice, textLength: text.length })
+
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: fullPrompt,
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: voice,
+              },
             },
           },
         },
-      },
-    })
+      })
 
-    // Extract audio data from response
-    const parts = response.candidates?.[0]?.content?.parts || []
+      // Extract audio data from response
+      const parts = response.candidates?.[0]?.content?.parts || []
 
-    for (const part of parts) {
-      if (part.inlineData) {
-        console.log('[TTS] GenAI success - mimeType:', part.inlineData.mimeType)
-        const result = buildAudioResult(part.inlineData)
-        console.log('[TTS] Audio URL length:', result.audioUrl?.length || 0, 'duration:', result.duration)
-        return result
+      for (const part of parts) {
+        if (part.inlineData) {
+          console.log('[TTS] GenAI success - mimeType:', part.inlineData.mimeType, 'model:', model)
+          const result = buildAudioResult(part.inlineData)
+          console.log('[TTS] Audio URL length:', result.audioUrl?.length || 0, 'duration:', result.duration)
+          return result
+        }
       }
+
+      genAiErrors.push('NO_AUDIO_GENERATED')
+      if (hasMoreGenAiFallbacks) {
+        console.warn('[TTS] No audio in GenAI response:', { model, nextModel: GENAI_TTS_MODELS[i + 1] })
+        continue
+      }
+
+      console.error('[TTS] No audio in GenAI response, trying Cloud TTS fallback')
+    } catch (error) {
+      const normalizedError = normalizeTtsError(error)
+      genAiErrors.push(normalizedError)
+
+      if (hasMoreGenAiFallbacks) {
+        console.warn('[TTS] GenAI failed:', error.message, '- trying next GenAI fallback model')
+        continue
+      }
+
+      console.warn('[TTS] GenAI failed:', error.message, '- trying Cloud TTS fallback')
     }
-
-    console.error('[TTS] No audio in GenAI response, trying Cloud TTS fallback')
-    return generateCloudTTS(text, language)
-  } catch (error) {
-    const normalizedError = normalizeTtsError(error)
-    console.warn('[TTS] GenAI failed:', error.message, '- trying Cloud TTS fallback')
-
-    // Fall back to Cloud TTS on any error (rate limit, network, etc.)
-    const fallbackResult = await generateCloudTTS(text, language)
-    if (fallbackResult.audioUrl) {
-      return fallbackResult
-    }
-
-    // Both failed - return original error
-    return { audioUrl: null, duration: 0, error: normalizedError }
   }
+
+  // Fall back to Cloud TTS after exhausting GenAI model chain.
+  const fallbackResult = await generateCloudTTS(text, language)
+  if (fallbackResult.audioUrl) {
+    return fallbackResult
+  }
+
+  // Prefer surfaced Cloud-specific auth/permission errors.
+  if (fallbackResult.error && fallbackResult.error !== 'RATE_LIMITED') {
+    return fallbackResult
+  }
+
+  const normalizedError =
+    genAiErrors.find((code) => code && code !== 'NO_AUDIO_GENERATED') ||
+    fallbackResult.error ||
+    'UNKNOWN_ERROR'
+
+  return { audioUrl: null, duration: 0, error: normalizedError }
 }
 
 /**
@@ -3012,16 +3046,15 @@ Generate the quiz questions now:`
 }
 
 /**
- * Generate a "What If?" counterfactual scenario from lesson content
- * Creates an engaging hypothetical scenario that requires understanding
- * the material to reason through consequences.
+ * Generate a "What If?" scenario with prediction cards.
+ * Creates an engaging hypothetical scenario with 4 prediction cards (2 correct, 2 wrong).
  *
  * @param {Object} params
  * @param {Array} params.slides - The slides from the lesson
  * @param {string} params.topicName - The topic being explored
  * @param {string} params.explanationLevel - 'simple' | 'standard' | 'deep'
  * @param {string} params.language - 'en' or 'zh'
- * @returns {Object} { scenario, imagePrompt, thinkAboutHints, expectedConsequences, bonusFact, error }
+ * @returns {Object} { scenario, scenarioImagePrompt, scenarioNarration, predictionCards, bonusFact, bonusFactNarration, error }
  */
 export async function generateWhatIfScenario({ slides, topicName, explanationLevel, language }) {
   const ai = getAIClient()
@@ -3058,25 +3091,52 @@ ${slideContext}
 Create a counterfactual "What If?" scenario that:
 1. Changes one key aspect of the topic in an interesting way
 2. Requires understanding the lesson to reason through
-3. Has 3-4 clear consequences that follow from the change
-4. Is thought-provoking but not overwhelming
+3. Is thought-provoking but not overwhelming
 
 ${levelGuidance[explanationLevel] || levelGuidance.standard}
+
+Generate exactly 4 prediction cards. Exactly 2 should be correct (scientifically accurate consequences) and 2 should be wrong (plausible-sounding but incorrect).
+
+For correct predictions:
+- Include "revealNarration": dramatic TTS-friendly explanation of why it's correct
+- Include "revealImagePrompt": description for generating a visual of this consequence
+
+For wrong predictions:
+- Only include "id", "text", and "isCorrect: false"
 
 Respond with ONLY valid JSON (no markdown, no code blocks):
 {
   "scenario": "What if [interesting counterfactual]?",
-  "imagePrompt": "Description for generating a dramatic visual of this scenario",
-  "thinkAboutHints": [
-    "Hint 1 to guide reasoning",
-    "Hint 2 to guide reasoning"
+  "scenarioImagePrompt": "Description for generating a dramatic visual of this scenario",
+  "scenarioNarration": "Dramatic, engaging TTS text to introduce the scenario (2-3 sentences)",
+  "predictionCards": [
+    {
+      "id": "card-1",
+      "text": "Correct prediction statement",
+      "isCorrect": true,
+      "revealNarration": "Dramatic explanation of why this is correct",
+      "revealImagePrompt": "Visual description of this consequence"
+    },
+    {
+      "id": "card-2",
+      "text": "Wrong prediction statement",
+      "isCorrect": false
+    },
+    {
+      "id": "card-3",
+      "text": "Correct prediction statement",
+      "isCorrect": true,
+      "revealNarration": "Dramatic explanation of why this is correct",
+      "revealImagePrompt": "Visual description of this consequence"
+    },
+    {
+      "id": "card-4",
+      "text": "Wrong prediction statement",
+      "isCorrect": false
+    }
   ],
-  "expectedConsequences": [
-    {"concept": "first_concept", "consequence": "What would happen"},
-    {"concept": "second_concept", "consequence": "Another effect"},
-    {"concept": "third_concept", "consequence": "Additional outcome"}
-  ],
-  "bonusFact": "Mind-expanding fact related to the scenario"
+  "bonusFact": "Mind-expanding fact related to the scenario",
+  "bonusFactNarration": "TTS-friendly dramatic narration of the bonus fact"
 }`
 
     const response = await ai.models.generateContent({
@@ -3084,7 +3144,7 @@ Respond with ONLY valid JSON (no markdown, no code blocks):
       contents: prompt,
       config: {
         temperature: 0.7,
-        maxOutputTokens: 900,
+        maxOutputTokens: 3000,
         responseMimeType: 'application/json',
       }
     })
@@ -3104,36 +3164,87 @@ Respond with ONLY valid JSON (no markdown, no code blocks):
 
     // Validate response structure
     if (!extracted.scenario || typeof extracted.scenario !== 'string') {
+      console.error('[Gemini] What If generation: missing or invalid scenario')
       return { error: 'INVALID_RESPONSE' }
     }
 
-    if (!Array.isArray(extracted.expectedConsequences) || extracted.expectedConsequences.length === 0) {
+    if (!Array.isArray(extracted.predictionCards)) {
+      console.error('[Gemini] What If generation: predictionCards is not an array')
       return { error: 'INVALID_RESPONSE' }
     }
 
-    const expectedConsequences = extracted.expectedConsequences
-      .filter(c => c && typeof c === 'object')
-      .map(c => ({
-        concept: typeof c.concept === 'string' ? c.concept.trim() : '',
-        consequence: typeof c.consequence === 'string' ? c.consequence.trim() : '',
-      }))
-      .filter(c => c.concept && c.consequence)
-      .slice(0, 6)
+    // Validate cards: 3-4 cards, at least 2 correct (3 accepted due to occasional truncation)
+    const cards = extracted.predictionCards
+      .filter(c => c && typeof c === 'object' && typeof c.text === 'string' && typeof c.isCorrect === 'boolean')
+      .slice(0, 4)
 
-    if (expectedConsequences.length === 0) {
+    if (cards.length < 3) {
+      console.error('[Gemini] What If generation: expected 3-4 cards, got', cards.length)
+      return { error: 'INVALID_RESPONSE' }
+    }
+
+    const correctCards = cards.filter(c => c.isCorrect === true)
+    const wrongCards = cards.filter(c => c.isCorrect === false)
+
+    // Attempt to fix if count is off
+    if (correctCards.length !== 2) {
+      console.warn('[Gemini] What If generation: expected 2 correct cards, got', correctCards.length, '- attempting fix')
+
+      if (correctCards.length < 2) {
+        console.error('[Gemini] What If generation: cannot fix - insufficient correct cards')
+        return { error: 'INVALID_RESPONSE' }
+      }
+    }
+
+    // Build immutable set of extra correct card IDs to demote
+    const extraCorrectIds = new Set(
+      correctCards.slice(2).map(c => c.id || cards.indexOf(c))
+    )
+
+    // Validate correct cards have required fields
+    const validatedCards = cards.map((c, i) => {
+      const isDemoted = extraCorrectIds.has(c.id || i)
+      const isCorrect = c.isCorrect && !isDemoted
+
+      const card = {
+        id: typeof c.id === 'string' ? c.id : `card-${i + 1}`,
+        text: c.text.trim(),
+        isCorrect
+      }
+
+      if (isCorrect) {
+        if (!c.revealNarration || typeof c.revealNarration !== 'string' || !c.revealNarration.trim()) {
+          console.error('[Gemini] What If generation: correct card missing revealNarration')
+          return null
+        }
+        if (!c.revealImagePrompt || typeof c.revealImagePrompt !== 'string' || !c.revealImagePrompt.trim()) {
+          console.error('[Gemini] What If generation: correct card missing revealImagePrompt')
+          return null
+        }
+        card.revealNarration = c.revealNarration.trim()
+        card.revealImagePrompt = c.revealImagePrompt.trim()
+      }
+
+      return card
+    })
+
+    if (validatedCards.some(c => c === null)) {
       return { error: 'INVALID_RESPONSE' }
     }
 
     return {
       scenario: extracted.scenario.trim(),
-      imagePrompt: (typeof extracted.imagePrompt === 'string' && extracted.imagePrompt.trim())
-        ? extracted.imagePrompt.trim()
+      scenarioImagePrompt: (typeof extracted.scenarioImagePrompt === 'string' && extracted.scenarioImagePrompt.trim())
+        ? extracted.scenarioImagePrompt.trim()
         : `Visual representation of: ${extracted.scenario}`,
-      thinkAboutHints: Array.isArray(extracted.thinkAboutHints)
-        ? extracted.thinkAboutHints.filter(h => typeof h === 'string' && h.trim()).map(h => h.trim()).slice(0, 4)
-        : [],
-      expectedConsequences,
+      scenarioNarration: (typeof extracted.scenarioNarration === 'string' && extracted.scenarioNarration.trim())
+        ? extracted.scenarioNarration.trim()
+        : extracted.scenario.trim(),
+      predictionCards: validatedCards,
       bonusFact: typeof extracted.bonusFact === 'string' ? extracted.bonusFact.trim() : '',
+      bonusFactNarration: (typeof extracted.bonusFactNarration === 'string' && extracted.bonusFactNarration.trim())
+        ? extracted.bonusFactNarration.trim()
+        : (typeof extracted.bonusFact === 'string' ? extracted.bonusFact.trim() : ''),
       error: null
     }
   } catch (error) {
@@ -3157,12 +3268,12 @@ Respond with ONLY valid JSON (no markdown, no code blocks):
  * @param {Array} params.slides - Lesson slides (expects subtitle/script fields)
  * @param {string} params.topicName - The topic being learned
  * @param {string} params.language - 'en' or 'zh'
- * @returns {Promise<{storyPrompt: string, conceptChecklist: string[], starterSuggestion: string, imageStyle: string, error: string|null}>}
+ * @returns {Promise<{storyPrompt: string, conceptChecklist: string[], starterSuggestion: string, imageStyle: string, missionHook: string, sceneImagePrompt: string, conceptCards: Array<{concept: string, icon: string, description: string}>, chapters: Object, error: string|null}>}
  */
 export async function generateStoryPrompt({ slides, topicName, language }) {
   const ai = getAIClient()
   if (!ai) {
-    return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', error: 'API_NOT_AVAILABLE' }
+    return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', missionHook: '', sceneImagePrompt: '', conceptCards: [], chapters: {}, error: 'API_NOT_AVAILABLE' }
   }
 
   try {
@@ -3193,14 +3304,33 @@ ${slideContext}
   "storyPrompt": "创意写作提示，引导孩子使用学到的概念创作故事",
   "conceptChecklist": ["概念1", "概念2", "概念3"],
   "starterSuggestion": "故事的开头建议，帮助孩子开始",
-  "imageStyle": "插图风格描述，用于生成儿童友好的插图"
+  "imageStyle": "插图风格描述，用于生成儿童友好的插图",
+  "missionHook": "简短2-3句话的激动人心的介绍钩子，适合TTS朗读",
+  "sceneImagePrompt": "用于生成彩色场景图像的详细提示",
+  "conceptCards": [{"concept": "概念名称", "icon": "表情符号", "description": "1句话描述"}],
+  "chapters": {
+    "1": {
+      "prompt": "我们的故事从哪里开始？",
+      "icon": "表情符号",
+      "choices": [
+        {"id": "1a", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]},
+        {"id": "1b", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]},
+        {"id": "1c", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]}
+      ]
+    }
+  }
 }
 
 要求:
 - 故事提示应该有趣、适合儿童
 - 概念清单应包含3-5个关键概念
 - 开头建议应该引人入胜
-- 插图风格应该是“儿童图书插图，色彩鲜艳，友好”
+- 插图风格应该是"儿童图书插图，色彩鲜艳，友好"
+- missionHook应该激动人心且适合儿童，最多2-3句话
+- sceneImagePrompt应该描述生成插图的生动场景
+- conceptCards应该为每个概念配一张卡片，带有相关的表情符号图标
+- 第1章应该有正好3个选择，每个都融入不同的概念
+- 每个选择应该是1-2句引人入胜的叙述
 
 只返回JSON，不要其他文本。`
       : `Based on this educational topic, create a creative story prompt for a kid.
@@ -3215,7 +3345,21 @@ Return a JSON object with:
   "storyPrompt": "A creative writing prompt that encourages using learned concepts",
   "conceptChecklist": ["concept1", "concept2", "concept3"],
   "starterSuggestion": "An opening line to help the kid start their story",
-  "imageStyle": "Style description for generating kid-friendly illustrations"
+  "imageStyle": "Style description for generating kid-friendly illustrations",
+  "missionHook": "A short 2-3 sentence exciting hook to narrate via TTS",
+  "sceneImagePrompt": "A detailed prompt for generating a colorful scene image",
+  "conceptCards": [{"concept": "name", "icon": "emoji", "description": "1 sentence"}],
+  "chapters": {
+    "1": {
+      "prompt": "Where does our story begin?",
+      "icon": "emoji",
+      "choices": [
+        {"id": "1a", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]},
+        {"id": "1b", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]},
+        {"id": "1c", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]}
+      ]
+    }
+  }
 }
 
 Requirements:
@@ -3224,6 +3368,11 @@ Requirements:
 - Starter suggestion should hook the imagination
 - Image style should be \"children's book illustration, colorful, friendly\"
 - Keep concepts concise (2-4 words each)
+- missionHook should be exciting and kid-friendly, 2-3 sentences max
+- sceneImagePrompt should describe a vivid scene for generating an illustration
+- conceptCards should have one card per concept with a relevant emoji icon
+- Chapter 1 should have exactly 3 choices, each weaving in different concepts
+- Each choice should be 1-2 sentences of engaging narrative
 
 ${languageNote}
 
@@ -3234,7 +3383,7 @@ Return ONLY the JSON object, no other text.`
       contents: prompt,
       config: {
         temperature: 0.9,
-        maxOutputTokens: 900,
+        maxOutputTokens: 1800,
         responseMimeType: 'application/json',
       }
     })
@@ -3244,7 +3393,7 @@ Return ONLY the JSON object, no other text.`
     const parsed = JSON.parse(jsonStr)
 
     if (!parsed || typeof parsed !== 'object') {
-      return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', error: 'INVALID_RESPONSE' }
+      return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', missionHook: '', sceneImagePrompt: '', conceptCards: [], chapters: {}, error: 'INVALID_RESPONSE' }
     }
 
     const storyPrompt = typeof parsed.storyPrompt === 'string' ? parsed.storyPrompt.trim() : ''
@@ -3253,24 +3402,221 @@ Return ONLY the JSON object, no other text.`
       : []
     const starterSuggestion = typeof parsed.starterSuggestion === 'string' ? parsed.starterSuggestion.trim() : ''
     const imageStyle = typeof parsed.imageStyle === 'string' ? parsed.imageStyle.trim() : ''
+    const missionHook = typeof parsed.missionHook === 'string' ? parsed.missionHook.trim() : storyPrompt
+    const sceneImagePrompt = typeof parsed.sceneImagePrompt === 'string' ? parsed.sceneImagePrompt.trim() : ''
+    const conceptCards = Array.isArray(parsed.conceptCards)
+      ? parsed.conceptCards.filter(c => c && typeof c === 'object').map(c => ({
+          concept: typeof c.concept === 'string' ? c.concept.trim() : '',
+          icon: typeof c.icon === 'string' ? c.icon.trim() : '📝',
+          description: typeof c.description === 'string' ? c.description.trim() : ''
+        })).filter(c => c.concept)
+      : conceptChecklist.map(c => ({ concept: c, icon: '📝', description: '' }))
 
-    if (!storyPrompt || conceptChecklist.length === 0 || !starterSuggestion || !imageStyle) {
-      return { storyPrompt, conceptChecklist, starterSuggestion, imageStyle, error: 'INVALID_RESPONSE' }
+    const chapters = parsed.chapters && typeof parsed.chapters === 'object' ? {} : {}
+    if (parsed.chapters && parsed.chapters['1']) {
+      const ch1 = parsed.chapters['1']
+      chapters['1'] = {
+        prompt: typeof ch1.prompt === 'string' ? ch1.prompt.trim() : 'Where does our story begin?',
+        icon: typeof ch1.icon === 'string' ? ch1.icon.trim() : '📖',
+        choices: Array.isArray(ch1.choices)
+          ? ch1.choices.filter(c => c && typeof c === 'object').map(c => ({
+              id: typeof c.id === 'string' ? c.id : '',
+              emoji: typeof c.emoji === 'string' ? c.emoji : '📖',
+              text: typeof c.text === 'string' ? c.text.trim() : '',
+              conceptHints: Array.isArray(c.conceptHints) ? c.conceptHints.filter(h => typeof h === 'string') : []
+            })).filter(c => c.text).slice(0, 3)
+          : []
+      }
     }
 
-    return { storyPrompt, conceptChecklist, starterSuggestion, imageStyle, error: null }
+    if (!storyPrompt || conceptChecklist.length === 0 || !starterSuggestion || !imageStyle) {
+      return { storyPrompt, conceptChecklist, starterSuggestion, imageStyle, missionHook, sceneImagePrompt, conceptCards, chapters, error: 'INVALID_RESPONSE' }
+    }
+
+    return { storyPrompt, conceptChecklist, starterSuggestion, imageStyle, missionHook, sceneImagePrompt, conceptCards, chapters, error: null }
   } catch (error) {
     console.error('[Gemini] Story prompt generation error:', error.message)
 
     if (error.message?.includes('quota') || error.message?.includes('rate')) {
-      return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', error: 'RATE_LIMITED' }
+      return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', missionHook: '', sceneImagePrompt: '', conceptCards: [], chapters: {}, error: 'RATE_LIMITED' }
     }
 
     if (error.message?.includes('JSON')) {
-      return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', error: 'PARSE_ERROR' }
+      return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', missionHook: '', sceneImagePrompt: '', conceptCards: [], chapters: {}, error: 'PARSE_ERROR' }
     }
 
-    return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', error: error.message || 'UNKNOWN_ERROR' }
+    return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', missionHook: '', sceneImagePrompt: '', conceptCards: [], chapters: {}, error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
+ * Generate next story chapter choices and illustration prompt based on previous selections.
+ *
+ * @param {Object} params
+ * @param {string} params.topicName
+ * @param {string[]} params.conceptChecklist
+ * @param {Array<{chapter: number, selectedText: string}>} params.previousChapters
+ * @param {number} params.currentChapter - 2 or 3
+ * @param {string} params.imageStyle
+ * @param {string} params.language - 'en' or 'zh'
+ * @returns {Promise<{illustration: {imagePrompt: string, sceneDescription: string}, nextChapter: Object|null, conceptsFound: string[], error: string|null}>}
+ */
+export async function generateStoryChapter({ topicName, conceptChecklist = [], previousChapters = [], currentChapter, imageStyle, language = 'en' }) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { illustration: { imagePrompt: '', sceneDescription: '' }, nextChapter: null, conceptsFound: [], error: 'API_NOT_AVAILABLE' }
+  }
+
+  try {
+    // Build context from previous chapters
+    const previousContext = previousChapters
+      .map(ch => `Chapter ${ch.chapter}: ${ch.selectedText}`)
+      .join('\n')
+
+    const conceptList = conceptChecklist.join(', ')
+
+    const chapterNames = { 2: 'The Adventure', 3: 'The Ending' }
+    const chapterName = chapterNames[currentChapter] || `Chapter ${currentChapter}`
+
+    const isLastChapter = currentChapter >= 3
+
+    // Build the prompt
+    const nextChapterSection = isLastChapter
+      ? '"nextChapter": null'
+      : `"nextChapter": {
+      "prompt": "Question for chapter ${currentChapter + 1}",
+      "icon": "emoji",
+      "choices": [
+        {"id": "${currentChapter + 1}a", "emoji": "emoji", "text": "Story choice (1-2 sentences)", "conceptHints": ["concept"]},
+        {"id": "${currentChapter + 1}b", "emoji": "emoji", "text": "Story choice (1-2 sentences)", "conceptHints": ["concept"]},
+        {"id": "${currentChapter + 1}c", "emoji": "emoji", "text": "Story choice (1-2 sentences)", "conceptHints": ["concept"]}
+      ]
+    }`
+
+    const prompt = language === 'zh'
+      ? `你是一个儿童故事助手。根据之前的章节选择，继续这个故事。
+
+主题: ${topicName}
+概念清单: ${conceptList}
+之前的章节:
+${previousContext}
+
+当前章节: ${currentChapter} - ${chapterName}
+
+返回JSON:
+{
+  "illustration": {
+    "imagePrompt": "为上一个选择生成插图的详细提示（${imageStyle}）",
+    "sceneDescription": "简短的场景描述"
+  },
+  ${isLastChapter ? '"nextChapter": null' : `"nextChapter": {
+    "prompt": "下一章的问题",
+    "icon": "表情符号",
+    "choices": [
+      {"id": "${currentChapter + 1}a", "emoji": "表情", "text": "故事选择（1-2句话）", "conceptHints": ["概念"]}
+    ]
+  }`},
+  "conceptsFound": ["在之前选择中检测到的概念"]
+}
+
+要求:
+- 插图提示应该详细，适合生成${imageStyle}风格的图片
+- 场景描述简洁
+- 如果不是最后一章，下一章应有3个选择
+- 选择应与之前的故事连贯
+- 每个选择应融入不同的概念
+- 检测之前选择中使用的概念
+
+只返回JSON。`
+      : `You are a children's story assistant. Continue this story based on previous chapter selections.
+
+Topic: ${topicName}
+Concept checklist: ${conceptList}
+Previous chapters:
+${previousContext}
+
+Current chapter: ${currentChapter} - ${chapterName}
+
+Return a JSON object:
+{
+  "illustration": {
+    "imagePrompt": "Detailed prompt for illustrating the previous selection (${imageStyle})",
+    "sceneDescription": "Brief scene description"
+  },
+  ${nextChapterSection},
+  "conceptsFound": ["concepts detected in previous selections"]
+}
+
+Requirements:
+- illustration imagePrompt should be detailed, suitable for generating a ${imageStyle} style image
+- sceneDescription should be concise (1 sentence)
+- If not the last chapter, nextChapter should have exactly 3 choices
+- Choices must be coherent with the story so far
+- Each choice should weave in different concepts from the checklist
+- conceptsFound should list concepts from the checklist that appeared in previous selections
+- Keep choice text to 1-2 engaging sentences
+${isLastChapter ? '- This is the final chapter, so nextChapter should be null' : `- Chapter ${currentChapter + 1} name: ${currentChapter + 1 === 3 ? 'The Ending' : 'Next'}`}
+
+Return ONLY the JSON object, no other text.`
+
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.9,
+        maxOutputTokens: 1200,
+        responseMimeType: 'application/json',
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    if (!parsed || typeof parsed !== 'object') {
+      return { illustration: { imagePrompt: '', sceneDescription: '' }, nextChapter: null, conceptsFound: [], error: 'INVALID_RESPONSE' }
+    }
+
+    // Parse illustration
+    const illustration = {
+      imagePrompt: typeof parsed.illustration?.imagePrompt === 'string' ? parsed.illustration.imagePrompt.trim() : '',
+      sceneDescription: typeof parsed.illustration?.sceneDescription === 'string' ? parsed.illustration.sceneDescription.trim() : ''
+    }
+
+    // Parse next chapter (null for last chapter)
+    let nextChapter = null
+    if (!isLastChapter && parsed.nextChapter && typeof parsed.nextChapter === 'object') {
+      nextChapter = {
+        prompt: typeof parsed.nextChapter.prompt === 'string' ? parsed.nextChapter.prompt.trim() : 'What happens next?',
+        icon: typeof parsed.nextChapter.icon === 'string' ? parsed.nextChapter.icon.trim() : '📖',
+        choices: Array.isArray(parsed.nextChapter.choices)
+          ? parsed.nextChapter.choices.filter(c => c && typeof c === 'object').map(c => ({
+              id: typeof c.id === 'string' ? c.id : '',
+              emoji: typeof c.emoji === 'string' ? c.emoji : '📖',
+              text: typeof c.text === 'string' ? c.text.trim() : '',
+              conceptHints: Array.isArray(c.conceptHints) ? c.conceptHints.filter(h => typeof h === 'string') : []
+            })).filter(c => c.text).slice(0, 3)
+          : []
+      }
+    }
+
+    // Parse concepts found
+    const conceptsFound = Array.isArray(parsed.conceptsFound)
+      ? parsed.conceptsFound.filter(c => typeof c === 'string' && c.trim()).map(c => c.trim())
+      : []
+
+    return { illustration, nextChapter, conceptsFound, error: null }
+  } catch (error) {
+    console.error('[Gemini] Story chapter generation error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { illustration: { imagePrompt: '', sceneDescription: '' }, nextChapter: null, conceptsFound: [], error: 'RATE_LIMITED' }
+    }
+    if (error.message?.includes('JSON')) {
+      return { illustration: { imagePrompt: '', sceneDescription: '' }, nextChapter: null, conceptsFound: [], error: 'PARSE_ERROR' }
+    }
+
+    return { illustration: { imagePrompt: '', sceneDescription: '' }, nextChapter: null, conceptsFound: [], error: error.message || 'UNKNOWN_ERROR' }
   }
 }
 
@@ -3394,132 +3740,6 @@ Return ONLY JSON.`
   }
 }
 
-/**
- * Evaluate user's prediction against expected consequences (non-judgmental)
- * Matches user's reasoning to expected outcomes and provides encouragement
- *
- * @param {Object} params
- * @param {string} params.userPrediction - User's transcribed prediction
- * @param {Array} params.expectedConsequences - Expected outcomes from generation
- * @param {string} params.language - 'en' or 'zh'
- * @returns {Object} { matchedPredictions, missedConsequences, xpEarned, error }
- */
-export async function evaluateWhatIfPrediction({ userPrediction, expectedConsequences, language }) {
-  const ai = getAIClient()
-  if (!ai) {
-    return { error: 'API_NOT_AVAILABLE' }
-  }
-
-  try {
-    const languageNote = language === 'zh'
-      ? 'Respond in Simplified Chinese (简体中文).'
-      : 'Respond in English.'
-
-    const prompt = `You are evaluating a student's prediction in a "What If?" learning scenario.
-
-Expected consequences:
-${expectedConsequences.map((c, i) => `${i + 1}. ${c.concept}: ${c.consequence}`).join('\n')}
-
-Student's prediction:
-"${userPrediction}"
-
-Your task is to:
-1. Identify which expected consequences the student mentioned (semantic matching, not exact words)
-2. Provide encouraging, non-judgmental feedback for each match
-3. List consequences they didn't mention (as learning opportunities, not failures)
-
-IMPORTANT: Every prediction is valuable. Even if they missed everything, award at least 10 XP for thinking.
-
-Scoring:
-- 3+ matches: 50 XP - "Amazing scientific thinking!"
-- 2 matches: 35 XP - "Great predictions!"
-- 1 match: 20 XP - "Good start! Here's more..."
-- 0 matches: 10 XP - "Interesting ideas! Let's see..."
-
-${languageNote}
-
-Respond with ONLY valid JSON (no markdown, no code blocks):
-{
-  "matchedPredictions": [
-    {
-      "concept": "concept_name",
-      "userPhrase": "phrase they used that matched",
-      "feedback": "Yes! [encouraging validation]"
-    }
-  ],
-  "missedConsequences": [
-    {
-      "concept": "concept_name",
-      "reveal": "Educational reveal of this consequence"
-    }
-  ],
-  "xpEarned": 50
-}`
-
-    const response = await ai.models.generateContent({
-      model: FAST_MODEL,
-      contents: prompt,
-      config: {
-        temperature: 0.6,
-        maxOutputTokens: 600,
-        responseMimeType: 'application/json',
-      }
-    })
-
-    const text = response.text || ''
-    let extracted
-    try {
-      const jsonStr = repairJSON(extractJSON(text))
-      extracted = JSON.parse(jsonStr)
-    } catch (parseError) {
-      console.error('[Gemini] What If evaluation failed to parse JSON:', {
-        error: parseError.message,
-        preview: text.substring(0, 400),
-      })
-      return { error: 'PARSE_ERROR' }
-    }
-
-    // Ensure arrays exist
-    const matchedPredictions = Array.isArray(extracted?.matchedPredictions)
-      ? extracted.matchedPredictions.filter(m => m && typeof m === 'object').slice(0, 6)
-      : []
-
-    const missedConsequences = Array.isArray(extracted?.missedConsequences)
-      ? extracted.missedConsequences.filter(m => m && typeof m === 'object').slice(0, 6)
-      : []
-
-    // Calculate XP based on matches (ensure always positive)
-    let xpEarned = 10 // Minimum baseline
-    const matchCount = matchedPredictions.length
-
-    if (matchCount >= 3) {
-      xpEarned = 50
-    } else if (matchCount === 2) {
-      xpEarned = 35
-    } else if (matchCount === 1) {
-      xpEarned = 20
-    }
-
-    return {
-      matchedPredictions,
-      missedConsequences,
-      xpEarned,
-      error: null
-    }
-  } catch (error) {
-    console.error('[Gemini] What If evaluation error:', error.message)
-
-    if (error.message?.includes('quota') || error.message?.includes('rate')) {
-      return { error: 'RATE_LIMITED' }
-    }
-    if (error.message?.includes('JSON')) {
-      return { error: 'PARSE_ERROR' }
-    }
-
-    return { error: error.message || 'UNKNOWN_ERROR' }
-  }
-}
-
 export default {
   isGeminiAvailable,
   generateScript,
@@ -3544,6 +3764,8 @@ export default {
   generateLivingWorldEvolutionPlan,
   generateLivingWorldImage,
   generateWhatIfScenario,
-  evaluateWhatIfPrediction,
   detectLanguage,
+  generateStoryPrompt,
+  generateStoryChapter,
+  extractStoryScene,
 }

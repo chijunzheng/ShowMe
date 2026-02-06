@@ -9,7 +9,7 @@
 import { Router } from 'express'
 import rateLimit from 'express-rate-limit'
 import { generateMystery, evaluateMysteryTheory } from '../services/mysteryGenerator.js'
-import { generateWhatIfScenario, detectLanguage, generateStoryPrompt, extractStoryScene, generateEducationalImage, generateTTS } from '../services/gemini.js'
+import { generateWhatIfScenario, detectLanguage, generateStoryPrompt, generateStoryChapter, extractStoryScene, generateEducationalImage, generateTTS } from '../services/gemini.js'
 import logger from '../utils/logger.js'
 
 const router = Router()
@@ -665,12 +665,8 @@ router.post('/whatif/reveal-assets', learnRateLimit, async (req, res) => {
       })
     }
 
-    if (!bonusFactNarration || typeof bonusFactNarration !== 'string') {
-      return res.status(400).json({
-        error: 'Missing or invalid bonusFactNarration',
-        field: 'bonusFactNarration'
-      })
-    }
+    // bonusFactNarration is optional — AI may not always generate one
+    const hasBonusFact = bonusFactNarration && typeof bonusFactNarration === 'string' && bonusFactNarration.trim().length > 0
 
     if (!topicName || typeof topicName !== 'string') {
       return res.status(400).json({
@@ -737,15 +733,17 @@ router.post('/whatif/reveal-assets', learnRateLimit, async (req, res) => {
           audioUrl
         }))
       ),
-      // Bonus fact audio
-      (async () => {
-        try {
-          return await generateTTS(bonusFactNarration)
-        } catch (error) {
-          logger.error('LEARN', 'Bonus fact audio generation failed', { error: error.message })
-          return null
-        }
-      })()
+      // Bonus fact audio (skip if no narration provided)
+      hasBonusFact
+        ? (async () => {
+            try {
+              return await generateTTS(bonusFactNarration)
+            } catch (error) {
+              logger.error('LEARN', 'Bonus fact audio generation failed', { error: error.message })
+              return null
+            }
+          })()
+        : Promise.resolve(null)
     ])
 
     // Extract results: first=scenario audio, last=bonus audio, middle=consequence assets
@@ -762,9 +760,12 @@ router.post('/whatif/reveal-assets', learnRateLimit, async (req, res) => {
     })
 
     return res.json({
-      scenarioAudioUrl: scenarioAudioResult,
-      revealAssets: consequenceResults,
-      bonusFactAudioUrl: bonusFactAudioResult
+      scenarioAudioUrl: scenarioAudioResult?.audioUrl || null,
+      revealAssets: consequenceResults.map((result) => ({
+        ...result,
+        audioUrl: result.audioUrl?.audioUrl || null,
+      })),
+      bonusFactAudioUrl: bonusFactAudioResult?.audioUrl || null,
     })
   } catch (error) {
     logger.error('LEARN', 'Reveal assets generation error', {
@@ -788,6 +789,11 @@ router.post('/whatif/reveal-assets', learnRateLimit, async (req, res) => {
  * - conceptChecklist: array - Key concepts to use in story
  * - starterSuggestion: string - Opening line suggestion
  * - imageStyle: string - Style guide for illustration generation
+ * - missionHook: string - Short 2-3 sentence hook for TTS narration
+ * - conceptCards: array - Concept cards with icons and descriptions
+ * - chapters: object - Chapter prompts and choices
+ * - sceneImage: string - Generated scene image (base64 data URL) or null
+ * - missionHookAudio: string - Generated TTS audio (base64) or null
  */
 router.post('/story', learnRateLimit, async (req, res) => {
   const startTime = Date.now()
@@ -841,7 +847,13 @@ router.post('/story', learnRateLimit, async (req, res) => {
           : 'Once upon a time...',
         imageStyle: language === 'zh'
           ? '儿童图书插图，色彩鲜艳，友好'
-          : "children's book illustration, colorful, friendly"
+          : "children's book illustration, colorful, friendly",
+        missionHook: language === 'zh'
+          ? `创作一个关于${topicName}的故事`
+          : `Create a story about ${topicName}`,
+        sceneImagePrompt: '',
+        conceptCards: [],
+        chapters: {}
       }
     } else {
       storyData = {
@@ -849,13 +861,60 @@ router.post('/story', learnRateLimit, async (req, res) => {
         conceptChecklist: result.conceptChecklist,
         starterSuggestion: result.starterSuggestion,
         imageStyle: result.imageStyle,
+        missionHook: result.missionHook,
+        sceneImagePrompt: result.sceneImagePrompt,
+        conceptCards: result.conceptCards,
+        chapters: result.chapters,
       }
     }
 
-    const duration = Date.now() - startTime
-    logger.info('LEARN', 'Story prompt generated', { duration, language })
+    // Generate scene image and mission hook audio in parallel (non-fatal)
+    const parallelResults = await Promise.allSettled([
+      // Scene image generation
+      (async () => {
+        if (!storyData.sceneImagePrompt) return null
+        try {
+          const imageResult = await generateEducationalImage(storyData.sceneImagePrompt, {
+            topic: topicName,
+            explanationLevel: 'simple',
+            language
+          })
+          return imageResult.error ? null : imageResult.imageUrl
+        } catch (error) {
+          logger.error('LEARN', 'Scene image generation failed', { error: error.message })
+          return null
+        }
+      })(),
+      // Mission hook TTS generation
+      (async () => {
+        if (!storyData.missionHook) return null
+        try {
+          const ttsResult = await generateTTS(storyData.missionHook)
+          return ttsResult?.audioUrl || null
+        } catch (error) {
+          logger.error('LEARN', 'Mission hook audio generation failed', { error: error.message })
+          return null
+        }
+      })()
+    ])
 
-    return res.json(storyData)
+    // Extract results from Promise.allSettled
+    const sceneImage = parallelResults[0].status === 'fulfilled' ? parallelResults[0].value : null
+    const missionHookAudio = parallelResults[1].status === 'fulfilled' ? parallelResults[1].value : null
+
+    const duration = Date.now() - startTime
+    logger.info('LEARN', 'Story prompt generated', {
+      duration,
+      language,
+      hasSceneImage: !!sceneImage,
+      hasMissionAudio: !!missionHookAudio
+    })
+
+    return res.json({
+      ...storyData,
+      sceneImage,
+      missionHookAudio
+    })
 
   } catch (error) {
     const duration = Date.now() - startTime
@@ -866,6 +925,132 @@ router.post('/story', learnRateLimit, async (req, res) => {
 
     return res.status(500).json({
       error: 'Failed to generate story prompt',
+      message: error.message
+    })
+  }
+})
+
+/**
+ * POST /api/learn/story/chapter
+ * Generate next chapter illustration and choices based on previous selections
+ *
+ * Request body:
+ * - topicName: string - The topic being learned
+ * - conceptChecklist: array - List of key concepts
+ * - previousChapters: array - Array of {chapter: number, selectedText: string}
+ * - currentChapter: number - Current chapter number (2 or 3)
+ * - imageStyle: string - Style guide for illustration generation
+ * - language: string - Optional language code (auto-detected if not provided)
+ *
+ * Response:
+ * - illustration: object - {imageUrl: string|null, sceneDescription: string}
+ * - nextChapter: object|null - Next chapter prompt and choices (null if final chapter)
+ * - conceptsFound: array - Concepts detected in previous chapters
+ */
+router.post('/story/chapter', learnRateLimit, async (req, res) => {
+  const startTime = Date.now()
+
+  try {
+    const { topicName, conceptChecklist, previousChapters, currentChapter, imageStyle, language } = req.body
+
+    // Validate required fields
+    if (!topicName || typeof topicName !== 'string') {
+      return res.status(400).json({
+        error: 'Missing or invalid topicName',
+        field: 'topicName'
+      })
+    }
+
+    if (!Array.isArray(previousChapters) || previousChapters.length === 0) {
+      return res.status(400).json({
+        error: 'Missing or invalid previousChapters array (must be non-empty)',
+        field: 'previousChapters'
+      })
+    }
+
+    if (typeof currentChapter !== 'number' || currentChapter < 2 || currentChapter > 3) {
+      return res.status(400).json({
+        error: 'Invalid currentChapter (must be 2 or 3)',
+        field: 'currentChapter'
+      })
+    }
+
+    // Detect language if not provided
+    const detectedLanguage = language || detectLanguage(topicName)
+
+    logger.info('LEARN', 'Generating story chapter', {
+      topicName,
+      currentChapter,
+      previousChapterCount: previousChapters.length,
+      language: detectedLanguage
+    })
+
+    // Generate chapter data
+    const chapterResult = await generateStoryChapter({
+      topicName,
+      conceptChecklist: conceptChecklist || [],
+      previousChapters,
+      currentChapter,
+      imageStyle: imageStyle || "children's book illustration, colorful, friendly",
+      language: detectedLanguage
+    })
+
+    if (chapterResult.error) {
+      logger.error('LEARN', 'Story chapter generation failed', { error: chapterResult.error })
+
+      if (chapterResult.error === 'API_NOT_AVAILABLE') {
+        return res.status(503).json({ error: 'API_NOT_AVAILABLE' })
+      }
+
+      if (chapterResult.error === 'RATE_LIMITED') {
+        return res.status(429).json({ error: 'RATE_LIMITED' })
+      }
+
+      return res.status(500).json({ error: chapterResult.error })
+    }
+
+    // Generate illustration in parallel (non-fatal)
+    let imageUrl = null
+    if (chapterResult.illustration?.imagePrompt) {
+      try {
+        const imageResult = await generateEducationalImage(chapterResult.illustration.imagePrompt, {
+          topic: topicName,
+          explanationLevel: 'simple',
+          language: detectedLanguage
+        })
+        imageUrl = imageResult.error ? null : imageResult.imageUrl
+      } catch (error) {
+        logger.error('LEARN', 'Chapter illustration generation failed', { error: error.message })
+      }
+    }
+
+    const duration = Date.now() - startTime
+    logger.info('LEARN', 'Story chapter generated', {
+      duration,
+      currentChapter,
+      hasImage: !!imageUrl,
+      hasNextChapter: !!chapterResult.nextChapter,
+      conceptsFound: chapterResult.conceptsFound.length
+    })
+
+    return res.json({
+      illustration: {
+        imageUrl,
+        sceneDescription: chapterResult.illustration?.sceneDescription || ''
+      },
+      nextChapter: chapterResult.nextChapter,
+      conceptsFound: chapterResult.conceptsFound
+    })
+
+  } catch (error) {
+    const duration = Date.now() - startTime
+    logger.error('LEARN', 'Story chapter generation failed', {
+      error: error.message,
+      duration
+    })
+
+    return res.status(500).json({
+      error: 'Failed to generate story chapter',
       message: error.message
     })
   }
