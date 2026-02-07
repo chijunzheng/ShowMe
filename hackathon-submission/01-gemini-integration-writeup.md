@@ -1,0 +1,7 @@
+# Gemini Integration Write-Up
+
+ShowMe is a voice-first educational platform built entirely on Gemini 3's multimodal capabilities. When a child speaks a question, **Gemini 3 Flash** performs real-time speech-to-text transcription, then generates a structured lesson script with slide-by-slide image prompts and narration text. **Gemini 3 Pro Image** (Nano Banana Pro) renders educational diagrams for each slide, while **Gemini TTS** narrates them - all generated in parallel to deliver a complete visual explanation in under 30 seconds.
+
+Beyond passive slideshows, Gemini 3 powers three active learning modes. **Mystery Lab** uses Gemini to generate detective scenarios with crime scenes, witness interviews, and evidence chains derived from lesson content. **Wonder Lab** generates "what-if" counterfactual scenarios with prediction cards and AI-illustrated consequence reveals. **Story Studio** produces branching narratives where each chapter is illustrated by Gemini 3 Pro Image in real-time.
+
+Gemini also drives the **Knowledge Constellation** - an AI-powered knowledge graph where `gemini-2.5-flash-lite` discovers semantic relationships between learned topics, identifies knowledge gaps, and suggests optimal learning paths. Quiz generation, Socratic questioning, topic classification, and adaptive difficulty are all Gemini-powered, making Gemini 3 the reasoning engine behind every interaction in ShowMe.
