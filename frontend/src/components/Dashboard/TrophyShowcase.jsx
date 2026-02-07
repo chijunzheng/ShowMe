@@ -189,14 +189,12 @@ function TrophyItem({ trophy, isRecent, isMostRecent, isSelected, onClick }) {
         {trophy.name || 'Unknown'}
       </span>
 
-      {/* Description shown on selection */}
-      {isSelected && (
-        <span className="text-[11px] text-slate-500 dark:text-slate-400 text-center leading-tight">
-          {isLocked
-            ? trophy.criteriaText || 'Keep exploring to unlock!'
-            : trophy.description || ''}
-        </span>
-      )}
+      {/* Criteria / description always visible */}
+      <span className="text-[11px] text-slate-500 dark:text-slate-400 text-center leading-tight">
+        {isLocked
+          ? trophy.criteriaText || 'Keep exploring to unlock!'
+          : trophy.description || ''}
+      </span>
 
       {/* New badge */}
       {showNew && (

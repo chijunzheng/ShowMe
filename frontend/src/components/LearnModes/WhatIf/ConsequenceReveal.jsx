@@ -13,8 +13,9 @@ import { vibrateSuccess, vibrateShort } from '../../../utils/haptics'
  * @param {Object} props
  * @param {Array} props.revealAssets - Array of {id, imageUrl, audioUrl, text, isCorrect, revealNarration}
  * @param {Set} props.userSelections - Set of card IDs the user selected
- * @param {Function} props.narrate - Narration function from useWonderNarration (fallback)
- * @param {Function} props.play - Play pre-generated audio URL directly
+ * @param {Function} props.narrate - JIT narration function from useWonderNarration
+ * @param {Function} props.play - Play pre-generated audio URL directly (backwards compat)
+ * @param {Function} props.prefetch - Prefetch TTS for upcoming narration text
  * @param {boolean} props.isPlaying - TTS playing state
  * @param {boolean} props.isLoading - TTS loading state
  * @param {Function} props.onComplete - Callback when all reveals done
@@ -24,6 +25,7 @@ export default function ConsequenceReveal({
   userSelections = new Set(),
   narrate,
   play,
+  prefetch,
   isPlaying = false,
   isLoading = false,
   onComplete,
@@ -57,11 +59,17 @@ export default function ConsequenceReveal({
       void narrate(currentAsset.revealNarration, `reveal-${currentAsset.id}`)
     }
 
+    // Pipeline: prefetch next consequence's TTS
+    const nextAsset = revealAssets[currentIndex + 1]
+    if (nextAsset?.revealNarration && prefetch) {
+      prefetch(nextAsset.revealNarration, `reveal-${nextAsset.id}`)
+    }
+
     // Vibrate for correct prediction
     if (userPredictedCorrectly) {
       vibrateSuccess()
     }
-  }, [currentAsset, narrate, play, hasNarrated, userPredictedCorrectly])
+  }, [currentAsset, narrate, play, hasNarrated, userPredictedCorrectly, prefetch, currentIndex, revealAssets])
 
   const handleImageLoad = () => {
     setImageLoaded(true)

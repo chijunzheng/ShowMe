@@ -38,10 +38,34 @@ export default function CrimeSceneScan({
   const requiredCount = requiredHotspots.length
   const allRequiredFound = requiredCount > 0 && foundRequiredCount >= requiredCount
 
-  const discoveredEvidence = evidenceCards.filter((card) => {
-    const cardId = String(card?.id || '')
-    return hotspots.some((spot) => String(spot?.evidenceId) === cardId && foundIds.has(String(spot?.id)))
-  })
+  const discoveredEvidence = useMemo(() => {
+    const seen = new Set()
+    const results = []
+
+    for (const spot of hotspots) {
+      if (!foundIds.has(String(spot?.id))) continue
+      const eid = String(spot?.evidenceId || '')
+      const card = evidenceCards.find((c) => String(c?.id) === eid)
+      if (card && !seen.has(card.id)) {
+        seen.add(card.id)
+        results.push(card)
+      }
+    }
+
+    // Index-based fallback when evidenceId linkage is broken
+    if (results.length === 0 && foundIds.size > 0) {
+      const foundHotspots = hotspots.filter((s) => foundIds.has(String(s?.id)))
+      for (const [i, spot] of foundHotspots.entries()) {
+        const card = evidenceCards[i]
+        if (card && !seen.has(card.id)) {
+          seen.add(card.id)
+          results.push(card)
+        }
+      }
+    }
+
+    return results
+  }, [hotspots, evidenceCards, foundIds])
 
   const bonusFound = hotspots.filter((spot) => Boolean(spot?.bonus) && foundIds.has(String(spot?.id))).length
 

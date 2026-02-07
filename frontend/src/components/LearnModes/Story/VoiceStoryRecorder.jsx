@@ -14,6 +14,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import LiveCanvas from './LiveCanvas'
 import ConceptTracker from './ConceptTracker'
 import logger from '../../../utils/logger'
+import { toApiUrl } from '../../../utils/api'
 
 // Speech recognition error messages
 const SPEECH_ERROR_MESSAGES = {
@@ -23,8 +24,6 @@ const SPEECH_ERROR_MESSAGES = {
   'network': 'Network error. Please check your connection.',
   'aborted': 'Recording was interrupted. Please try again.',
 }
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
 
 // Maximum scenes allowed
 const MAX_SCENES = 6
@@ -210,7 +209,7 @@ export default function VoiceStoryRecorder({
     })
 
     try {
-      const response = await fetch(`${API_BASE}/api/learn/story/scene`, {
+      const response = await fetch(toApiUrl('/api/learn/story/scene'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

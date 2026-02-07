@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react'
 import MysteryLab from '../MysteryLab'
-import { getMysteryLoaderFacts } from '../mysteryLoaderFacts'
 
 const mockNarrate = vi.fn()
 const mockStop = vi.fn()
@@ -232,7 +231,7 @@ describe('MysteryLab - Crime Scene Ops', () => {
     expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ completed: true }))
   })
 
-  it('transitions to briefing before image generation resolves', async () => {
+  it('waits for image and TTS before transitioning to briefing', async () => {
     const imageDeferred = createDeferred()
 
     const fetchMock = vi.fn((url) => {
@@ -263,21 +262,22 @@ describe('MysteryLab - Crime Scene Ops', () => {
       />
     )
 
-    expect(await screen.findByRole('button', { name: /investigate/i })).toBeInTheDocument()
-    expect(screen.queryByTestId('mystery-loader-stage')).not.toBeInTheDocument()
+    // Should still be loading while image is pending
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByTestId('mystery-loader-stage')).toBeInTheDocument()
 
+    // Resolve image — should then transition to briefing
     imageDeferred.resolve({
       ok: true,
       status: 200,
       json: () => Promise.resolve({ imageUrl: 'https://example.com/scene.png' }),
     })
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/learn/mystery/image'), expect.any(Object))
-    })
+    expect(await screen.findByRole('button', { name: /investigate/i })).toBeInTheDocument()
+    expect(screen.queryByTestId('mystery-loader-stage')).not.toBeInTheDocument()
   })
 
-  it('renders scene image when image generation resolves after 12s', async () => {
+  it('renders scene image once loaded even if slow', async () => {
     vi.useFakeTimers()
 
     const fetchMock = vi.fn((url, options = {}) => {
@@ -319,17 +319,17 @@ describe('MysteryLab - Crime Scene Ops', () => {
       />
     )
 
-    await act(async () => {
-      await Promise.resolve()
-    })
+    // Should still be in loading state (image hasn't resolved)
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByTestId('mystery-loader-stage')).toBeInTheDocument()
 
-    expect(screen.getByRole('button', { name: /investigate/i })).toBeInTheDocument()
-
+    // Advance past image delay — image resolves, transitions to briefing
     await act(async () => {
       await vi.advanceTimersByTimeAsync(13100)
       await Promise.resolve()
     })
 
+    expect(screen.getByRole('button', { name: /investigate/i })).toBeInTheDocument()
     const image = screen.getByAltText('Mystery scene')
     expect(image.getAttribute('src')).toContain('late-scene.png')
   })
@@ -395,9 +395,8 @@ describe('MysteryLab - Crime Scene Ops', () => {
     expect(mockNarrate).toHaveBeenCalledTimes(1)
   })
 
-  it('falls back to local fact when engagement request fails and narrates once', async () => {
+  it('shows no fun fact when engagement request fails', async () => {
     vi.useFakeTimers()
-    const fallbackFacts = getMysteryLoaderFacts('deep')
 
     const fetchMock = vi.fn((url, options = {}) => {
       if (String(url).includes('/api/learn/mystery')) {
@@ -422,31 +421,17 @@ describe('MysteryLab - Crime Scene Ops', () => {
     )
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(901)
-    })
-
-    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000)
       await Promise.resolve()
     })
 
-    expect(screen.getByText(fallbackFacts[0].text)).toBeInTheDocument()
-    expect(mockNarrate).toHaveBeenCalledWith(
-      `Fun fact: ${fallbackFacts[0].text}`,
-      `loader-fun-fact:${fallbackFacts[0].text}`
-    )
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(30000)
-      await Promise.resolve()
-    })
-
-    expect(mockNarrate).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId('mystery-loader-fun-fact')).not.toBeInTheDocument()
+    expect(mockNarrate).not.toHaveBeenCalled()
   })
 
-  it('does not swap displayed fact after it is shown when API resolves late', async () => {
+  it('shows API fact once it resolves even if delayed', async () => {
     vi.useFakeTimers()
-    const fallbackFacts = getMysteryLoaderFacts('standard')
-    const lateApiFact = 'Late API fact should not replace displayed fallback.'
+    const lateApiFact = 'Late API fact appears once resolved.'
 
     const fetchMock = vi.fn((url, options = {}) => {
       if (String(url).includes('/api/learn/mystery')) {
@@ -469,7 +454,7 @@ describe('MysteryLab - Crime Scene Ops', () => {
                 suggestedQuestions: [],
               }),
             })
-          }, 2000)
+          }, 3000)
 
           options.signal?.addEventListener('abort', () => {
             clearTimeout(timerId)
@@ -491,20 +476,20 @@ describe('MysteryLab - Crime Scene Ops', () => {
       />
     )
 
+    // No fact shown before API resolves
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(901)
+      await vi.advanceTimersByTimeAsync(1000)
+      await Promise.resolve()
+    })
+    expect(screen.queryByTestId('mystery-loader-fun-fact')).not.toBeInTheDocument()
+
+    // Advance past API delay — fact appears
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2500)
       await Promise.resolve()
     })
 
-    expect(screen.getByText(fallbackFacts[0].text)).toBeInTheDocument()
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2000)
-      await Promise.resolve()
-    })
-
-    expect(screen.getByText(fallbackFacts[0].text)).toBeInTheDocument()
-    expect(screen.queryByText(lateApiFact)).not.toBeInTheDocument()
+    expect(screen.getByText(lateApiFact)).toBeInTheDocument()
   })
 
   it('cleans loader timers and requests on unmount without state warnings', async () => {

@@ -13,18 +13,28 @@
  * - 0/2 correct = 10 XP
  */
 
-import { useReducer, useEffect, useMemo, useRef } from 'react'
+import { useReducer, useEffect, useMemo, useRef, useState } from 'react'
 import useWonderNarration from './useWonderNarration'
 import SceneIntro from './SceneIntro'
 import PredictionCards from './PredictionCards'
 import ExperimentLoader from './ExperimentLoader'
 import ConsequenceReveal from './ConsequenceReveal'
 import ResultsSummary from './ResultsSummary'
+import { getWonderLoaderStages } from './wonderLoaderFacts'
 import logger from '../../../utils/logger'
 import { buildLearnSlidesPayload } from '../../../utils/learnSlidesPayload'
+import { toApiUrl } from '../../../utils/api'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
-const READINESS_TIMEOUT_MS = 12000
+const FAILSAFE_TIMEOUT_MS = 30000
+const STAGE_ROTATE_MS = 2500
+const LOADER_FACT_TTS_CACHE_KEY_PREFIX = 'wonder-loader-fun-fact:'
+const DEFAULT_FACT_QUERY = 'science experiments what if'
+
+function normalizeFunFact(rawFact) {
+  const text = typeof rawFact?.text === 'string' ? rawFact.text.trim() : ''
+  if (!text) return null
+  return { emoji: rawFact?.emoji || '🔬', text }
+}
 
 // State machine states
 const STATE = {
@@ -45,6 +55,7 @@ const ACTION = {
   SUBMIT_PREDICTIONS: 'SUBMIT_PREDICTIONS',
   REVEALS_READY: 'REVEALS_READY',
   REVEALS_COMPLETE: 'REVEALS_COMPLETE',
+  REVEAL_FUN_FACT_LOADED: 'REVEAL_FUN_FACT_LOADED',
   ERROR: 'ERROR',
   RETRY: 'RETRY',
 }
@@ -57,9 +68,8 @@ const initialState = {
   predictionCards: [],
   selectedCards: [],
   revealAssets: [],
-  scenarioAudioUrl: null,
-  bonusFactAudioUrl: null,
   bonusFact: null,
+  revealFunFact: null,
   xpEarned: 0,
   error: null,
   loadingProgress: { scenario: false, image: false, audio: false },
@@ -115,7 +125,7 @@ function wonderReducer(state, action) {
       }
 
     case ACTION.REVEALS_READY: {
-      const { revealAssets, scenarioAudioUrl, bonusFactAudioUrl } = action.payload
+      const { revealAssets } = action.payload
 
       // Calculate XP deterministically based on correct predictions
       const correctPredictions = state.selectedCards.filter((cardId) => {
@@ -129,8 +139,6 @@ function wonderReducer(state, action) {
       return {
         ...state,
         revealAssets,
-        scenarioAudioUrl,
-        bonusFactAudioUrl,
         xpEarned,
         currentState: STATE.REVEAL,
         error: null,
@@ -142,6 +150,9 @@ function wonderReducer(state, action) {
         ...state,
         currentState: STATE.RESULTS,
       }
+
+    case ACTION.REVEAL_FUN_FACT_LOADED:
+      return { ...state, revealFunFact: action.payload }
 
     case ACTION.ERROR:
       return {
@@ -184,6 +195,17 @@ export default function WonderLab({
   const slidePayload = useMemo(() => buildLearnSlidesPayload(slides), [slides])
   const loadRequestIdRef = useRef(0)
   const scenarioDataRef = useRef(null)
+  const imageReadyRef = useRef(false)
+  const audioReadyRef = useRef(false)
+
+  // Loader state (rotating stage text + fun fact with TTS)
+  const [loaderStageIndex, setLoaderStageIndex] = useState(0)
+  const [loaderFunFact, setLoaderFunFact] = useState(null)
+  const [showFunFact, setShowFunFact] = useState(false)
+  const narratedLoaderFactTextRef = useRef('')
+
+  const loaderStages = useMemo(() => getWonderLoaderStages(explanationLevel), [explanationLevel])
+  const loaderStageText = loaderStages[loaderStageIndex % Math.max(loaderStages.length, 1)] || 'Setting up the experiment...'
 
   // Extract correct consequences for reveal
   const correctConsequences = useMemo(() => {
@@ -196,6 +218,101 @@ export default function WonderLab({
       return card && card.isCorrect
     }).length
   }, [state.selectedCards, state.predictionCards])
+
+  // Reset loader state when entering LOADING
+  useEffect(() => {
+    if (state.currentState !== STATE.LOADING) return
+    setLoaderStageIndex(0)
+    setLoaderFunFact(null)
+    setShowFunFact(false)
+    narratedLoaderFactTextRef.current = ''
+  }, [state.currentState])
+
+  // Rotate stage text while loading
+  useEffect(() => {
+    if (state.currentState !== STATE.LOADING || loaderStages.length <= 1) return
+
+    const stageIntervalId = setInterval(() => {
+      setLoaderStageIndex((prev) => (prev + 1) % loaderStages.length)
+    }, STAGE_ROTATE_MS)
+
+    return () => clearInterval(stageIntervalId)
+  }, [state.currentState, loaderStages.length])
+
+  // Fetch fun fact from engagement API + prefetch TTS
+  useEffect(() => {
+    if (state.currentState !== STATE.LOADING) return
+
+    const controller = new AbortController()
+
+    const fetchApiFact = async () => {
+      const queryCandidate = topicName || DEFAULT_FACT_QUERY
+      const query = typeof queryCandidate === 'string' && queryCandidate.trim()
+        ? queryCandidate.trim()
+        : DEFAULT_FACT_QUERY
+
+      try {
+        const response = await fetch(toApiUrl('/api/generate/engagement'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, explanationLevel, skipTTS: true }),
+          signal: controller.signal,
+        })
+
+        if (!response.ok) {
+          throw new Error(`Engagement API error: ${response.status}`)
+        }
+
+        const payload = await response.json()
+        const resolvedFact = normalizeFunFact(payload?.funFact)
+
+        if (!resolvedFact) {
+          throw new Error('Missing fun fact payload')
+        }
+
+        if (controller.signal.aborted) return
+
+        const factText = `Fun fact: ${resolvedFact.text}`
+        const cacheKey = `${LOADER_FACT_TTS_CACHE_KEY_PREFIX}${resolvedFact.text}`
+        await prefetch(factText, cacheKey)
+
+        if (!controller.signal.aborted) {
+          setLoaderFunFact(resolvedFact)
+          setShowFunFact(true)
+        }
+
+        logger.debug('WONDER', 'Loader fun fact resolved with TTS', {
+          source: 'api',
+          query,
+          explanationLevel,
+        })
+      } catch (error) {
+        if (error.name === 'AbortError') return
+        logger.warn('WONDER', 'Loader fun fact request failed', {
+          error: error.message,
+        })
+      }
+    }
+
+    void fetchApiFact()
+
+    return () => {
+      controller.abort()
+    }
+  }, [state.currentState, topicName, explanationLevel])
+
+  // Auto-narrate fun fact when it appears
+  useEffect(() => {
+    if (state.currentState !== STATE.LOADING || !showFunFact) return
+    if (!loaderFunFact?.text) return
+    if (narratedLoaderFactTextRef.current === loaderFunFact.text) return
+
+    narratedLoaderFactTextRef.current = loaderFunFact.text
+    void narrate(
+      `Fun fact: ${loaderFunFact.text}`,
+      `${LOADER_FACT_TTS_CACHE_KEY_PREFIX}${loaderFunFact.text}`
+    )
+  }, [state.currentState, showFunFact, loaderFunFact, narrate])
 
   // Phase 1: Load scenario on mount
   useEffect(() => {
@@ -214,7 +331,7 @@ export default function WonderLab({
         })
 
         // Fetch scenario (text-only, fast)
-        const response = await fetch(`${API_BASE}/api/learn/whatif`, {
+        const response = await fetch(toApiUrl('/api/learn/whatif'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -254,22 +371,35 @@ export default function WonderLab({
         const imagePrompt = data.scenarioImagePrompt
         const introNarration = data.scenarioNarration
 
-        // Readiness timeout: if assets aren't ready in 12s, proceed anyway
-        let timedOut = false
+        // Failsafe: only force-complete assets that haven't loaded after 30s
         readinessTimeoutId = setTimeout(() => {
           if (!isStale()) {
-            timedOut = true
-            dispatch({ type: ACTION.ASSET_LOADED, payload: 'image' })
-            dispatch({ type: ACTION.ASSET_LOADED, payload: 'audio' })
+            if (!imageReadyRef.current) {
+              logger.warn('WONDER', 'Image failsafe triggered')
+              imageReadyRef.current = true
+              dispatch({ type: ACTION.ASSET_LOADED, payload: 'image' })
+            }
+            if (!audioReadyRef.current) {
+              logger.warn('WONDER', 'Audio failsafe triggered')
+              audioReadyRef.current = true
+              dispatch({ type: ACTION.ASSET_LOADED, payload: 'audio' })
+            }
           }
-        }, READINESS_TIMEOUT_MS)
+        }, FAILSAFE_TIMEOUT_MS)
 
         await Promise.all([
           (async () => {
             if (imagePrompt) {
-              await fetchScenarioImage(imagePrompt, controller)
+              const imageUrl = await fetchScenarioImage(imagePrompt, controller)
+              if (imageUrl && !isStale()) {
+                dispatch({ type: ACTION.IMAGE_LOADED, payload: imageUrl })
+                await preloadImageInBrowser(imageUrl)
+              }
             }
-            if (!isStale() && !timedOut) dispatch({ type: ACTION.ASSET_LOADED, payload: 'image' })
+            if (!isStale() && !imageReadyRef.current) {
+              imageReadyRef.current = true
+              dispatch({ type: ACTION.ASSET_LOADED, payload: 'image' })
+            }
           })(),
           (async () => {
             if (introNarration) {
@@ -279,7 +409,10 @@ export default function WonderLab({
                 // TTS prefetch failed, proceed without
               }
             }
-            if (!isStale() && !timedOut) dispatch({ type: ACTION.ASSET_LOADED, payload: 'audio' })
+            if (!isStale() && !audioReadyRef.current) {
+              audioReadyRef.current = true
+              dispatch({ type: ACTION.ASSET_LOADED, payload: 'audio' })
+            }
           })(),
         ])
 
@@ -297,32 +430,25 @@ export default function WonderLab({
       }
     }
 
-    const fetchScenarioImage = async (imagePrompt, controller) => {
+    const fetchScenarioImage = async (imagePrompt, abortController) => {
       try {
-        const response = await fetch(`${API_BASE}/api/learn/mystery/image`, {
+        const response = await fetch(toApiUrl('/api/learn/mystery/image'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            imagePrompt,
-            topicName,
-            explanationLevel,
-          }),
-          signal: controller.signal,
+          body: JSON.stringify({ imagePrompt, topicName, explanationLevel }),
+          signal: abortController.signal,
         })
-
         if (!response.ok) {
           logger.warn('WONDER', 'Scenario image generation failed')
-          return
+          return null
         }
-
         const data = await response.json()
-        if (data.imageUrl && !isStale()) {
-          dispatch({ type: ACTION.IMAGE_LOADED, payload: data.imageUrl })
-        }
+        return data.imageUrl || null
       } catch (error) {
         if (error.name !== 'AbortError') {
           logger.warn('WONDER', 'Image load error', { error: error.message })
         }
+        return null
       }
     }
 
@@ -332,6 +458,8 @@ export default function WonderLab({
       controller.abort()
       stop()
       if (readinessTimeoutId) clearTimeout(readinessTimeoutId)
+      imageReadyRef.current = false
+      audioReadyRef.current = false
     }
   }, [slidePayload, topicName, explanationLevel, stop, prefetch])
 
@@ -363,7 +491,7 @@ export default function WonderLab({
           revealImagePrompt: card.revealImagePrompt,
         }))
 
-        const response = await fetch(`${API_BASE}/api/learn/whatif/reveal-assets`, {
+        const response = await fetch(toApiUrl('/api/learn/whatif/reveal-assets'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -394,13 +522,19 @@ export default function WonderLab({
           }
         })
 
+        // Pipeline: prefetch TTS for first consequence before entering REVEAL
+        const firstAsset = enrichedRevealAssets[0]
+        if (firstAsset?.revealNarration) {
+          try {
+            await prefetch(firstAsset.revealNarration, `reveal-${firstAsset.id}`)
+          } catch {
+            // TTS prefetch failed, narrate() will handle JIT
+          }
+        }
+
         dispatch({
           type: ACTION.REVEALS_READY,
-          payload: {
-            revealAssets: enrichedRevealAssets,
-            scenarioAudioUrl: data.scenarioAudioUrl,
-            bonusFactAudioUrl: data.bonusFactAudioUrl,
-          },
+          payload: { revealAssets: enrichedRevealAssets },
         })
       } catch (error) {
         if (error.name === 'AbortError') {
@@ -415,12 +549,33 @@ export default function WonderLab({
       }
     }
 
+    const fetchRevealFunFact = async () => {
+      try {
+        const response = await fetch(toApiUrl('/api/generate/engagement'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: topicName, explanationLevel, skipTTS: true }),
+          signal: controller.signal,
+        })
+        if (!response.ok) return
+        const data = await response.json()
+        if (data.funFact?.text) {
+          dispatch({ type: ACTION.REVEAL_FUN_FACT_LOADED, payload: data.funFact.text })
+        }
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          logger.debug('WONDER', 'Reveal fun fact fetch failed (non-blocking)', { error: error.message })
+        }
+      }
+    }
+
+    fetchRevealFunFact()
     generateRevealAssets()
 
     return () => {
       controller.abort()
     }
-  }, [state.currentState, correctConsequences, topicName, explanationLevel])
+  }, [state.currentState, correctConsequences, topicName, explanationLevel, prefetch])
 
   // Handlers
   const handleStartPredictions = () => {
@@ -439,7 +594,24 @@ export default function WonderLab({
 
   const handleComplete = () => {
     stop()
-    onComplete?.({ xpEarned: state.xpEarned })
+    onComplete?.({
+      completed: true,
+      xpEarned: state.xpEarned,
+      correctCount,
+      totalCount: 2,
+      session: {
+        completedAt: Date.now(),
+        scenario: state.scenario || '',
+        scenarioImage: state.scenarioImage || null,
+        selectedCards: state.selectedCards || [],
+        predictionCards: state.predictionCards || [],
+        revealAssets: state.revealAssets || [],
+        correctCount,
+        totalCount: 2,
+        xpEarned: state.xpEarned || 0,
+        bonusFact: state.bonusFact || null,
+      },
+    })
   }
 
   const handleRetry = () => {
@@ -489,14 +661,11 @@ export default function WonderLab({
   }
 
   if (state.currentState === STATE.LOADING) {
-    const { scenario, image, audio } = state.loadingProgress
-    const progress = [scenario, image, audio].filter(Boolean).length
-    const progressPercent = Math.round((progress / 3) * 100)
-
     return (
       <ExperimentLoader
-        progress={progressPercent}
-        bonusFact={state.bonusFact}
+        stageText={loaderStageText}
+        funFact={showFunFact ? loaderFunFact : null}
+        factSource="api"
       />
     )
   }
@@ -548,7 +717,12 @@ export default function WonderLab({
   }
 
   if (state.currentState === STATE.GENERATING_REVEALS) {
-    return <ExperimentLoader message="Running the experiment..." bonusFact={state.bonusFact} />
+    return (
+      <ExperimentLoader
+        stageText="Running the experiment..."
+        funFact={state.revealFunFact ? { text: state.revealFunFact, emoji: '🔬' } : null}
+      />
+    )
   }
 
   if (state.currentState === STATE.REVEAL) {
@@ -558,6 +732,7 @@ export default function WonderLab({
         userSelections={new Set(state.selectedCards)}
         narrate={narrate}
         play={play}
+        prefetch={prefetch}
         isPlaying={isPlaying}
         isLoading={isNarrationLoading}
         onComplete={handleRevealsComplete}
@@ -578,6 +753,16 @@ export default function WonderLab({
   }
 
   return null
+}
+
+// Preload an image into the browser cache so it renders instantly
+function preloadImageInBrowser(url) {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve(true)
+    img.onerror = () => resolve(false)
+    img.src = url
+  })
 }
 
 // Error mapping helper

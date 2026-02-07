@@ -7,11 +7,12 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react'
 import logger from '../../../utils/logger'
+import { toApiUrl } from '../../../utils/api'
 
 // API configuration
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
-const TTS_ENDPOINT = `${API_BASE}/api/voice/speak`
+const TTS_ENDPOINT = toApiUrl('/api/voice/speak')
 const RATE_LIMIT_MS = 3000 // Minimum 3 seconds between API calls
+const PANEL_PAUSE_MS = 500
 
 /**
  * Custom hook for Story Studio TTS narration
@@ -28,6 +29,7 @@ export default function useStoryNarration() {
   const cacheRef = useRef(new Map()) // cacheKey -> audioUrl
   const lastRequestTimeRef = useRef(0)
   const requestIdRef = useRef(0)
+  const pendingPlaybackResolveRef = useRef(null)
 
   /**
    * Stop and clear the active audio element without touching request IDs.
@@ -41,6 +43,12 @@ export default function useStoryNarration() {
       audioRef.current.onended = null
       audioRef.current.onerror = null
       audioRef.current = null
+    }
+
+    const pendingResolve = pendingPlaybackResolveRef.current
+    if (pendingResolve) {
+      pendingPlaybackResolveRef.current = null
+      pendingResolve(false)
     }
   }, [])
 
@@ -116,6 +124,95 @@ export default function useStoryNarration() {
       setIsLoading(false)
       return false
     }
+  }, [])
+
+  /**
+   * Play audio and resolve only when playback completes or fails.
+   * Used for sequential panel narration.
+   *
+   * @param {string} audioUrl - Data URI or URL to audio
+   * @param {number} requestId - Active narration request ID
+   * @returns {Promise<boolean>} True when clip fully played, false if cancelled/failed
+   */
+  const playAudioBlocking = useCallback((audioUrl, requestId) => {
+    if (!audioUrl || requestId !== requestIdRef.current) {
+      return Promise.resolve(false)
+    }
+
+    return new Promise((resolve) => {
+      let settled = false
+      let audio = null
+
+      const finalize = (success) => {
+        if (settled) return
+        settled = true
+
+        if (pendingPlaybackResolveRef.current === finalize) {
+          pendingPlaybackResolveRef.current = null
+        }
+
+        if (audioRef.current === audio) {
+          audioRef.current.onplay = null
+          audioRef.current.onended = null
+          audioRef.current.onerror = null
+          audioRef.current = null
+        }
+
+        setIsPlaying(false)
+        setIsLoading(false)
+        resolve(success)
+      }
+
+      try {
+        audio = new Audio(audioUrl)
+        pendingPlaybackResolveRef.current = finalize
+        setIsLoading(true)
+
+        audio.onplay = () => {
+          if (requestId !== requestIdRef.current) {
+            finalize(false)
+            return
+          }
+          setIsLoading(false)
+          setIsPlaying(true)
+        }
+
+        audio.onended = () => {
+          if (requestId !== requestIdRef.current) {
+            finalize(false)
+            return
+          }
+          logger.debug('STORY_TTS', 'Blocking audio playback ended')
+          finalize(true)
+        }
+
+        audio.onerror = (event) => {
+          if (requestId !== requestIdRef.current) {
+            finalize(false)
+            return
+          }
+          const errorMessage = 'Audio playback error'
+          logger.error('STORY_TTS', errorMessage, { error: event })
+          setError(errorMessage)
+          finalize(false)
+        }
+
+        audioRef.current = audio
+        audio.play().catch((err) => {
+          if (requestId !== requestIdRef.current) {
+            finalize(false)
+            return
+          }
+          logger.error('STORY_TTS', 'Audio play() rejected', { error: err.message })
+          finalize(false)
+        })
+      } catch (playbackError) {
+        logger.error('STORY_TTS', 'Failed to create Audio element for blocking playback', {
+          error: playbackError.message,
+        })
+        finalize(false)
+      }
+    })
   }, [])
 
   /**
@@ -293,6 +390,89 @@ export default function useStoryNarration() {
   }, [])
 
   /**
+   * Narrate panel captions sequentially with short pauses.
+   *
+   * @param {string[]} captions - Ordered panel captions
+   * @param {string} chapterId - Identifier used for cache keys
+   * @returns {Promise<boolean>} True when finished, false if cancelled/failed
+   */
+  const narratePanels = useCallback(async (captions = [], chapterId = 'chapter') => {
+    const normalizedCaptions = Array.isArray(captions)
+      ? captions
+        .filter((caption) => typeof caption === 'string' && caption.trim().length > 0)
+        .map((caption) => caption.trim())
+        .slice(0, 4)
+      : []
+
+    if (normalizedCaptions.length === 0) {
+      return false
+    }
+
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
+    const isStale = () => requestId !== requestIdRef.current
+
+    stopCurrentAudio()
+    setError(null)
+    setIsPlaying(false)
+    setIsLoading(false)
+
+    for (let panelIndex = 0; panelIndex < normalizedCaptions.length; panelIndex += 1) {
+      if (isStale()) {
+        setIsLoading(false)
+        return false
+      }
+
+      const panelText = normalizedCaptions[panelIndex]
+      const cacheKey = `${chapterId}-panel-${panelIndex + 1}`
+      const prefetched = await prefetch(panelText, cacheKey)
+
+      if (isStale()) {
+        setIsLoading(false)
+        return false
+      }
+
+      if (!prefetched) {
+        setIsLoading(false)
+        return false
+      }
+
+      const audioUrl = cacheRef.current.get(cacheKey)
+      if (!audioUrl) {
+        setIsLoading(false)
+        return false
+      }
+
+      const played = await playAudioBlocking(audioUrl, requestId)
+      if (!played || isStale()) {
+        setIsLoading(false)
+        return false
+      }
+
+      if (panelIndex < normalizedCaptions.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, PANEL_PAUSE_MS))
+      }
+    }
+
+    setIsPlaying(false)
+    setIsLoading(false)
+    return !isStale()
+  }, [playAudioBlocking, prefetch, stopCurrentAudio])
+
+  /**
+   * Cache a pre-generated audio URL directly without TTS fetch
+   * @param {string} audioUrl - Pre-generated audio URL to cache
+   * @param {string} cacheKey - Unique key for caching
+   * @returns {boolean} True if cached successfully
+   */
+  const cacheAudio = useCallback((audioUrl, cacheKey) => {
+    if (!audioUrl || !cacheKey) return false
+    cacheRef.current.set(cacheKey, audioUrl)
+    logger.debug('STORY_TTS', 'Audio URL cached directly', { cacheKey })
+    return true
+  }, [])
+
+  /**
    * Play a pre-generated audio URL directly (no TTS fetch)
    * @param {string} audioUrl - Data URI or URL to audio
    * @returns {boolean} True if playback started
@@ -318,9 +498,11 @@ export default function useStoryNarration() {
 
   return {
     narrate,
+    narratePanels,
     play,
     stop,
     prefetch,
+    cacheAudio,
     isPlaying,
     isLoading,
     error,

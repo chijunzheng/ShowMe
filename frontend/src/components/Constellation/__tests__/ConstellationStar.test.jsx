@@ -234,12 +234,12 @@ describe('ConstellationStar', () => {
   })
 
   describe('visual appearance', () => {
-    it('has indigo background color', () => {
+    it('has stardust background color', () => {
       const props = createDefaultProps()
       render(<ConstellationStar {...props} />)
 
       const star = screen.getByTestId('constellation-star-node-1')
-      expect(star.className).toMatch(/indigo/)
+      expect(star.className).toMatch(/stardust/)
     })
 
     it('has rounded-full styling', () => {

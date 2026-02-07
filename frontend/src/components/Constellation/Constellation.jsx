@@ -10,7 +10,7 @@
  * - Pan with drag, zoom with wheel/pinch
  * - Touch-friendly with min 44px tap targets
  * - Accessible with keyboard navigation and ARIA labels
- * - Dark theme optimized (slate-950 background)
+ * - Dark theme optimized (warm night palette background)
  */
 
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
@@ -20,6 +20,15 @@ import ConstellationGap from './ConstellationGap'
 import DiscoverButton from './DiscoverButton'
 import useConstellationLayout from './useConstellationLayout'
 import { calculateGapPosition } from './constellationUtils'
+import {
+  getClusterStyle,
+  normalizeCategoryKey,
+  formatCategoryLabel,
+} from '../../utils/clusterStyle'
+import {
+  buildInferredCategoryEdges,
+  buildVisualCategoryClusters,
+} from './constellationCategoryGraph'
 
 /**
  * Zoom constraints
@@ -48,6 +57,43 @@ const BRIGHTNESS_PRIORITY = {
   dim: 1,
 }
 
+const NODE_RADIUS_BY_BRIGHTNESS = {
+  dim: 10,
+  glow: 12,
+  bright: 14,
+  brilliant: 18,
+}
+
+function normalizeTopicRef(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function trimLineEndpoints(fromPos, toPos, fromRadius = 0, toRadius = 0) {
+  const dx = toPos.x - fromPos.x
+  const dy = toPos.y - fromPos.y
+  const dist = Math.hypot(dx, dy)
+  if (dist <= 0.001) {
+    return { fromPos, toPos }
+  }
+
+  const ux = dx / dist
+  const uy = dy / dist
+
+  return {
+    fromPos: {
+      x: fromPos.x + ux * fromRadius,
+      y: fromPos.y + uy * fromRadius,
+    },
+    toPos: {
+      x: toPos.x - ux * toRadius,
+      y: toPos.y - uy * toRadius,
+    },
+  }
+}
+
 /**
  * Constellation - Main interactive graph component
  *
@@ -66,22 +112,23 @@ const BRIGHTNESS_PRIORITY = {
 export default function Constellation({
   nodes = [],
   edges = [],
-  clusters = [],
+  clusters: _clusters = [],
   gaps = [],
   onNodeTap,
   onGapTap,
   onEdgeTap,
   onDiscover,
   isDiscovering = false,
+  highlightTopicName = null,
   className = '',
+  children,
 }) {
   // Viewport state for pan/zoom
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 })
   const [isDragging, setIsDragging] = useState(false)
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 })
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [hoveredClusterId, setHoveredClusterId] = useState(null)
-  const [legendClusterId, setLegendClusterId] = useState(null)
+  const [legendCategoryKey, setLegendCategoryKey] = useState(null)
   const [isLegendOpen, setIsLegendOpen] = useState(false)
 
   // Refs for drag handling
@@ -113,10 +160,16 @@ export default function Constellation({
   }, [])
 
   // Calculate node positions using force-directed layout
+  const visualClusters = useMemo(
+    () => buildVisualCategoryClusters(nodes),
+    [nodes]
+  )
+
+  // Calculate node positions using force-directed layout
   const positions = useConstellationLayout(nodes, edges, {
     centerX: containerSize.width / 2,
     centerY: containerSize.height / 2 - 20,
-  }, clusters)
+  }, visualClusters)
 
   /**
    * Check if event target is the background (not a node/edge)
@@ -239,15 +292,54 @@ export default function Constellation({
     }
   }, [])
 
+  const nodeById = useMemo(() => {
+    const map = new Map()
+    nodes.forEach((node) => {
+      if (!node?.id) return
+      map.set(node.id, node)
+    })
+    return map
+  }, [nodes])
+
+  const nodeIdByNormalizedName = useMemo(() => {
+    const map = new Map()
+    nodes.forEach((node) => {
+      if (!node?.id || !node?.name) return
+      map.set(normalizeTopicRef(node.name), node.id)
+    })
+    return map
+  }, [nodes])
+
+  const gapsWithResolvedConnections = useMemo(() => {
+    return gaps.map((gap) => {
+      const rawConnectIds = gap.connectsTo || gap.relatedNodeIds || []
+      const resolved = Array.isArray(rawConnectIds)
+        ? rawConnectIds
+          .map((ref) => {
+            const direct = String(ref || '')
+            if (nodeById.has(direct)) return direct
+            const normalized = normalizeTopicRef(direct)
+            return nodeIdByNormalizedName.get(normalized) || null
+          })
+          .filter(Boolean)
+        : []
+
+      return {
+        ...gap,
+        connectsTo: Array.from(new Set(resolved)),
+      }
+    })
+  }, [gaps, nodeById, nodeIdByNormalizedName])
+
   /**
    * Memoize gap positions to avoid recalculating on every render
    */
   const gapPositions = useMemo(() => {
-    return gaps.map((gap) => ({
+    return gapsWithResolvedConnections.map((gap) => ({
       gap,
       position: calculateGapPosition(gap, positions, nodes),
     }))
-  }, [gaps, positions, nodes])
+  }, [gapsWithResolvedConnections, positions, nodes])
 
   /**
    * Determine which labels should be visible to avoid collisions.
@@ -334,26 +426,31 @@ export default function Constellation({
       connectIds.forEach((nodeId, idx) => {
         const fromPos = positions.get(nodeId)
         if (!fromPos) return
+        const sourceNode = nodeById.get(nodeId)
+        const sourceRadius = NODE_RADIUS_BY_BRIGHTNESS[sourceNode?.brightness] || 12
+        // Keep source-side trim so lines start at node edge, but let lines fully reach
+        // the suggested-topic center so they visually terminate on the suggestion marker.
+        const trimmed = trimLineEndpoints(fromPos, position, sourceRadius, 0)
         edges.push({
           id: `${gap.id}_${nodeId}_${idx}`,
-          fromPos,
-          toPos: position,
+          fromPos: trimmed.fromPos,
+          toPos: trimmed.toPos,
         })
       })
     })
 
     return edges
-  }, [gapPositions, positions])
+  }, [gapPositions, positions, nodeById])
 
   const nodeClusterMap = useMemo(() => {
     const map = new Map()
-    clusters.forEach((cluster) => {
+    visualClusters.forEach((cluster) => {
       (cluster.nodeIds || []).forEach((id) => {
         map.set(id, cluster.id)
       })
     })
     return map
-  }, [clusters])
+  }, [visualClusters])
 
   const edgeGroups = useMemo(() => {
     const crossClusterEdges = []
@@ -372,6 +469,20 @@ export default function Constellation({
     return { crossClusterEdges, intraClusterEdges }
   }, [edges, nodeClusterMap])
 
+  const nodeCategoryMap = useMemo(() => {
+    const map = new Map()
+    nodes.forEach((node) => {
+      if (!node?.id) return
+      map.set(node.id, normalizeCategoryKey(node.category))
+    })
+    return map
+  }, [nodes])
+
+  const inferredCategoryEdges = useMemo(
+    () => buildInferredCategoryEdges(nodes, edges),
+    [nodes, edges]
+  )
+
   const buildCrossEdgePath = useCallback((fromPos, toPos) => {
     const dx = toPos.x - fromPos.x
     const dy = toPos.y - fromPos.y
@@ -384,29 +495,38 @@ export default function Constellation({
     return `M ${fromPos.x} ${fromPos.y} Q ${cx} ${cy} ${toPos.x} ${toPos.y}`
   }, [])
 
-  /**
-   * Filter out "General" cluster for display
-   */
-  const displayClusters = useMemo(() =>
-    clusters.filter(c => c.name?.toLowerCase() !== 'general'),
-    [clusters]
-  )
-
   const legendClusters = useMemo(() => {
-    return [...displayClusters]
-      .filter((cluster) => (cluster.nodeIds || []).length > 0)
-      .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-  }, [displayClusters])
+    const counts = new Map()
+    nodes.forEach((node) => {
+      const key = normalizeCategoryKey(node?.category)
+      if (key === 'general') return
+      counts.set(key, (counts.get(key) || 0) + 1)
+    })
 
-  const clusterColorMap = useMemo(() => {
+    return Array.from(counts.entries())
+      .map(([key, count]) => {
+        const style = getClusterStyle(key)
+        return {
+          id: `category_${key.replace(/\s+/g, '_')}`,
+          key,
+          name: formatCategoryLabel(key),
+          color: style.color,
+          icon: style.icon,
+          count,
+        }
+      })
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [nodes])
+
+  const legendCategoryColorMap = useMemo(() => {
     const map = new Map()
-    displayClusters.forEach((cluster) => {
-      if (cluster?.id) {
-        map.set(cluster.id, cluster.color)
+    legendClusters.forEach((category) => {
+      if (category?.key) {
+        map.set(category.key, category.color)
       }
     })
     return map
-  }, [displayClusters])
+  }, [legendClusters])
 
   /**
    * Transform style for pan/zoom
@@ -425,7 +545,7 @@ export default function Constellation({
       data-testid="constellation"
       className={`
         relative w-full h-full overflow-hidden
-        bg-gradient-to-b from-slate-900 via-slate-950 to-indigo-950
+        bg-gradient-to-b from-night-900 via-night-800 to-night-700
         touch-none select-none
         ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}
         ${className}
@@ -531,6 +651,7 @@ export default function Constellation({
           {gapEdges.map((edge) => (
             <line
               key={edge.id}
+              data-testid={`constellation-gap-edge-${edge.id}`}
               x1={edge.fromPos.x}
               y1={edge.fromPos.y}
               x2={edge.toPos.x}
@@ -542,6 +663,30 @@ export default function Constellation({
               vectorEffect="non-scaling-stroke"
             />
           ))}
+        </g>
+        <g className="pointer-events-none">
+          {inferredCategoryEdges.map((edge) => {
+            const fromPos = positions.get(edge.from)
+            const toPos = positions.get(edge.to)
+            if (!fromPos || !toPos) return null
+            const edgeColor = getClusterStyle(edge.categoryKey).color
+            return (
+              <line
+                key={edge.id}
+                data-testid={`constellation-inferred-edge-${edge.id}`}
+                x1={fromPos.x}
+                y1={fromPos.y}
+                x2={toPos.x}
+                y2={toPos.y}
+                stroke={edgeColor}
+                strokeWidth="1"
+                strokeDasharray="none"
+                strokeLinecap="round"
+                opacity="0.24"
+                vectorEffect="non-scaling-stroke"
+              />
+            )
+          })}
         </g>
         <g className="pointer-events-auto">
           {edgeGroups.crossClusterEdges.map((edge) => {
@@ -615,10 +760,10 @@ export default function Constellation({
         {nodes.map((node) => {
           const pos = positions.get(node.id)
           if (!pos) return null
-          const nodeClusterId = nodeClusterMap.get(node.id)
-          const accentColor = nodeClusterId ? clusterColorMap.get(nodeClusterId) : null
+          const nodeCategory = nodeCategoryMap.get(node.id) || 'general'
+          const accentColor = legendCategoryColorMap.get(nodeCategory) || getClusterStyle(nodeCategory).color
           const isDimmed = Boolean(
-            legendClusterId && nodeClusterId && nodeClusterId !== legendClusterId
+            legendCategoryKey && nodeCategory !== legendCategoryKey
           )
           return (
             <ConstellationStar
@@ -627,9 +772,8 @@ export default function Constellation({
               position={pos}
               onTap={onNodeTap}
               showLabel={labelVisibility.visibleNodes.has(node.id)}
-              onHoverStart={() => setHoveredClusterId(nodeClusterId || null)}
-              onHoverEnd={() => setHoveredClusterId(null)}
               isDimmed={isDimmed}
+              isHighlighted={highlightTopicName && node.name?.toLowerCase() === highlightTopicName.toLowerCase()}
               accentColor={accentColor}
             />
           )
@@ -646,14 +790,14 @@ export default function Constellation({
           onClick={handleZoomIn}
           className="
             w-12 h-12 rounded-xl
-            bg-slate-800/90 border-2 border-black dark:border-slate-600
-            shadow-[3px_3px_0_0_#000] dark:shadow-[3px_3px_0_0_#475569]
-            hover:bg-slate-700/90
-            active:shadow-none active:translate-x-[3px] active:translate-y-[3px]
+            bg-night-600/90 backdrop-blur-sm border border-white/15
+            shadow-[0_2px_8px_rgba(0,0,0,0.3)]
+            hover:bg-night-700/90
+            active:scale-95
             text-white text-xl font-bold
             flex items-center justify-center
             transition-all duration-150
-            focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-950
+            focus:outline-none focus:ring-2 focus:ring-stardust/50 focus:ring-offset-2 focus:ring-offset-night-900
           "
           aria-label="Zoom in"
         >
@@ -663,14 +807,14 @@ export default function Constellation({
           onClick={handleZoomOut}
           className="
             w-12 h-12 rounded-xl
-            bg-slate-800/90 border-2 border-black dark:border-slate-600
-            shadow-[3px_3px_0_0_#000] dark:shadow-[3px_3px_0_0_#475569]
-            hover:bg-slate-700/90
-            active:shadow-none active:translate-x-[3px] active:translate-y-[3px]
+            bg-night-600/90 backdrop-blur-sm border border-white/15
+            shadow-[0_2px_8px_rgba(0,0,0,0.3)]
+            hover:bg-night-700/90
+            active:scale-95
             text-white text-xl font-bold
             flex items-center justify-center
             transition-all duration-150
-            focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-950
+            focus:outline-none focus:ring-2 focus:ring-stardust/50 focus:ring-offset-2 focus:ring-offset-night-900
           "
           aria-label="Zoom out"
         >
@@ -680,14 +824,14 @@ export default function Constellation({
           onClick={handleToggleFullscreen}
           className="
             w-12 h-12 rounded-xl
-            bg-slate-800/90 border-2 border-black dark:border-slate-600
-            shadow-[3px_3px_0_0_#000] dark:shadow-[3px_3px_0_0_#475569]
-            hover:bg-slate-700/90
-            active:shadow-none active:translate-x-[3px] active:translate-y-[3px]
+            bg-night-600/90 backdrop-blur-sm border border-white/15
+            shadow-[0_2px_8px_rgba(0,0,0,0.3)]
+            hover:bg-night-700/90
+            active:scale-95
             text-white text-lg font-bold
             flex items-center justify-center
             transition-all duration-150
-            focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-950
+            focus:outline-none focus:ring-2 focus:ring-stardust/50 focus:ring-offset-2 focus:ring-offset-night-900
           "
           aria-label="Toggle fullscreen"
         >
@@ -697,14 +841,14 @@ export default function Constellation({
           onClick={handleResetView}
           className="
             w-12 h-12 rounded-xl
-            bg-slate-800/90 border-2 border-black dark:border-slate-600
-            shadow-[3px_3px_0_0_#000] dark:shadow-[3px_3px_0_0_#475569]
-            hover:bg-slate-700/90
-            active:shadow-none active:translate-x-[3px] active:translate-y-[3px]
+            bg-night-600/90 backdrop-blur-sm border border-white/15
+            shadow-[0_2px_8px_rgba(0,0,0,0.3)]
+            hover:bg-night-700/90
+            active:scale-95
             text-white text-sm font-bold
             flex items-center justify-center
             transition-all duration-150
-            focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-950
+            focus:outline-none focus:ring-2 focus:ring-stardust/50 focus:ring-offset-2 focus:ring-offset-night-900
           "
           aria-label="Reset view"
         >
@@ -717,7 +861,7 @@ export default function Constellation({
         <div
           className="
             absolute top-4 left-4 z-10
-            bg-slate-900/90 border border-slate-700
+            bg-night-900/90 border border-night-600
             rounded-xl px-3 py-2
             text-xs text-slate-200
             shadow-[0_0_18px_rgba(15,23,42,0.5)]
@@ -731,20 +875,20 @@ export default function Constellation({
             onClick={() => {
               setIsLegendOpen((prev) => {
                 if (prev) {
-                  setLegendClusterId(null)
+                  setLegendCategoryKey(null)
                 }
                 return !prev
               })
             }}
             className="
               w-full flex items-center justify-between gap-2
-              text-[11px] uppercase tracking-wide text-slate-300
+              text-[11px] uppercase tracking-wide text-cream-200
               hover:text-white transition-colors
             "
             aria-expanded={isLegendOpen}
           >
             <span>Categories</span>
-            <span className="flex items-center gap-2 text-slate-400">
+            <span className="flex items-center gap-2 text-cream-300">
               <span>{legendClusters.length}</span>
               <span>{isLegendOpen ? '▾' : '▸'}</span>
             </span>
@@ -752,11 +896,11 @@ export default function Constellation({
           {isLegendOpen && (
             <div
               className="mt-2 max-h-40 overflow-y-auto pr-1"
-              onMouseLeave={() => setLegendClusterId(null)}
+              onMouseLeave={() => setLegendCategoryKey(null)}
               role="list"
             >
               {legendClusters.map((cluster) => {
-                const isActive = legendClusterId === cluster.id
+                const isActive = legendCategoryKey === cluster.key
                 return (
                   <button
                     key={cluster.id}
@@ -766,13 +910,13 @@ export default function Constellation({
                       text-left
                       ${isActive ? 'text-white' : 'text-slate-200'}
                       hover:text-white
-                      focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60
+                      focus:outline-none focus-visible:ring-2 focus-visible:ring-stardust/50
                       rounded-md px-1
                     `}
                     role="listitem"
-                    onMouseEnter={() => setLegendClusterId(cluster.id)}
-                    onFocus={() => setLegendClusterId(cluster.id)}
-                    onBlur={() => setLegendClusterId(null)}
+                    onMouseEnter={() => setLegendCategoryKey(cluster.key)}
+                    onFocus={() => setLegendCategoryKey(cluster.key)}
+                    onBlur={() => setLegendCategoryKey(null)}
                   >
                     <span
                       className="w-2.5 h-2.5 rounded-full"
@@ -801,9 +945,9 @@ export default function Constellation({
           className="absolute inset-0 flex items-center justify-center p-8"
           role="status"
         >
-          <div className="text-center text-slate-400 max-w-sm">
+          <div className="text-center text-night-600 max-w-sm">
             <div className="text-6xl mb-4" aria-hidden="true">✨</div>
-            <h3 className="text-xl font-bold mb-2 text-slate-300">
+            <h3 className="text-xl font-bold mb-2 text-cream-200">
               Your Knowledge Constellation
             </h3>
             <p className="text-sm">
@@ -814,14 +958,17 @@ export default function Constellation({
         </div>
       )}
 
+      {/* Overlay content (e.g. action sheets) - rendered inside fullscreen container */}
+      {children}
+
       {/* Interaction hints for new users */}
       {nodes.length > 0 && nodes.length <= 3 && (
         <div className="
           absolute top-4 right-4
-          bg-slate-800/90 backdrop-blur-sm
+          bg-night-600/90 backdrop-blur-sm
           px-4 py-3 rounded-xl
-          border border-slate-600
-          text-sm text-slate-200
+          border border-night-700
+          text-sm text-cream-200
           max-w-xs z-10
         ">
           <p className="font-semibold mb-1">Tip</p>

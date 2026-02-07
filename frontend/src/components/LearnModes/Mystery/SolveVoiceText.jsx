@@ -9,9 +9,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { playMicOnSound } from '../../../utils/soundEffects'
 import logger from '../../../utils/logger'
-
-// API base URL for backend calls
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
+import { toApiUrl } from '../../../utils/api'
 
 // Max recording duration in seconds
 const MAX_RECORDING_DURATION = 60
@@ -205,7 +203,7 @@ export default function SolveVoiceText({
       const formData = new FormData()
       formData.append('audio', audioBlob, 'recording.webm')
 
-      const response = await fetch(`${API_BASE}/api/transcribe`, {
+      const response = await fetch(toApiUrl('/api/transcribe'), {
         method: 'POST',
         body: formData
       })

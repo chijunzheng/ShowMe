@@ -20,9 +20,9 @@ import Constellation from '../Constellation'
  * Sample test data
  */
 const sampleNodes = [
-  { id: 'n1', name: 'Volcanoes', mastery: 0.8, brightness: 'bright' },
-  { id: 'n2', name: 'Earthquakes', mastery: 0.5, brightness: 'glow' },
-  { id: 'n3', name: 'Plate Tectonics', mastery: 0.3, brightness: 'dim' },
+  { id: 'n1', name: 'Volcanoes', mastery: 0.8, brightness: 'bright', category: 'science' },
+  { id: 'n2', name: 'Earthquakes', mastery: 0.5, brightness: 'glow', category: 'science' },
+  { id: 'n3', name: 'Plate Tectonics', mastery: 0.3, brightness: 'dim', category: 'geography' },
 ]
 
 const sampleEdges = [
@@ -84,13 +84,13 @@ describe('Constellation', () => {
       render(<Constellation {...props} />)
 
       expect(screen.getByTestId('constellation-edge-e1')).toBeInTheDocument()
-      expect(screen.getByTestId('constellation-edge-e2')).toBeInTheDocument()
+      expect(screen.getByTestId('constellation-cross-edge-e2')).toBeInTheDocument()
     })
 
     it('renders cross-cluster edges as curved paths', () => {
       const nodes = [
-        { id: 'n1', name: 'Alpha', mastery: 0.4, brightness: 'glow' },
-        { id: 'n2', name: 'Beta', mastery: 0.6, brightness: 'bright' },
+        { id: 'n1', name: 'Alpha', mastery: 0.4, brightness: 'glow', category: 'science' },
+        { id: 'n2', name: 'Beta', mastery: 0.6, brightness: 'bright', category: 'technology' },
       ]
       const clusters = [
         { id: 'c1', name: 'Cluster A', icon: 'A', color: '#22C55E', nodeIds: ['n1'] },
@@ -122,10 +122,11 @@ describe('Constellation', () => {
 
       const toggle = screen.getByRole('button', { name: /categories/i })
       expect(toggle).toBeInTheDocument()
-      expect(screen.queryByText('Earth Science')).not.toBeInTheDocument()
+      expect(screen.queryByText('Science')).not.toBeInTheDocument()
 
       fireEvent.click(toggle)
-      expect(screen.getByText('Earth Science')).toBeInTheDocument()
+      expect(screen.getByText('Science')).toBeInTheDocument()
+      expect(screen.getByText('Geography')).toBeInTheDocument()
     })
 
     it('renders gap suggestions', () => {
@@ -305,7 +306,7 @@ describe('Constellation', () => {
       render(<Constellation {...props} />)
 
       const container = screen.getByTestId('constellation')
-      expect(container.className).toMatch(/bg-gradient-to-b from-slate-900 via-slate-950 to-indigo-950/)
+      expect(container.className).toMatch(/bg-gradient-to-b from-night-900 via-night-800 to-night-700/)
     })
 
     it('has overflow hidden', () => {
@@ -360,6 +361,123 @@ describe('Constellation', () => {
         clusters: [{ id: 'c1', name: 'Empty', icon: '?', color: '#888', nodeIds: ['missing1', 'missing2'] }],
       })
       expect(() => render(<Constellation {...props} />)).not.toThrow()
+    })
+
+    it('renders inferred same-category links for disconnected nodes', () => {
+      const props = createDefaultProps({
+        nodes: [
+          { id: 'n1', name: 'Alpha', mastery: 0.4, brightness: 'glow', category: 'science' },
+          { id: 'n2', name: 'Beta', mastery: 0.5, brightness: 'bright', category: 'science' },
+        ],
+        edges: [],
+        gaps: [],
+        clusters: [],
+      })
+      const { container } = render(<Constellation {...props} />)
+
+      const inferredEdges = container.querySelectorAll('[data-testid^="constellation-inferred-edge-"]')
+      expect(inferredEdges).toHaveLength(1)
+      expect(inferredEdges[0].getAttribute('stroke-dasharray')).toBe('none')
+    })
+
+    it('keeps gap suggestion edges dashed', () => {
+      const props = createDefaultProps({
+        nodes: [
+          { id: 'n1', name: 'Alpha', mastery: 0.4, brightness: 'glow', category: 'science' },
+        ],
+        edges: [],
+        gaps: [{ id: 'g1', suggestedTopic: 'Gap Topic', connectsTo: ['n1'] }],
+        clusters: [],
+      })
+      const { container } = render(<Constellation {...props} />)
+
+      const gapEdge = container.querySelector('[data-testid^="constellation-gap-edge-"]')
+      expect(gapEdge).toBeInTheDocument()
+      expect(gapEdge.getAttribute('stroke-dasharray')).toBe('4 5')
+    })
+
+    it('resolves gap connectsTo entries provided as topic names', () => {
+      const props = createDefaultProps({
+        nodes: [
+          { id: 'n1', name: 'Artificial Neural Networks', mastery: 0.4, brightness: 'glow', category: 'technology' },
+        ],
+        edges: [],
+        gaps: [{ id: 'g1', suggestedTopic: 'Intro to Transformers', connectsTo: ['Artificial Neural Networks'] }],
+        clusters: [],
+      })
+      const { container } = render(<Constellation {...props} />)
+
+      const gapEdge = container.querySelector('[data-testid^="constellation-gap-edge-"]')
+      expect(gapEdge).toBeInTheDocument()
+    })
+
+    it('keeps inferred links non-interactive', () => {
+      const onEdgeTap = vi.fn()
+      const props = createDefaultProps({
+        onEdgeTap,
+        nodes: [
+          { id: 'n1', name: 'Alpha', mastery: 0.4, brightness: 'glow', category: 'science' },
+          { id: 'n2', name: 'Beta', mastery: 0.5, brightness: 'bright', category: 'science' },
+        ],
+        edges: [],
+        gaps: [],
+        clusters: [],
+      })
+      const { container } = render(<Constellation {...props} />)
+
+      const inferredEdge = container.querySelector('[data-testid^="constellation-inferred-edge-"]')
+      fireEvent.click(inferredEdge)
+      expect(onEdgeTap).not.toHaveBeenCalled()
+    })
+
+    it('groups real edges by derived category clusters even when props clusters are inconsistent', () => {
+      const props = createDefaultProps({
+        nodes: [
+          { id: 'n1', name: 'Alpha', mastery: 0.4, brightness: 'glow', category: 'science' },
+          { id: 'n2', name: 'Beta', mastery: 0.5, brightness: 'bright', category: 'science' },
+        ],
+        edges: [{ id: 'e1', from: 'n1', to: 'n2', type: 'extends', strength: 0.8, discovered: true }],
+        gaps: [],
+        clusters: [
+          { id: 'c1', name: 'Cluster A', icon: 'A', color: '#22C55E', nodeIds: ['n1'] },
+          { id: 'c2', name: 'Cluster B', icon: 'B', color: '#60A5FA', nodeIds: ['n2'] },
+        ],
+      })
+
+      render(<Constellation {...props} />)
+
+      expect(screen.getByTestId('constellation-edge-e1')).toBeInTheDocument()
+      expect(screen.queryByTestId('constellation-cross-edge-e1')).not.toBeInTheDocument()
+    })
+
+    it('uses category color when cluster membership is missing', () => {
+      const props = createDefaultProps({
+        nodes: [{ id: 'n1', name: 'Model Training', mastery: 0.6, brightness: 'bright', category: 'technology' }],
+        clusters: [{ id: 'c1', name: 'Empty', icon: '?', color: '#888', nodeIds: [] }],
+        edges: [],
+        gaps: [],
+      })
+      render(<Constellation {...props} />)
+
+      const star = screen.getByTestId('constellation-star-n1')
+      expect(star.style.backgroundColor).toBe('rgb(99, 102, 241)')
+    })
+
+    it('builds legend entries from node categories even without clusters', () => {
+      const props = createDefaultProps({
+        nodes: [
+          { id: 'n1', name: 'Marine Exploration', mastery: 0.4, brightness: 'glow', category: 'marine biology' },
+          { id: 'n2', name: 'Transformer Architecture', mastery: 0.5, brightness: 'bright', category: 'technology' },
+        ],
+        clusters: [],
+        edges: [],
+        gaps: [],
+      })
+      render(<Constellation {...props} />)
+
+      fireEvent.click(screen.getByRole('button', { name: /categories/i }))
+      expect(screen.getByText('Marine Biology')).toBeInTheDocument()
+      expect(screen.getByText('Technology')).toBeInTheDocument()
     })
   })
 

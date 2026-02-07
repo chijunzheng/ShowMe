@@ -4,9 +4,11 @@
  * Shows the final illustrated story as a slideshow with navigation controls.
  */
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { vibrateShort } from '../../../utils/haptics'
 import { playSelectSound } from '../../../utils/soundEffects'
+import useStoryNarration from './useStoryNarration'
+import ComicPage from './ComicPage'
 
 /**
  * @param {Object} props
@@ -28,14 +30,27 @@ export default function StoryPlayback({
   onFinish
 }) {
   const [currentSceneIndex, setCurrentSceneIndex] = useState(0)
+  const { narrate, narratePanels, stop, isPlaying } = useStoryNarration()
 
   const currentScene = scenes[currentSceneIndex]
+  const panelCaptions = useMemo(() => {
+    if (!Array.isArray(currentScene?.panelCaptions)) return []
+    return currentScene.panelCaptions
+      .filter((caption) => typeof caption === 'string' && caption.trim())
+      .map((caption) => caption.trim())
+      .slice(0, 4)
+  }, [currentScene?.panelCaptions])
+
+  const hasPanelNarration = panelCaptions.length > 0
+  const fallbackNarrativeText = currentScene?.narrativeText || ''
+  const hasNarration = hasPanelNarration || fallbackNarrativeText.trim().length > 0
   const allConceptsUsed = conceptsUsed === totalConcepts && totalConcepts > 0
 
   const handlePrevious = () => {
     if (currentSceneIndex > 0) {
       vibrateShort()
       playSelectSound()
+      stop()
       setCurrentSceneIndex(prev => prev - 1)
     }
   }
@@ -44,8 +59,29 @@ export default function StoryPlayback({
     if (currentSceneIndex < scenes.length - 1) {
       vibrateShort()
       playSelectSound()
+      stop()
       setCurrentSceneIndex(prev => prev + 1)
     }
+  }
+
+  const handleReadAloud = async () => {
+    if (!hasNarration) return
+
+    vibrateShort()
+    playSelectSound()
+
+    if (isPlaying) {
+      stop()
+      return
+    }
+
+    const chapterId = currentScene?.chapterTitle || `scene-${currentSceneIndex + 1}`
+    if (hasPanelNarration) {
+      await narratePanels(panelCaptions, chapterId)
+      return
+    }
+
+    await narrate(fallbackNarrativeText, `${chapterId}-narration`)
   }
 
   const handleShare = () => {
@@ -102,35 +138,30 @@ export default function StoryPlayback({
       {/* Slideshow */}
       <div className="flex-1 flex flex-col items-center justify-center p-6">
         <div className="w-full max-w-3xl">
-          {/* Chapter Title */}
-          {currentScene?.chapterTitle && (
-            <div className="text-center mb-3">
-              <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-300">
-                {currentScene.chapterTitle}
-              </h2>
-            </div>
-          )}
-
           {/* Scene Image */}
-          <div className="aspect-video bg-white dark:bg-slate-800 rounded-2xl border-2 border-gray-200 dark:border-slate-700 overflow-hidden shadow-2xl mb-6">
-            {currentScene?.imageUrl ? (
-              <img
-                src={currentScene.imageUrl}
-                alt={currentScene.sceneDescription || `Scene ${currentSceneIndex + 1}`}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center bg-gray-100 dark:bg-slate-700">
-                <span className="text-gray-400 text-4xl">🎨</span>
-              </div>
-            )}
-          </div>
+          <ComicPage
+            imageUrl={currentScene?.imageUrl}
+            panelCaptions={panelCaptions}
+            chapterTitle={currentScene?.chapterTitle}
+            sceneDescription={currentScene?.sceneDescription || `Scene ${currentSceneIndex + 1}`}
+          />
 
           {/* Scene Text */}
           <div className="mb-6 p-6 bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700">
-            <p className="text-lg text-gray-800 dark:text-gray-100 leading-relaxed text-center">
-              {currentScene?.narrativeText || 'Scene text'}
-            </p>
+            {hasPanelNarration ? (
+              <ol className="space-y-2 text-left text-gray-800 dark:text-gray-100">
+                {panelCaptions.map((caption, index) => (
+                  <li key={`${currentSceneIndex}-${index}`} className="text-base sm:text-lg leading-relaxed">
+                    <span className="font-semibold mr-2">{index + 1}.</span>
+                    <span>{caption}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="text-lg text-gray-800 dark:text-gray-100 leading-relaxed text-center">
+                {fallbackNarrativeText || 'Scene text'}
+              </p>
+            )}
           </div>
 
           {/* Progress Dots */}
@@ -140,6 +171,7 @@ export default function StoryPlayback({
                 key={index}
                 onClick={() => {
                   vibrateShort()
+                  stop()
                   setCurrentSceneIndex(index)
                 }}
                 className={`
@@ -176,6 +208,17 @@ export default function StoryPlayback({
             >
               <span>Next</span>
               <span>→</span>
+            </button>
+          </div>
+
+          {/* Read Aloud */}
+          <div className="flex justify-center mb-6">
+            <button
+              onClick={handleReadAloud}
+              disabled={!hasNarration}
+              className="px-6 py-2.5 rounded-full bg-indigo-500 text-white font-medium hover:bg-indigo-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isPlaying ? 'Stop Reading' : '🔊 Read Aloud'}
             </button>
           </div>
 

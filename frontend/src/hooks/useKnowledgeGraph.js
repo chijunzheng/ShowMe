@@ -22,8 +22,18 @@ import {
   determineCategory,
   createInitialClusters,
 } from '../utils/graphMigration'
+import {
+  CLUSTER_CONFIG,
+  getClusterStyle,
+  normalizeCategoryKey,
+  formatCategoryLabel,
+} from '../utils/clusterStyle'
 import { getExplorerRank } from '../components/ExplorerRank/explorerRankUtils'
+import { getClientId } from '../utils/clientId'
+import { toApiUrl } from '../utils/api'
 import logger from '../utils/logger'
+
+export { CLUSTER_CONFIG, getClusterStyle }
 
 // ============================================================================
 // CONSTANTS
@@ -35,14 +45,10 @@ import logger from '../utils/logger'
 const LEGACY_STORAGE_KEY = 'showme_topics'
 
 /**
- * API base URL from environment
- */
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
-
-/**
  * Debounce delay for saving to storage (ms)
  */
 const SAVE_DEBOUNCE_MS = 500
+const ENABLE_SERVER_GRAPH_PERSISTENCE = import.meta.env.MODE !== 'test'
 
 /**
  * Minimum nodes required for gap analysis
@@ -63,48 +69,6 @@ export const RECLUSTER_DEBOUNCE_MS = 2500
  * Node count limit for auto reclustering
  */
 export const SMALL_GRAPH_RECLUSTER_LIMIT = 40
-
-/**
- * Cluster configuration for category-based grouping
- */
-export const CLUSTER_CONFIG = {
-  mathematics: { icon: '\u{1F522}', color: '#3B82F6' }, // number emoji
-  science: { icon: '\u{1F52C}', color: '#10B981' }, // microscope
-  history: { icon: '\u{1F4DC}', color: '#F59E0B' }, // scroll
-  geography: { icon: '\u{1F30D}', color: '#06B6D4' }, // globe
-  language: { icon: '\u{1F4DA}', color: '#A855F7' }, // books
-  arts: { icon: '\u{1F3A8}', color: '#EC4899' }, // palette
-  technology: { icon: '\u{1F4BB}', color: '#6366F1' }, // laptop
-  astronomy: { icon: '\u{1F30C}', color: '#2DD4BF' }, // milky way
-  nature: { icon: '\u{1F33F}', color: '#84CC16' }, // herb
-  'marine biology': { icon: '\u{1F433}', color: '#0EA5E9' }, // whale
-  civilization: { icon: '\u{1F3DB}\u{FE0F}', color: '#F97316' }, // classical building
-  general: { icon: '\u{1F4A1}', color: '#64748B' }, // light bulb
-}
-
-// Color pool for dynamically assigned categories (max hue separation)
-const DYNAMIC_COLOR_POOL = [
-  '#F97316', '#D946EF', '#2DD4BF', '#84CC16', '#A855F7',
-  '#FB923C', '#14B8A6', '#E879F9', '#FACC15', '#38BDF8',
-]
-
-function hashString(str) {
-  let hash = 0
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash) + str.charCodeAt(i)
-    hash |= 0
-  }
-  return Math.abs(hash)
-}
-
-export function getClusterStyle(category) {
-  const key = (category || 'general').toLowerCase()
-  if (CLUSTER_CONFIG[key]) return CLUSTER_CONFIG[key]
-  return {
-    icon: '\u{1F4CC}',
-    color: DYNAMIC_COLOR_POOL[hashString(key) % DYNAMIC_COLOR_POOL.length],
-  }
-}
 
 // ============================================================================
 // ID GENERATION
@@ -161,6 +125,45 @@ export function shouldAutoRecluster({
   return true
 }
 
+const DEFAULT_GAP_TARGET_COUNT = 6
+const MIN_GAP_TARGET_COUNT = 1
+const MAX_GAP_TARGET_COUNT = 10
+
+/**
+ * Normalize optional gap target count from caller input.
+ *
+ * @param {number|undefined} targetCount
+ * @returns {number}
+ */
+export function normalizeGapTargetCount(targetCount) {
+  if (!Number.isFinite(targetCount)) {
+    return DEFAULT_GAP_TARGET_COUNT
+  }
+  const value = Math.trunc(targetCount)
+  return Math.min(MAX_GAP_TARGET_COUNT, Math.max(MIN_GAP_TARGET_COUNT, value))
+}
+
+/**
+ * Decide whether to reset the in-session seen suggestion set.
+ *
+ * @param {Object} params
+ * @param {boolean} params.requireFreshSet
+ * @param {number} params.targetCount
+ * @param {number} params.resultCount
+ * @param {number} params.seenCount
+ * @returns {boolean}
+ */
+export function shouldResetSeenGapSuggestions({
+  requireFreshSet,
+  targetCount,
+  resultCount,
+  seenCount,
+}) {
+  if (!requireFreshSet) return false
+  if (seenCount <= 0) return false
+  return resultCount < targetCount
+}
+
 /**
  * Get cluster icon for a category
  *
@@ -168,8 +171,7 @@ export function shouldAutoRecluster({
  * @returns {string} Emoji icon
  */
 function getClusterIcon(category) {
-  const config = CLUSTER_CONFIG[category?.toLowerCase()]
-  return config?.icon || CLUSTER_CONFIG.general.icon
+  return getClusterStyle(category).icon
 }
 
 /**
@@ -179,8 +181,7 @@ function getClusterIcon(category) {
  * @returns {string} Hex color
  */
 function getClusterColor(category) {
-  const config = CLUSTER_CONFIG[category?.toLowerCase()]
-  return config?.color || CLUSTER_CONFIG.general.color
+  return getClusterStyle(category).color
 }
 
 /**
@@ -202,9 +203,7 @@ function normalizeTopicName(name) {
  * @returns {string} Cluster id
  */
 function toClusterId(category) {
-  const safeCategory = String(category || 'general')
-    .toLowerCase()
-    .replace(/\s+/g, '_')
+  const safeCategory = normalizeCategoryKey(category).replace(/\s+/g, '_')
   return `cluster_${safeCategory}`
 }
 
@@ -215,12 +214,7 @@ function toClusterId(category) {
  * @returns {string} Display name
  */
 function formatClusterName(category) {
-  if (!category) return 'General'
-  return String(category)
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ')
+  return formatCategoryLabel(category)
 }
 
 /**
@@ -239,11 +233,8 @@ function normalizeGraphCategories(graphData) {
   const updatedNodes = graphData.nodes.map((node) => {
     if (!node) return node
 
-    const rawCategory = typeof node.category === 'string'
-      ? node.category.toLowerCase()
-      : ''
-    const hasKnownCategory = Boolean(CLUSTER_CONFIG[rawCategory])
-    const shouldRecompute = !rawCategory || !hasKnownCategory || rawCategory === 'general' || rawCategory === 'nature'
+    const rawCategory = normalizeCategoryKey(node.category)
+    const shouldRecompute = rawCategory === 'general'
 
     if (!shouldRecompute) {
       return node
@@ -251,11 +242,6 @@ function normalizeGraphCategories(graphData) {
 
     const derived = determineCategory({ name: node.name, topicName: node.name })
     if (derived && derived !== rawCategory) {
-      changed = true
-      return { ...node, category: derived }
-    }
-
-    if (!rawCategory && derived) {
       changed = true
       return { ...node, category: derived }
     }
@@ -386,12 +372,16 @@ export default function useKnowledgeGraph() {
 
   // Debounced save timer
   const saveTimerRef = useRef(null)
+  const clientIdRef = useRef(getClientId())
 
   // Track last recluster to avoid thrashing
   const lastReclusterAtRef = useRef(0)
 
   // Track in-flight addTopic calls to prevent duplicate API requests
   const pendingTopicsRef = useRef(new Set())
+
+  // Session-only set of suggested topic names already shown via Discover
+  const seenSuggestedTopicsRef = useRef(new Set())
 
   // ============================================================================
   // STORAGE OPERATIONS
@@ -420,6 +410,28 @@ export default function useKnowledgeGraph() {
       } catch (err) {
         logger.error('STORAGE', 'Failed to save graph', { error: err.message })
       }
+
+      if (!ENABLE_SERVER_GRAPH_PERSISTENCE) {
+        return
+      }
+
+      const clientId = clientIdRef.current
+      if (!clientId) {
+        return
+      }
+
+      fetch(toApiUrl('/api/graph/state/save'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientId,
+          graph: graphData,
+        }),
+      }).catch((error) => {
+        logger.warn('GRAPH', 'Failed to persist graph state to server', {
+          error: error.message,
+        })
+      })
     }, SAVE_DEBOUNCE_MS)
   }, [])
 
@@ -441,8 +453,37 @@ export default function useKnowledgeGraph() {
       setError(null)
 
       try {
-        // First try to load existing graph
-        const existingGraph = loadGraphFromStorage(LEGACY_STORAGE_KEY)
+        const clientId = clientIdRef.current
+        let existingGraph = null
+
+        if (ENABLE_SERVER_GRAPH_PERSISTENCE && clientId) {
+          try {
+            const response = await fetch(toApiUrl('/api/graph/state/load'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ clientId }),
+            })
+
+            if (response.ok) {
+              const payload = await response.json()
+              if (payload?.graph && typeof payload.graph === 'object') {
+                existingGraph = payload.graph
+                saveGraphToStorage(payload.graph, LEGACY_STORAGE_KEY)
+                logger.info('GRAPH', 'Loaded knowledge graph from server', {
+                  nodesCount: Array.isArray(payload.graph?.nodes) ? payload.graph.nodes.length : 0,
+                })
+              }
+            }
+          } catch (error) {
+            logger.warn('GRAPH', 'Server graph load failed, falling back to local graph', {
+              error: error.message,
+            })
+          }
+        }
+
+        if (!existingGraph) {
+          existingGraph = loadGraphFromStorage(LEGACY_STORAGE_KEY)
+        }
 
         if (existingGraph) {
           logger.info('STORAGE', 'Loaded existing knowledge graph', {
@@ -481,7 +522,7 @@ export default function useKnowledgeGraph() {
             const existingCategories = [...new Set(
               migratedNodes.map(n => n.category).filter(c => c && c !== 'general')
             )]
-            fetch(`${API_BASE}/api/graph/categorize`, {
+            fetch(toApiUrl('/api/graph/categorize'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -584,7 +625,7 @@ export default function useKnowledgeGraph() {
     }
 
     try {
-      const response = await fetch(`${API_BASE}/api/graph/discover`, {
+      const response = await fetch(toApiUrl('/api/graph/discover'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -636,7 +677,7 @@ export default function useKnowledgeGraph() {
     }
 
     try {
-      const response = await fetch(`${API_BASE}/api/graph/cluster`, {
+      const response = await fetch(toApiUrl('/api/graph/cluster'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nodes: nodesToCluster }),
@@ -1158,7 +1199,7 @@ export default function useKnowledgeGraph() {
    * Refresh knowledge gaps from API
    * Requires at least MIN_NODES_FOR_GAPS nodes
    */
-  const refreshGaps = useCallback(async () => {
+  const refreshGaps = useCallback(async (options = {}) => {
     if (graph.nodes.length < MIN_NODES_FOR_GAPS) {
       logger.debug('STORAGE', 'Not enough nodes for gap analysis', {
         current: graph.nodes.length,
@@ -1168,41 +1209,80 @@ export default function useKnowledgeGraph() {
     }
 
     try {
-      const response = await fetch(`${API_BASE}/api/graph/gaps`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ graph }),
-      })
-
-      if (!response.ok) {
-        logger.warn('STORAGE', 'Gap analysis API returned error', {
-          status: response.status,
-        })
-        return []
-      }
-
-      const data = await response.json()
       const existingNames = new Set(
         graph.nodes.map((node) => normalizeTopicName(node.name))
       )
-      const rawGaps = data.gaps || []
-      const dedupedGaps = rawGaps.filter((gap) => {
-        const normalized = normalizeTopicName(gap.suggestedTopic)
-        return normalized && !existingNames.has(normalized)
+
+      const requireFreshSet = Boolean(options?.requireFreshSet)
+      const targetCount = normalizeGapTargetCount(options?.targetCount)
+      const initialExcludes = requireFreshSet
+        ? Array.from(seenSuggestedTopicsRef.current)
+        : []
+
+      const requestGaps = async (excludeTopics = []) => {
+        const response = await fetch(toApiUrl('/api/graph/gaps'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            graph,
+            targetCount,
+            excludeTopics,
+          }),
+        })
+
+        if (!response.ok) {
+          logger.warn('STORAGE', 'Gap analysis API returned error', {
+            status: response.status,
+          })
+          return []
+        }
+
+        const data = await response.json()
+        const rawGaps = Array.isArray(data.gaps) ? data.gaps : []
+        const dedupedNames = new Set()
+        const dedupedGaps = rawGaps.filter((gap) => {
+          const normalized = normalizeTopicName(gap?.suggestedTopic)
+          if (!normalized || existingNames.has(normalized) || dedupedNames.has(normalized)) {
+            return false
+          }
+          dedupedNames.add(normalized)
+          return true
+        })
+        return filterGapsWithConnections(dedupedGaps)
+      }
+
+      let filteredGaps = await requestGaps(initialExcludes)
+      const shouldResetSeen = shouldResetSeenGapSuggestions({
+        requireFreshSet,
+        targetCount,
+        resultCount: filteredGaps.length,
+        seenCount: initialExcludes.length,
       })
-      const filteredGaps = filterGapsWithConnections(dedupedGaps)
-      const skippedDuplicates = rawGaps.length - dedupedGaps.length
-      const skippedDisconnected = dedupedGaps.length - filteredGaps.length
+
+      if (shouldResetSeen) {
+        seenSuggestedTopicsRef.current.clear()
+        filteredGaps = await requestGaps([])
+      }
 
       setGraph((prev) => ({
         ...prev,
         gaps: filteredGaps,
       }))
 
+      if (requireFreshSet) {
+        filteredGaps.forEach((gap) => {
+          const normalized = normalizeTopicName(gap?.suggestedTopic)
+          if (normalized) {
+            seenSuggestedTopicsRef.current.add(normalized)
+          }
+        })
+      }
+
       logger.info('STORAGE', 'Refreshed knowledge gaps', {
         gapsCount: filteredGaps.length,
-        skippedDuplicates,
-        skippedDisconnected,
+        targetCount,
+        requireFreshSet,
+        resetSeen: shouldResetSeen,
       })
 
       return filteredGaps
@@ -1226,7 +1306,7 @@ export default function useKnowledgeGraph() {
     }
 
     try {
-      const response = await fetch(`${API_BASE}/api/graph/cluster`, {
+      const response = await fetch(toApiUrl('/api/graph/cluster'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nodes: graph.nodes }),

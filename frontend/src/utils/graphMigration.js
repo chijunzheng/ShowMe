@@ -9,6 +9,11 @@
  */
 
 import { calculateBrightness } from '../types/knowledgeGraph'
+import {
+  getClusterStyle,
+  normalizeCategoryKey,
+  formatCategoryLabel,
+} from './clusterStyle.js'
 import logger from './logger.js'
 
 // ============================================================================
@@ -38,25 +43,6 @@ const EXPLORER_RANKS = [
   { level: 11, title: 'Galactic Legend', icon: '\u{1F30C}', minTopics: 110 },
   { level: 12, title: 'Legendary Luminary', icon: '\u{2600}\u{FE0F}', minTopics: 120 },
 ]
-
-/**
- * Cluster configuration for category-based grouping
- */
-const CLUSTER_CONFIG = {
-  mathematics: { icon: '\u{1F522}', color: '#3B82F6' },
-  science: { icon: '\u{1F52C}', color: '#10B981' },
-  history: { icon: '\u{1F4DC}', color: '#F59E0B' },
-  geography: { icon: '\u{1F30D}', color: '#06B6D4' },
-  language: { icon: '\u{1F4DA}', color: '#8B5CF6' },
-  arts: { icon: '\u{1F3A8}', color: '#EC4899' },
-  technology: { icon: '\u{1F4BB}', color: '#6366F1' },
-  astronomy: { icon: '\u{1F30C}', color: '#7C3AED' },
-  nature: { icon: '\u{1F33F}', color: '#22C55E' },
-  'marine biology': { icon: '\u{1F433}', color: '#0EA5E9' },
-  civilization: { icon: '\u{1F3DB}\u{FE0F}', color: '#F59E0B' },
-  arcane: { icon: '\u{1F52E}', color: '#8B5CF6' },
-  general: { icon: '\u{1F4A1}', color: '#64748B' },
-}
 
 // ============================================================================
 // ID GENERATION
@@ -248,16 +234,12 @@ export function determineCategory(topic) {
   // Check existing category/zone
   if (topic.category) {
     const normalized = topic.category.toLowerCase()
-    if (CLUSTER_CONFIG[normalized]) {
-      return normalized
-    }
+    return normalized
   }
 
   if (topic.zone) {
     const normalized = topic.zone.toLowerCase()
-    if (CLUSTER_CONFIG[normalized]) {
-      return normalized
-    }
+    return normalized
   }
 
   // Try to infer from topic name
@@ -477,7 +459,7 @@ export function createInitialClusters(nodes) {
 
   nodes.forEach((node) => {
     if (!node) return
-    const category = String(node.category || 'general').toLowerCase()
+    const category = normalizeCategoryKey(node.category)
     if (!categoryMap.has(category)) {
       categoryMap.set(category, [])
     }
@@ -486,13 +468,9 @@ export function createInitialClusters(nodes) {
 
   const clusters = []
   categoryMap.forEach((nodeIds, category) => {
-    const config = CLUSTER_CONFIG[category] || CLUSTER_CONFIG.general
+    const config = getClusterStyle(category)
     const clusterId = `cluster_${category.replace(/\s+/g, '_')}`
-    const clusterName = category
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ')
+    const clusterName = formatCategoryLabel(category)
     clusters.push({
       id: clusterId,
       name: clusterName,

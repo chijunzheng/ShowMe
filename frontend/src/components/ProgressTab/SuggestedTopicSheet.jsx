@@ -8,9 +8,9 @@
 import { useCallback, useEffect, useMemo } from 'react'
 
 const LEVEL_OPTIONS = [
-  { id: 'simple', label: 'Simple' },
-  { id: 'standard', label: 'Standard' },
-  { id: 'deep', label: 'Deep' },
+  { id: 'simple', label: 'Simple', emoji: '\u{1F331}', desc: 'Everyday language' },
+  { id: 'standard', label: 'Standard', emoji: '\u{1F4DA}', desc: 'Key concepts' },
+  { id: 'deep', label: 'Deep', emoji: '\u{1F52C}', desc: 'Technical depth' },
 ]
 
 /**
@@ -78,7 +78,7 @@ export default function SuggestedTopicSheet({
     <div
       className="
         fixed inset-0 z-50
-        flex items-end justify-center
+        flex items-center justify-center
         bg-black/40 backdrop-blur-sm
         animate-[fade-in_0.2s_ease-out]
       "
@@ -89,13 +89,13 @@ export default function SuggestedTopicSheet({
     >
       <div
         className="
-          w-full max-w-lg
+          w-full max-w-lg mx-4
           bg-white dark:bg-slate-900
-          border-t-4 border-x-4 border-black dark:border-slate-600
-          rounded-t-3xl
-          shadow-[0_-4px_0_0_#000] dark:shadow-[0_-4px_0_0_#475569]
+          border-4 border-black dark:border-slate-600
+          rounded-3xl
+          shadow-[6px_6px_0_0_#000] dark:shadow-[6px_6px_0_0_#475569]
           p-5 pb-8
-          animate-[slide-up_0.3s_ease-out]
+          animate-[scale-in_0.25s_ease-out]
           max-h-[85vh] overflow-y-auto
         "
       >
@@ -166,36 +166,41 @@ export default function SuggestedTopicSheet({
           </section>
         )}
 
-        <section className="mb-6">
+        <section className="mb-6" role="radiogroup" aria-label="Difficulty level">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">
             Difficulty
           </h3>
-          <div className="flex items-center gap-3">
-            <label htmlFor="suggested-difficulty" className="sr-only">
-              Select difficulty
-            </label>
-            <select
-              id="suggested-difficulty"
-              value={selectedLevel}
-              onChange={(e) => setSelectedLevel?.(e.target.value)}
-              className="
-                w-full
-                px-3 py-2.5
-                rounded-xl
-                border-2 border-black dark:border-slate-600
-                bg-white dark:bg-slate-900
-                text-slate-800 dark:text-slate-100
-                font-semibold
-                shadow-[3px_3px_0_0_#000] dark:shadow-[3px_3px_0_0_#475569]
-                focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-950
-              "
-            >
-              {LEVEL_OPTIONS.map((level) => (
-                <option key={level.id} value={level.id}>
-                  {level.label}
-                </option>
-              ))}
-            </select>
+          <div className="grid grid-cols-3 gap-2">
+            {LEVEL_OPTIONS.map((level) => {
+              const isSelected = selectedLevel === level.id
+              return (
+                <button
+                  key={level.id}
+                  onClick={() => setSelectedLevel?.(level.id)}
+                  role="radio"
+                  aria-checked={isSelected}
+                  className={`
+                    py-3 px-2
+                    rounded-xl
+                    border-2 border-black dark:border-slate-600
+                    cursor-pointer
+                    transition-all duration-150
+                    flex flex-col items-center gap-1
+                    ${isSelected
+                      ? 'bg-indigo-600 text-white shadow-[3px_3px_0_0_#000] dark:shadow-[3px_3px_0_0_#475569]'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 shadow-[2px_2px_0_0_#000] dark:shadow-[2px_2px_0_0_#475569] hover:bg-slate-50 dark:hover:bg-slate-700'
+                    }
+                    active:shadow-none active:translate-x-[2px] active:translate-y-[2px]
+                  `}
+                >
+                  <span className="text-xl">{level.emoji}</span>
+                  <span className="font-semibold text-sm">{level.label}</span>
+                  <span className={`text-[10px] leading-tight ${isSelected ? 'text-indigo-100' : 'text-slate-400 dark:text-slate-500'}`}>
+                    {level.desc}
+                  </span>
+                </button>
+              )
+            })}
           </div>
         </section>
 
@@ -225,9 +230,9 @@ export default function SuggestedTopicSheet({
           from { opacity: 0; }
           to { opacity: 1; }
         }
-        @keyframes slide-up {
-          from { transform: translateY(100%); }
-          to { transform: translateY(0); }
+        @keyframes scale-in {
+          from { transform: scale(0.95); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
         }
       `}</style>
     </div>

@@ -19,11 +19,11 @@ export default function DiscoverButton({ onClick, isLoading = false }) {
       disabled={isLoading}
       className={`
         px-5 h-14 rounded-2xl
-        bg-stardust
+        bg-white/10 backdrop-blur-md
         border-2 border-stardust-100
         ring-1 ring-white/40
         shadow-[0_0_30px_rgba(255,216,102,0.65)]
-        hover:bg-stardust-500 hover:shadow-[0_0_40px_rgba(255,216,102,0.75)]
+        hover:bg-white/20 hover:shadow-[0_0_40px_rgba(255,216,102,0.75)]
         text-white text-base font-extrabold tracking-wide
         flex items-center justify-center gap-2
         transition-all duration-150

@@ -19,6 +19,10 @@ const FALLBACK_FACTS = {
       emoji: '✨',
       text: 'Making up stories uses the same brain power as solving puzzles.',
     },
+    {
+      emoji: '🧩',
+      text: 'When you explain ideas in a story, your brain practices problem solving too.',
+    },
   ],
   standard: [
     {
@@ -33,6 +37,10 @@ const FALLBACK_FACTS = {
       emoji: '📝',
       text: 'Putting knowledge into a story makes it 22x more memorable than facts alone.',
     },
+    {
+      emoji: '🎯',
+      text: 'Great stories keep attention by linking each new event to what came before it.',
+    },
   ],
   deep: [
     {
@@ -46,6 +54,10 @@ const FALLBACK_FACTS = {
     {
       emoji: '💡',
       text: 'Creating explanatory narratives is how scientists communicate complex discoveries.',
+    },
+    {
+      emoji: '🧭',
+      text: 'Narrative sequencing helps learners encode temporal and causal relationships more accurately.',
     },
   ],
 }

@@ -16,19 +16,16 @@ import CrimeSceneScan from './CrimeSceneScan'
 import WitnessRoom from './WitnessRoom'
 import TimelineRebuild from './TimelineRebuild'
 import WarrantDecision from './WarrantDecision'
-import { getMysteryLoaderFacts, getMysteryLoaderStages } from './mysteryLoaderFacts'
+import { getMysteryLoaderStages } from './mysteryLoaderFacts'
 import logger from '../../../utils/logger'
 import { vibrateSuccess, vibrateShort } from '../../../utils/haptics'
 import { playCorrectSound, playIncorrectSound, playPartialSound } from '../../../utils/soundEffects'
+import { toApiUrl } from '../../../utils/api'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
 const MAX_MYSTERY_SLIDES = 12
 const MAX_CHARS_PER_FIELD = 2000
-const READINESS_TIMEOUT_MS = 12000
 const REVEAL_NARRATION_TIMEOUT_MS = 12000
 const STAGE_ROTATE_MS = 2500
-const FACT_FETCH_DELAY_MS = 900
-const FACT_REQUEST_TIMEOUT_MS = 1800
 const LOADER_FACT_TTS_CACHE_KEY_PREFIX = 'loader-fun-fact:'
 const DEFAULT_FACT_QUERY = 'science detective mystery'
 
@@ -295,7 +292,7 @@ export default function MysteryLab({
 
   const slideContext = useMemo(() => buildMysterySlideContext(slides), [slides])
   const loaderStages = useMemo(() => getMysteryLoaderStages(explanationLevel), [explanationLevel])
-  const fallbackLoaderFacts = useMemo(() => getMysteryLoaderFacts(explanationLevel), [explanationLevel])
+
   const loadRequestIdRef = useRef(0)
   const revealNarrationTimeoutRef = useRef(null)
   const narratedLoaderFactTextRef = useRef('')
@@ -308,7 +305,7 @@ export default function MysteryLab({
   const loaderStageText = loaderStages[loaderStageIndex % Math.max(loaderStages.length, 1)] || 'Preparing the case file...'
 
   const evaluateStage = async ({ solveMethod, userAnswer, userTheory }) => {
-    const response = await fetch(`${API_BASE}/api/learn/mystery/evaluate`, {
+    const response = await fetch(toApiUrl('/api/learn/mystery/evaluate'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -340,10 +337,10 @@ export default function MysteryLab({
     if (state.currentState !== STATE.LOADING) return
 
     setLoaderStageIndex(0)
-    setLoaderFunFact(normalizeFunFact(fallbackLoaderFacts[0]))
+    setLoaderFunFact(null)
     setShowFunFact(false)
     narratedLoaderFactTextRef.current = ''
-  }, [state.currentState, fallbackLoaderFacts])
+  }, [state.currentState])
 
   useEffect(() => {
     if (state.currentState !== STATE.LOADING || loaderStages.length <= 1) return
@@ -359,10 +356,6 @@ export default function MysteryLab({
     if (state.currentState !== STATE.LOADING) return
 
     const controller = new AbortController()
-    let requestTimeoutId = null
-    let selectedFactLocked = false
-    let apiFact = null
-    const fallbackFact = normalizeFunFact(fallbackLoaderFacts[0])
 
     const fetchApiFact = async () => {
       const queryCandidate = topicName || state.mystery?.mysteryTitle || DEFAULT_FACT_QUERY
@@ -371,9 +364,7 @@ export default function MysteryLab({
         : DEFAULT_FACT_QUERY
 
       try {
-        requestTimeoutId = setTimeout(() => controller.abort(), FACT_REQUEST_TIMEOUT_MS)
-
-        const response = await fetch(`${API_BASE}/api/generate/engagement`, {
+        const response = await fetch(toApiUrl('/api/generate/engagement'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -394,53 +385,37 @@ export default function MysteryLab({
           throw new Error('Missing fun fact payload')
         }
 
-        apiFact = resolvedFact
+        if (controller.signal.aborted) return
 
-        if (!selectedFactLocked && !controller.signal.aborted) {
-          logger.debug('MYSTERY', 'Loader fun fact ready before display delay', {
-            source: 'api',
-            query,
-            explanationLevel,
-          })
+        const factText = `Fun fact: ${resolvedFact.text}`
+        const cacheKey = `${LOADER_FACT_TTS_CACHE_KEY_PREFIX}${resolvedFact.text}`
+        await prefetch(factText, cacheKey)
+
+        if (!controller.signal.aborted) {
+          setLoaderFunFact(resolvedFact)
+          setShowFunFact(true)
         }
 
-        logger.debug('MYSTERY', 'Loader fun fact resolved', {
+        logger.debug('MYSTERY', 'Loader fun fact resolved with TTS', {
           source: 'api',
           query,
           explanationLevel,
         })
       } catch (error) {
-        if (error.name === 'AbortError') {
-          logger.warn('MYSTERY', 'Loader fun fact request timed out', {
-            timeoutMs: FACT_REQUEST_TIMEOUT_MS,
-          })
-          return
-        }
+        if (error.name === 'AbortError') return
 
-        logger.warn('MYSTERY', 'Loader fun fact request failed; using fallback', {
+        logger.warn('MYSTERY', 'Loader fun fact request failed', {
           error: error.message,
         })
-      } finally {
-        if (requestTimeoutId) clearTimeout(requestTimeoutId)
       }
     }
 
     void fetchApiFact()
 
-    const delayedFetchId = setTimeout(() => {
-      if (controller.signal.aborted) return
-
-      selectedFactLocked = true
-      setLoaderFunFact(apiFact || fallbackFact)
-      setShowFunFact(true)
-    }, FACT_FETCH_DELAY_MS)
-
     return () => {
-      clearTimeout(delayedFetchId)
-      if (requestTimeoutId) clearTimeout(requestTimeoutId)
       controller.abort()
     }
-  }, [state.currentState, topicName, explanationLevel, state.mystery?.mysteryTitle, fallbackLoaderFacts])
+  }, [state.currentState, topicName, explanationLevel, state.mystery?.mysteryTitle])
 
   useEffect(() => {
     if (state.currentState !== STATE.LOADING || !showFunFact) return
@@ -463,7 +438,7 @@ export default function MysteryLab({
       loadRequestIdRef.current !== requestId || controller.signal.aborted
 
     const fetchMystery = async () => {
-      const response = await fetch(`${API_BASE}/api/learn/mystery`, {
+      const response = await fetch(toApiUrl('/api/learn/mystery'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -485,7 +460,7 @@ export default function MysteryLab({
 
     const fetchImage = async (imagePrompt) => {
       try {
-        const response = await fetch(`${API_BASE}/api/learn/mystery/image`, {
+        const response = await fetch(toApiUrl('/api/learn/mystery/image'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ imagePrompt, topicName, explanationLevel }),
@@ -507,49 +482,17 @@ export default function MysteryLab({
       }
     }
 
-    const fetchImageWithSoftTimeout = async (imagePrompt, timeoutMs = READINESS_TIMEOUT_MS) => {
-      if (!imagePrompt) return null
-
-      let timeoutId = null
-
-      try {
-        timeoutId = setTimeout(() => {
-          logger.warn('MYSTERY', 'Image load is slow; keeping placeholder until ready', { timeoutMs })
-        }, timeoutMs)
-
-        return await fetchImage(imagePrompt)
-      } finally {
-        if (timeoutId) clearTimeout(timeoutId)
-      }
-    }
-
-    const prefetchWithTimeout = async (text, cacheKey, timeoutMs = READINESS_TIMEOUT_MS) => {
+    const prefetchNarration = async (text, cacheKey) => {
       if (!text || typeof text !== 'string') {
         return false
       }
 
-      const timeoutSentinel = { timedOut: true }
-      let timeoutId = null
-
       try {
-        const result = await Promise.race([
-          Promise.resolve(prefetch(text, cacheKey)),
-          new Promise((resolve) => {
-            timeoutId = setTimeout(() => resolve(timeoutSentinel), timeoutMs)
-          }),
-        ])
-
-        if (result === timeoutSentinel) {
-          logger.warn('MYSTERY', 'Narration prefetch timed out', { cacheKey, timeoutMs })
-          return false
-        }
-
+        const result = await prefetch(text, cacheKey)
         return Boolean(result)
       } catch (error) {
         logger.warn('MYSTERY', 'Narration prefetch failed', { cacheKey, error: error.message })
         return false
-      } finally {
-        if (timeoutId) clearTimeout(timeoutId)
       }
     }
 
@@ -563,18 +506,21 @@ export default function MysteryLab({
           return
         }
 
+        const [imageUrl] = await Promise.all([
+          fetchImage(mystery.imagePrompt).catch((error) => {
+            logger.warn('MYSTERY', 'Image load failed', { error: error.message })
+            return null
+          }),
+          prefetchNarration(`${mystery.mysteryTitle}. ${mystery.mysterySetup}`, 'briefing-setup'),
+        ])
+
+        if (isStale()) return
+
         dispatch({ type: ACTION.MYSTERY_LOADED, payload: mystery })
 
-        void fetchImageWithSoftTimeout(mystery.imagePrompt, READINESS_TIMEOUT_MS)
-          .then((imageUrl) => {
-            if (isStale() || !imageUrl) return
-            dispatch({ type: ACTION.IMAGE_LOADED, payload: imageUrl })
-          })
-          .catch((error) => {
-            logger.warn('MYSTERY', 'Background image load failed', { error: error.message })
-          })
-
-        void prefetchWithTimeout(mystery.mysterySetup, 'briefing-setup', READINESS_TIMEOUT_MS)
+        if (imageUrl) {
+          dispatch({ type: ACTION.IMAGE_LOADED, payload: imageUrl })
+        }
       } catch (error) {
         if (isStale() || error.name === 'AbortError') return
         dispatch({ type: ACTION.ERROR, payload: error.message || FRIENDLY_MYSTERY_ERRORS.DEFAULT })
@@ -591,7 +537,7 @@ export default function MysteryLab({
 
   useEffect(() => {
     if (state.currentState === STATE.BRIEFING && state.mystery) {
-      narrate(state.mystery.mysterySetup, 'briefing-setup')
+      narrate(`${state.mystery.mysteryTitle}. ${state.mystery.mysterySetup}`, 'briefing-setup')
     }
   }, [state.currentState, state.mystery, narrate])
 
@@ -738,9 +684,26 @@ export default function MysteryLab({
 
   const handleContinue = () => {
     stop()
+    const completedAt = Date.now()
+    const session = {
+      completedAt,
+      mysteryTitle: state.mystery?.mysteryTitle || '',
+      mysterySetup: state.mystery?.mysterySetup || '',
+      sceneImage: state.sceneImage || null,
+      sceneProgress: state.sceneProgress || null,
+      witnessProgress: state.witnessProgress || null,
+      timelineProgress: state.timelineProgress || null,
+      warrantDraft: state.warrantDraft || null,
+      evaluationResult: state.evaluationResult || null,
+      bonusFinds: state.bonusFinds || 0,
+      bonusXp: state.bonusXp || 0,
+      totalXp: state.totalXp || 0,
+    }
+
     onComplete?.({
       completed: Boolean(state.evaluationResult?.isCorrect),
       xpEarned: state.evaluationResult?.xpEarned || state.totalXp,
+      session,
     })
   }
 

@@ -118,7 +118,7 @@ export default function TopicActionSheet({
 
   if (!isOpen || !topic) return null
 
-  const zoneIcon = ZONE_ICONS[topic.zone] || '✨'
+  const topicIcon = topic.icon || ZONE_ICONS[topic.zone] || '✨'
   const reviewStatus = getReviewStatus(topic)
   const daysSince = getDaysSinceReview(topic)
   const relatedTopics = topic.relatedTopics || []
@@ -133,7 +133,7 @@ export default function TopicActionSheet({
     <div
       className="
         fixed inset-0 z-50
-        flex items-end justify-center
+        flex items-center justify-center
         bg-black/40 backdrop-blur-sm
         animate-[fade-in_0.2s_ease-out]
       "
@@ -145,13 +145,13 @@ export default function TopicActionSheet({
       <div
         ref={sheetRef}
         className="
-          w-full max-w-lg
+          w-full max-w-lg mx-4
           bg-white dark:bg-slate-900
-          border-t-4 border-x-4 border-black dark:border-slate-600
-          rounded-t-3xl
-          shadow-[0_-4px_0_0_#000] dark:shadow-[0_-4px_0_0_#475569]
-          p-5 pb-8
-          animate-[slide-up_0.3s_ease-out]
+          border-4 border-black dark:border-slate-600
+          rounded-3xl
+          shadow-[6px_6px_0_0_#000] dark:shadow-[6px_6px_0_0_#475569]
+          p-5 pb-6
+          animate-[scale-in_0.2s_ease-out]
           max-h-[85vh] overflow-y-auto
         "
       >
@@ -159,7 +159,7 @@ export default function TopicActionSheet({
         <div className="flex items-start justify-between gap-3 mb-5">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-2xl" aria-hidden="true">{zoneIcon}</span>
+              <span className="text-2xl" aria-hidden="true">{topicIcon}</span>
               <h2
                 id="topic-sheet-title"
                 className="text-xl font-bold text-slate-900 dark:text-white truncate"
@@ -293,9 +293,9 @@ export default function TopicActionSheet({
           from { opacity: 0; }
           to { opacity: 1; }
         }
-        @keyframes slide-up {
-          from { transform: translateY(100%); }
-          to { transform: translateY(0); }
+        @keyframes scale-in {
+          from { transform: scale(0.9); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
         }
       `}</style>
     </div>

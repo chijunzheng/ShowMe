@@ -68,6 +68,7 @@ export default function StatsBar({
   totalXP = 0,
   topicsLearned = 0,
   trophyCount = 0,
+  storyCount = 0,
   rankIcon,
   isLoading = false,
   compact = false,
@@ -108,6 +109,7 @@ export default function StatsBar({
   const safeXP = Math.max(0, totalXP || 0)
   const safeTopics = Math.max(0, topicsLearned || 0)
   const safeTrophyCount = Math.max(0, trophyCount || 0)
+  const safeStoryCount = Math.max(0, storyCount || 0)
   const rankInfo = getExplorerRank(safeTopics, safeXP)
   const isMaxRank = rankInfo.level === MAX_RANK_LEVEL
   const rankDisplayIcon = rankIcon || rankInfo.icon
@@ -193,6 +195,20 @@ export default function StatsBar({
         <span className={`font-bold ${compact ? 'text-slate-800' : 'text-slate-800 dark:text-white'}`}>{safeTrophyCount}</span>
         <span className={labelClass}>Trophies</span>
       </button>
+
+      {/* Stories - only show when user has saved stories */}
+      {safeStoryCount > 0 && (
+        <button
+          type="button"
+          data-testid="stat-stories"
+          onClick={() => onStatTap?.('stories')}
+          className={`flex flex-col items-center px-3 py-2 rounded-lg ${compact ? 'bg-pink-50' : 'bg-pink-50 dark:bg-pink-900/30'} cursor-pointer hover:scale-105 active:scale-95 transition-transform`}
+        >
+          <span className="text-xl">{'\ud83d\udcd6'}</span>
+          <span className={`font-bold ${compact ? 'text-slate-800' : 'text-slate-800 dark:text-white'}`}>{safeStoryCount}</span>
+          <span className={labelClass}>Stories</span>
+        </button>
+      )}
     </div>
   )
 }
@@ -202,6 +218,7 @@ StatsBar.propTypes = {
   totalXP: PropTypes.number,
   topicsLearned: PropTypes.number,
   trophyCount: PropTypes.number,
+  storyCount: PropTypes.number,
   rankIcon: PropTypes.string,
   isLoading: PropTypes.bool,
   compact: PropTypes.bool,

@@ -13,6 +13,7 @@
  */
 
 import { useState, useCallback, useMemo } from 'react'
+import { computeDisplayedMastery } from '../../hooks/useKnowledgeGraph'
 
 /**
  * Size classes for different brightness levels
@@ -25,22 +26,32 @@ const SIZE_CLASSES = {
 }
 
 /**
- * Color classes for different brightness levels
+ * Fallback color classes when no accent color is provided
  */
 const COLOR_CLASSES = {
-  dim: 'bg-slate-500',
-  glow: 'bg-indigo-300',
-  bright: 'bg-indigo-200',
+  dim: 'bg-night-600',
+  glow: 'bg-stardust-200',
+  bright: 'bg-stardust-100',
   brilliant: 'bg-white',
+}
+
+/**
+ * Opacity multipliers for brightness levels when using accent color
+ */
+const ACCENT_OPACITY = {
+  dim: 0.5,
+  glow: 0.7,
+  bright: 0.85,
+  brilliant: 1.0,
 }
 
 /**
  * Glow effect classes for different brightness levels
  */
 const GLOW_CLASSES = {
-  dim: 'opacity-60 shadow-[0_0_4px_rgba(100,116,139,0.3)]',
-  glow: 'opacity-80 shadow-[0_0_8px_rgba(165,180,252,0.5)]',
-  bright: 'opacity-95 shadow-[0_0_14px_rgba(199,210,254,0.7)]',
+  dim: 'opacity-60 shadow-[0_0_4px_rgba(61,53,85,0.4)]',
+  glow: 'opacity-80 shadow-[0_0_8px_rgba(255,216,102,0.5)]',
+  bright: 'opacity-95 shadow-[0_0_14px_rgba(255,236,136,0.6)]',
   brilliant: 'opacity-100 shadow-[0_0_24px_rgba(255,255,255,0.9)] animate-pulse-slow',
 }
 
@@ -69,6 +80,7 @@ export default function ConstellationStar({
   onHoverStart,
   onHoverEnd,
   isDimmed = false,
+  isHighlighted = false,
   accentColor,
 }) {
   const [isHovered, setIsHovered] = useState(false)
@@ -106,18 +118,25 @@ export default function ConstellationStar({
   /**
    * Get CSS classes based on brightness
    */
-  const sizeClass = SIZE_CLASSES[node.brightness] || SIZE_CLASSES.glow
-  const colorClass = COLOR_CLASSES[node.brightness] || COLOR_CLASSES.glow
-  const glowClass = GLOW_CLASSES[node.brightness] || GLOW_CLASSES.glow
+  const brightness = node.brightness || 'glow'
+  const sizeClass = SIZE_CLASSES[brightness] || SIZE_CLASSES.glow
+  const colorClass = accentColor ? '' : (COLOR_CLASSES[brightness] || COLOR_CLASSES.glow)
+  const glowClass = GLOW_CLASSES[brightness] || GLOW_CLASSES.glow
 
   /**
-   * Memoize mastery percentage for aria-label
+   * Compute displayed mastery % with Bloom's scores and spaced repetition decay
    */
   const masteryPercent = useMemo(() => {
+    if (node.masteryScores) {
+      return Math.round(computeDisplayedMastery(node.masteryScores, node.lastReviewedAt) * 100)
+    }
     return Math.round((node.mastery || 0) * 100)
-  }, [node.mastery])
+  }, [node.masteryScores, node.mastery, node.lastReviewedAt])
 
   const shouldShowLabel = showLabel || isHovered
+
+  // Highlighted stars should never be dimmed
+  const effectiveDimmed = isDimmed && !isHighlighted
 
   return (
     <button
@@ -133,22 +152,28 @@ export default function ConstellationStar({
         rounded-full
         transition-all duration-300
         hover:scale-125 focus:scale-125
-        focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-950
+        focus:outline-none focus:ring-2 focus:ring-stardust focus:ring-offset-2 focus:ring-offset-night-900
         ${sizeClass}
         ${colorClass}
         ${glowClass}
-        ${isDimmed ? 'opacity-40' : ''}
+        ${effectiveDimmed ? 'opacity-40' : ''}
+        ${isHighlighted ? 'scale-125 z-20' : ''}
       `}
       style={{
         left: position.x,
         top: position.y,
+        ...(accentColor ? {
+          backgroundColor: accentColor,
+          opacity: effectiveDimmed ? 0.4 : (ACCENT_OPACITY[brightness] || 0.7),
+          boxShadow: `0 0 ${brightness === 'brilliant' ? 20 : brightness === 'bright' ? 12 : 8}px ${accentColor}80`,
+        } : {}),
       }}
       aria-label={`${node.name} - ${masteryPercent}% mastery`}
     >
       {accentColor && (
         <span
-          className="absolute inset-0 rounded-full border pointer-events-none"
-          style={{ borderColor: accentColor, opacity: 0.55 }}
+          className="absolute inset-0 rounded-full border-2 pointer-events-none"
+          style={{ borderColor: `${accentColor}aa` }}
           aria-hidden="true"
         />
       )}
@@ -174,24 +199,32 @@ export default function ConstellationStar({
         </div>
       )}
 
+      {/* Highlight pulsing ring for focused topic */}
+      {isHighlighted && (
+        <span
+          className="absolute -inset-2 rounded-full border-2 border-yellow-400 animate-ping pointer-events-none"
+          aria-hidden="true"
+        />
+      )}
+
       {/* Label tooltip on hover/focus */}
       {isHovered && (
         <div
           className="
             absolute left-1/2 top-full mt-2 -translate-x-1/2
-            px-2 py-1 rounded bg-slate-800 text-white text-xs
+            px-2 py-1 rounded bg-night-900 text-white text-xs
             whitespace-nowrap pointer-events-none z-10
             shadow-lg
           "
           role="tooltip"
         >
           <div className="font-medium">{node.name}</div>
-          <div className="text-slate-400 text-[10px]">
+          <div className="text-cream-300 text-[10px]">
             {masteryPercent}% mastery
           </div>
           {/* Tooltip arrow */}
           <div
-            className="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-slate-800"
+            className="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-night-900"
             aria-hidden="true"
           />
         </div>
@@ -204,7 +237,7 @@ export default function ConstellationStar({
             absolute left-1/2 top-full mt-1 -translate-x-1/2
             px-2 py-0.5
             rounded-full
-            bg-slate-900/70 border border-white/10
+            bg-night-900/70 border border-white/10
             text-[11px] text-slate-100
             whitespace-nowrap pointer-events-none
             max-w-[110px] truncate text-center

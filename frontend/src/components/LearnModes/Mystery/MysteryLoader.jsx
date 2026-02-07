@@ -16,12 +16,11 @@ export default function MysteryLoader({
       <div className="max-w-xl w-full space-y-6 animate-fade-in">
         <div className="flex flex-col items-center gap-4">
           <div className="w-16 h-16 border-4 border-indigo-200 dark:border-indigo-700 border-t-indigo-600 dark:border-t-indigo-300 rounded-full animate-spin" />
-          <p className="text-xl font-medium text-gray-800 dark:text-gray-100">Preparing the case file...</p>
           <p
             role="status"
             aria-live="polite"
             data-testid="mystery-loader-stage"
-            className="text-sm text-indigo-700 dark:text-indigo-300 font-semibold"
+            className="text-xl font-medium text-indigo-700 dark:text-indigo-300"
           >
             {stageText}
           </p>
@@ -49,9 +48,6 @@ export default function MysteryLoader({
           </article>
         )}
 
-        <p className="text-center text-xs text-slate-500 dark:text-slate-400">
-          Case prep continues automatically. No action needed.
-        </p>
       </div>
     </div>
   )

@@ -37,6 +37,11 @@ export default function MysteryIntro({
   return (
     <div className="flex flex-col items-center justify-center min-h-screen px-6 py-12 bg-gradient-to-br from-purple-50 via-white to-indigo-50 dark:from-gray-900 dark:via-gray-800 dark:to-purple-950">
       <div className="max-w-2xl w-full space-y-6 animate-fade-in">
+        {/* Case Title */}
+        <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-100 text-center">
+          {mysteryTitle}
+        </h1>
+
         {/* Scene Image Container - 16:9 aspect ratio */}
         <div className="relative w-full aspect-video rounded-2xl overflow-hidden border-2 border-purple-200 dark:border-purple-700 bg-gray-100 dark:bg-gray-800">
           {/* Detective emoji placeholder - shown while loading or if no image */}
@@ -57,16 +62,6 @@ export default function MysteryIntro({
               }`}
             />
           )}
-
-          {/* Gradient overlay for text readability */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
-
-          {/* Case Title - positioned over gradient */}
-          <div className="absolute bottom-0 left-0 right-0 p-6">
-            <h1 className="text-3xl font-bold text-white mb-2 drop-shadow-lg">
-              {mysteryTitle}
-            </h1>
-          </div>
         </div>
 
         {/* Mystery Setup Card */}

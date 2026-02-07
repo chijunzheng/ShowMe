@@ -101,7 +101,8 @@ function applyRepulsion(nodes, positions, repulsion) {
 
       const dx = posB.x - posA.x
       const dy = posB.y - posA.y
-      const distSquared = dx * dx + dy * dy
+      // Clamp to minimum of 1 to prevent division by zero when nodes overlap
+      const distSquared = Math.max(1, dx * dx + dy * dy)
       const dist = Math.max(1, Math.sqrt(distSquared))
 
       // Inverse square repulsion force
@@ -246,7 +247,8 @@ function applyClusterRepulsion(nodes, positions, clusters, repulsion) {
       const b = centroids[j]
       const dx = b.cx - a.cx
       const dy = b.cy - a.cy
-      const distSquared = dx * dx + dy * dy
+      // Clamp to minimum of 1 to prevent division by zero when clusters overlap
+      const distSquared = Math.max(1, dx * dx + dy * dy)
       const dist = Math.max(1, Math.sqrt(distSquared))
 
       const force = repulsion / distSquared

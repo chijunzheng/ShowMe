@@ -13,6 +13,7 @@ import { Constellation } from '../Constellation'
 import useKnowledgeGraph from '../../hooks/useKnowledgeGraph'
 import TopicActionSheet from './TopicActionSheet'
 import SuggestedTopicSheet from './SuggestedTopicSheet'
+import useStoryStorage from '../../hooks/useStoryStorage'
 
 // ============================================================================
 // MAIN PROGRESS TAB COMPONENT
@@ -50,6 +51,7 @@ export default function ProgressTab({
   graphClusters: graphClustersProp,
   graphGaps: graphGapsProp,
   graphIsLoading: graphIsLoadingProp,
+  highlightTopicName = null,
 }) {
   // State for action sheet
   const [selectedTopic, setSelectedTopic] = useState(null)
@@ -63,6 +65,7 @@ export default function ProgressTab({
 
   // Knowledge graph state - use props if provided, otherwise use internal hook
   const internalGraph = useKnowledgeGraph()
+  const { stories: savedStories, deleteStory: deleteStoredStory, loadStoryContent } = useStoryStorage()
 
   // Prefer props passed from App.jsx, fallback to internal hook values
   const nodes = graphNodesProp ?? internalGraph.nodes
@@ -215,6 +218,7 @@ export default function ProgressTab({
           totalXP={totalXP}
           topicsLearned={topicList.length}
           trophyCount={earnedTrophyCount}
+          storyCount={savedStories.length}
           compact={true}
           onStatTap={setActiveStatSheet}
           rankIcon={rankInfo?.icon}
@@ -233,34 +237,34 @@ export default function ProgressTab({
           onGapTap={handleGapTap}
           onDiscover={handleDiscover}
           isDiscovering={isDiscovering}
+          highlightTopicName={highlightTopicName}
           className="w-full h-full"
-        />
+        >
+          {/* Render inside Constellation so they're visible in native fullscreen */}
+          <TopicActionSheet
+            topic={selectedTopic}
+            isOpen={isActionSheetOpen}
+            onClose={handleCloseActionSheet}
+            onReviewSlideshow={handleReviewFromSheet}
+            onLaunchMode={handleLaunchFromSheet}
+            onSelectRelatedTopic={handleSelectRelatedTopic}
+          />
+          <SuggestedTopicSheet
+            gap={selectedGap}
+            isOpen={isSuggestedSheetOpen}
+            onClose={handleCloseSuggestedSheet}
+            onStart={handleStartSuggestedTopic}
+            nodes={nodes}
+            selectedLevel={selectedLevel}
+            setSelectedLevel={setSelectedLevel}
+          />
+        </Constellation>
         {discoverMessage && (
           <div className="absolute bottom-20 left-6 z-20 rounded-lg bg-slate-900/90 px-3 py-2 text-xs text-white shadow-lg">
             {discoverMessage}
           </div>
         )}
       </div>
-
-      {/* Topic Action Sheet (modal overlay) */}
-      <TopicActionSheet
-        topic={selectedTopic}
-        isOpen={isActionSheetOpen}
-        onClose={handleCloseActionSheet}
-        onReviewSlideshow={handleReviewFromSheet}
-        onLaunchMode={handleLaunchFromSheet}
-        onSelectRelatedTopic={handleSelectRelatedTopic}
-      />
-
-      <SuggestedTopicSheet
-        gap={selectedGap}
-        isOpen={isSuggestedSheetOpen}
-        onClose={handleCloseSuggestedSheet}
-        onStart={handleStartSuggestedTopic}
-        nodes={nodes}
-        selectedLevel={selectedLevel}
-        setSelectedLevel={setSelectedLevel}
-      />
 
       {/* Stat Detail Sheet */}
       {activeStatSheet && (
@@ -272,6 +276,9 @@ export default function ProgressTab({
           topicList={topicList}
           trophyList={trophyList}
           graphNodes={nodes}
+          stories={savedStories}
+          onDeleteStory={deleteStoredStory}
+          onLoadStoryContent={loadStoryContent}
         />
       )}
     </div>

@@ -1,14 +1,17 @@
 /**
  * StoryStudio - Main Story Studio learning mode container (state machine)
  *
- * State flow: LOADING → INTRO → CHAPTER_1 → ILLUSTRATING_1 → CHAPTER_2 →
- *            ILLUSTRATING_2 → CHAPTER_3 → ILLUSTRATING_3 → PLAYBACK → SHARE
+ * State flow (batch mode): LOADING → INTRO → CHAPTER_1 → CHAPTER_2 →
+ *            CHAPTER_3 → FINALIZING → PLAYBACK → SHARE
+ *
+ * Legacy flow (flag off): LOADING → INTRO → CHAPTER_1 → ILLUSTRATING_1 →
+ *            CHAPTER_2 → ILLUSTRATING_2 → CHAPTER_3 → ILLUSTRATING_3 → PLAYBACK → SHARE
  *
  * Flow:
  * 1. Load story setup (prompt, concept checklist, ch1, scene image, TTS)
  * 2. Show intro with mission hook and concept cards
  * 3. Present 3 chapters with choice cards
- * 4. After each choice, generate illustration + next chapter
+ * 4. Batch mode: collect all 3 chapter answers, then generate all illustrations once
  * 5. Show playback with all 3 illustrated chapters
  * 6. Award XP based on concepts found
  */
@@ -30,9 +33,11 @@ import StoryPlayback from "./StoryPlayback";
 import ShareStory from "./ShareStory";
 import logger from "../../../utils/logger";
 import { buildLearnSlidesPayload } from "../../../utils/learnSlidesPayload";
+import useStoryStorage from "../../../hooks/useStoryStorage";
+import { toApiUrl } from "../../../utils/api";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3002";
 const LOADING_TIMEOUT_MS = 30000;
+const STORY_BATCH_MODE = import.meta.env.VITE_STORY_BATCH_MODE !== "false";
 
 // State machine states
 const STATE = {
@@ -44,6 +49,7 @@ const STATE = {
   ILLUSTRATING_2: "ILLUSTRATING_2",
   CHAPTER_3: "CHAPTER_3",
   ILLUSTRATING_3: "ILLUSTRATING_3",
+  FINALIZING: "FINALIZING",
   PLAYBACK: "PLAYBACK",
   SHARE: "SHARE",
   ERROR: "ERROR",
@@ -56,10 +62,12 @@ const ACTION = {
   SELECT_CHOICE: "SELECT_CHOICE",
   CHAPTER_READY: "CHAPTER_READY",
   ALL_CHAPTERS_DONE: "ALL_CHAPTERS_DONE",
+  FINALIZED_STORY: "FINALIZED_STORY",
   SHOW_SHARE: "SHOW_SHARE",
   ERROR: "ERROR",
   RETRY: "RETRY",
   BACK_TO_PLAYBACK: "BACK_TO_PLAYBACK",
+  UPDATE_FUN_FACT: "UPDATE_FUN_FACT",
 };
 
 // Initial state
@@ -67,7 +75,6 @@ const initialState = {
   currentState: STATE.LOADING,
   storySetup: null,
   sceneImage: null,
-  missionHookAudio: null,
   chapters: {},
   selections: [],
   illustrations: [],
@@ -75,6 +82,56 @@ const initialState = {
   funFact: null,
   error: null,
 };
+
+function normalizeFunFact(rawFact) {
+  const text = rawFact?.fact || rawFact?.text;
+  if (!text || typeof text !== "string") return null;
+  return {
+    emoji: rawFact?.emoji || "💡",
+    text: text.trim(),
+  };
+}
+
+function pickNextFunFact({
+  apiFact,
+  fallbackFacts = [],
+  usedTexts,
+  currentFactText = null,
+}) {
+  const fallbackPool = fallbackFacts.filter((fact) => fact?.text);
+  const candidates = apiFact ? [apiFact, ...fallbackPool] : fallbackPool;
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const unusedFact = candidates.find((fact) => !usedTexts.has(fact.text));
+  if (unusedFact) {
+    return unusedFact;
+  }
+
+  const differentFact = candidates.find((fact) => fact.text !== currentFactText);
+  if (differentFact) {
+    return differentFact;
+  }
+
+  return candidates[0];
+}
+
+const FUN_FACT_API_MAX_ATTEMPTS = 2;
+
+function buildDistinctFactQuery(baseQuery, excludedFacts = []) {
+  if (excludedFacts.length === 0) {
+    return baseQuery;
+  }
+
+  const priorFacts = excludedFacts
+    .slice(-2)
+    .map((fact) => fact.slice(0, 120))
+    .join(" | ");
+
+  return `${baseQuery}\nGive a different fun fact than these: ${priorFacts}`;
+}
 
 // Reducer function
 function storyReducer(state, action) {
@@ -84,9 +141,7 @@ function storyReducer(state, action) {
         ...state,
         storySetup: action.payload.storySetup,
         sceneImage: action.payload.sceneImage,
-        missionHookAudio: action.payload.missionHookAudio,
-        chapters: { 1: action.payload.chapter1 },
-        funFact: action.payload.funFact,
+        chapters: action.payload.chapters || {},
         currentState: STATE.INTRO,
         error: null,
       };
@@ -98,7 +153,7 @@ function storyReducer(state, action) {
       };
 
     case ACTION.SELECT_CHOICE: {
-      const { chapter, choice } = action.payload;
+      const { chapter, choice, batchMode } = action.payload;
       const newSelections = [
         ...state.selections,
         { chapter, selectedText: choice.text, choice },
@@ -106,12 +161,19 @@ function storyReducer(state, action) {
 
       // Determine next state
       let nextState = STATE.ILLUSTRATING_1;
-      if (chapter === 2) nextState = STATE.ILLUSTRATING_2;
-      if (chapter === 3) nextState = STATE.ILLUSTRATING_3;
+      if (batchMode) {
+        if (chapter === 1) nextState = STATE.CHAPTER_2;
+        if (chapter === 2) nextState = STATE.CHAPTER_3;
+        if (chapter === 3) nextState = STATE.FINALIZING;
+      } else {
+        if (chapter === 2) nextState = STATE.ILLUSTRATING_2;
+        if (chapter === 3) nextState = STATE.ILLUSTRATING_3;
+      }
 
       return {
         ...state,
         selections: newSelections,
+        funFact: null,
         currentState: nextState,
         error: null,
       };
@@ -158,6 +220,21 @@ function storyReducer(state, action) {
       };
     }
 
+    case ACTION.FINALIZED_STORY: {
+      const { scenes, conceptsFound } = action.payload;
+      const newConceptsFound = [
+        ...new Set([...(conceptsFound || [])]),
+      ];
+
+      return {
+        ...state,
+        illustrations: Array.isArray(scenes) ? scenes : [],
+        conceptsFound: newConceptsFound,
+        currentState: STATE.PLAYBACK,
+        error: null,
+      };
+    }
+
     case ACTION.SHOW_SHARE:
       return {
         ...state,
@@ -182,6 +259,12 @@ function storyReducer(state, action) {
         ...initialState,
       };
 
+    case ACTION.UPDATE_FUN_FACT:
+      return {
+        ...state,
+        funFact: action.payload,
+      };
+
     default:
       return state;
   }
@@ -204,10 +287,13 @@ export default function StoryStudio({
 }) {
   const [state, dispatch] = useReducer(storyReducer, initialState);
   const { narrate, stop, prefetch, isPlaying } = useStoryNarration();
+  const { saveStory } = useStoryStorage();
 
   const slidePayload = useMemo(() => buildLearnSlidesPayload(slides), [slides]);
   const loadRequestIdRef = useRef(0);
   const storyDataRef = useRef(null);
+  const usedFunFactTextsRef = useRef(new Set());
+  const currentFunFactTextRef = useRef(null);
 
   // Stage text rotation for loader
   const [currentStage, setCurrentStage] = useState(0);
@@ -219,6 +305,94 @@ export default function StoryStudio({
     () => getStoryLoaderFacts(explanationLevel),
     [explanationLevel],
   );
+
+  useEffect(() => {
+    currentFunFactTextRef.current = state.funFact?.text || null;
+  }, [state.funFact?.text]);
+
+  // Reset fun fact history for a fresh run (initial load or retry)
+  useEffect(() => {
+    if (state.currentState === STATE.LOADING && state.selections.length === 0) {
+      usedFunFactTextsRef.current.clear();
+      currentFunFactTextRef.current = null;
+    }
+  }, [state.currentState, state.selections.length]);
+
+  const fetchNextFunFact = useCallback(async ({
+    signal,
+    query,
+    currentFactText = null,
+  }) => {
+    const baseQuery = query || topicName;
+    const excludedFacts = [];
+    let uniqueApiFact = null;
+
+    for (let attempt = 0; attempt < FUN_FACT_API_MAX_ATTEMPTS; attempt += 1) {
+      if (signal?.aborted) {
+        return null;
+      }
+
+      try {
+        const res = await fetch(toApiUrl('/api/generate/engagement'), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: buildDistinctFactQuery(baseQuery, excludedFacts),
+            explanationLevel,
+            skipTTS: true,
+          }),
+          signal,
+        });
+        const data = res.ok ? await res.json() : null;
+        const candidate = data?.fallback ? null : normalizeFunFact(data?.funFact);
+
+        if (!candidate?.text) {
+          break;
+        }
+
+        const isDuplicate =
+          usedFunFactTextsRef.current.has(candidate.text) ||
+          candidate.text === currentFactText;
+
+        if (!isDuplicate) {
+          uniqueApiFact = candidate;
+          break;
+        }
+
+        excludedFacts.push(candidate.text);
+      } catch {
+        break;
+      }
+    }
+
+    const fallbackFact = pickNextFunFact({
+      apiFact: null,
+      fallbackFacts: loaderFacts,
+      usedTexts: usedFunFactTextsRef.current,
+      currentFactText,
+    });
+
+    const nextFact = uniqueApiFact
+      ? { ...uniqueApiFact, source: "api" }
+      : fallbackFact
+        ? { ...fallbackFact, source: "local" }
+        : null;
+
+    if (!nextFact?.text) {
+      return null;
+    }
+
+    usedFunFactTextsRef.current.add(nextFact.text);
+
+    void prefetch(
+      `Fun fact. ${nextFact.text}`,
+      `fun-fact-${nextFact.text.slice(0, 20)}`,
+    ).catch(() => {
+      // Non-critical: keep the visual fact even if TTS prefetch fails.
+    });
+
+    return nextFact;
+  }, [topicName, explanationLevel, loaderFacts, prefetch]);
 
   // Rotate stage text during loading
   useEffect(() => {
@@ -260,28 +434,33 @@ export default function StoryStudio({
           }
         }, LOADING_TIMEOUT_MS);
 
-        // Fetch story setup and fun fact in parallel
-        const [storyResponse, engagementResponse] = await Promise.all([
-          fetch(`${API_BASE}/api/learn/story`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              slides: slidePayload,
-              topicName,
-              explanationLevel,
-            }),
+        // Fire engagement fetch independently so fun fact shows during loading
+        const loadFunFact = async () => {
+          const fact = await fetchNextFunFact({
             signal: controller.signal,
+            query: topicName,
+            currentFactText: null,
+          });
+
+          if (isStale() || !fact?.text) {
+            return;
+          }
+
+          dispatch({ type: ACTION.UPDATE_FUN_FACT, payload: fact });
+        };
+        void loadFunFact();
+
+        // Fetch story setup (slower, ~5-10s)
+        const storyResponse = await fetch(toApiUrl('/api/learn/story'), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            slides: slidePayload,
+            topicName,
+            explanationLevel,
           }),
-          fetch(`${API_BASE}/api/generate/engagement`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              topicName,
-              explanationLevel,
-            }),
-            signal: controller.signal,
-          }).catch(() => null), // Optional endpoint
-        ]);
+          signal: controller.signal,
+        });
 
         if (!storyResponse.ok) {
           const errorData = await storyResponse.json().catch(() => ({}));
@@ -302,39 +481,18 @@ export default function StoryStudio({
         // Store full data in ref
         storyDataRef.current = storyData;
 
-        // Parse fun fact from engagement endpoint
-        let funFact = null;
-        if (engagementResponse?.ok) {
-          const engagementData = await engagementResponse
-            .json()
-            .catch(() => ({}));
-          if (engagementData?.funFact) {
-            funFact = {
-              emoji: engagementData.funFact.emoji || "💡",
-              text: engagementData.funFact.fact || engagementData.funFact.text,
-            };
-          }
-        }
-
-        // Fallback to local facts if no API fact
-        if (!funFact) {
-          const randomFact =
-            loaderFacts[Math.floor(Math.random() * loaderFacts.length)];
-          funFact = randomFact;
-        }
-
-        // Prefetch mission hook narration if available
-        if (storyData.missionHookAudio) {
-          try {
-            await prefetch(storyData.missionHookAudio, "mission-hook");
-          } catch {
-            // Prefetch failed, proceed without
-          }
-        }
-
         clearTimeout(timeoutId);
 
+        // Pipeline: prefetch mission hook TTS so it plays instantly on INTRO
+        if (storyData.missionHook && !isStale()) {
+          await prefetch(storyData.missionHook, "mission-hook");
+        }
+
+        if (isStale()) return;
+
         // Dispatch loaded data
+        const loadedChapters = buildStoryChaptersMap(storyData);
+
         dispatch({
           type: ACTION.STORY_LOADED,
           payload: {
@@ -348,10 +506,8 @@ export default function StoryStudio({
               missionHook: storyData.missionHook || "",
               starterSuggestion: storyData.starterSuggestion || "",
             },
-            chapter1: storyData.chapters?.["1"] || {},
+            chapters: loadedChapters,
             sceneImage: storyData.sceneImage || null,
-            missionHookAudio: storyData.missionHookAudio || null,
-            funFact,
           },
         });
       } catch (error) {
@@ -377,24 +533,68 @@ export default function StoryStudio({
       stop();
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [slidePayload, topicName, explanationLevel, stop, prefetch, loaderFacts]);
-
-  // Auto-narrate mission hook in INTRO state
-  useEffect(() => {
-    if (state.currentState === STATE.INTRO && state.storySetup?.missionHook) {
-      if (state.missionHookAudio) {
-        narrate(state.storySetup.missionHook, "mission-hook");
-      }
-    }
   }, [
-    state.currentState,
-    state.storySetup?.missionHook,
-    state.missionHookAudio,
-    narrate,
+    slidePayload,
+    topicName,
+    explanationLevel,
+    stop,
+    prefetch,
+    fetchNextFunFact,
   ]);
+
+  // Auto-narrate mission hook in INTRO state (pre-cached by pipeline)
+  // Also prefetch chapter 1 prompt TTS while user reads the intro
+  useEffect(() => {
+    if (state.currentState !== STATE.INTRO) return;
+    if (state.storySetup?.missionHook) {
+      narrate(state.storySetup.missionHook, "mission-hook");
+    }
+    // Pipeline: prefetch chapter 1 prompt TTS in background
+    const ch1Prompt = state.chapters[1]?.prompt;
+    if (ch1Prompt) {
+      prefetch(ch1Prompt, "chapter-1-prompt");
+    }
+  }, [state.currentState, state.storySetup?.missionHook, state.chapters, narrate, prefetch]);
+
+  // Auto-narrate chapter prompt when entering CHAPTER states
+  useEffect(() => {
+    const chapterStates = {
+      [STATE.CHAPTER_1]: 1,
+      [STATE.CHAPTER_2]: 2,
+      [STATE.CHAPTER_3]: 3,
+    };
+    const chapterNum = chapterStates[state.currentState];
+    if (!chapterNum) return;
+
+    const chapterData = state.chapters[chapterNum];
+    if (chapterData?.prompt) {
+      narrate(chapterData.prompt, `chapter-${chapterNum}-prompt`);
+    }
+  }, [state.currentState, state.chapters, narrate]);
+
+  // Auto-narrate fun fact during loading/illustrating states
+  useEffect(() => {
+    const loadingStates = [
+      STATE.LOADING,
+      STATE.ILLUSTRATING_1,
+      STATE.ILLUSTRATING_2,
+      STATE.ILLUSTRATING_3,
+      STATE.FINALIZING,
+    ];
+    if (!loadingStates.includes(state.currentState)) return;
+    if (!state.funFact?.text) return;
+    narrate(
+      `Fun fact. ${state.funFact.text}`,
+      `fun-fact-${state.funFact.text.slice(0, 20)}`,
+    );
+  }, [state.currentState, state.funFact?.text, narrate]);
 
   // Generate chapter illustration after selection
   useEffect(() => {
+    if (STORY_BATCH_MODE) {
+      return;
+    }
+
     const illustratingStates = [
       STATE.ILLUSTRATING_1,
       STATE.ILLUSTRATING_2,
@@ -416,13 +616,34 @@ export default function StoryStudio({
           isFinalChapter,
         });
 
+        void (async () => {
+          const selectedText =
+            state.selections[currentChapterNum - 1]?.selectedText || "";
+          const fact = await fetchNextFunFact({
+            signal: controller.signal,
+            query: `${topicName} ${selectedText}`.trim(),
+            currentFactText: currentFunFactTextRef.current,
+          });
+
+          if (
+            controller.signal.aborted ||
+            !fact?.text ||
+            fact.text === currentFunFactTextRef.current
+          ) {
+            return;
+          }
+
+          currentFunFactTextRef.current = fact.text;
+          dispatch({ type: ACTION.UPDATE_FUN_FACT, payload: fact });
+        })();
+
         // Build previous chapters payload
         const previousChapters = state.selections.map((sel) => ({
-          chapterNumber: sel.chapter,
-          selectedChoice: sel.choice,
+          chapter: sel.chapter,
+          selectedText: sel.selectedText,
         }));
 
-        const response = await fetch(`${API_BASE}/api/learn/story/chapter`, {
+        const response = await fetch(toApiUrl('/api/learn/story/chapter'), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -448,6 +669,7 @@ export default function StoryStudio({
         const illustration = {
           imageUrl: data.illustration?.imageUrl || null,
           sceneDescription: data.illustration?.sceneDescription || "",
+          panelCaptions: data.illustration?.panelCaptions || [],
           chapterTitle: `Chapter ${currentChapterNum}: ${getChapterLabel(currentChapterNum)}`,
         };
 
@@ -460,15 +682,33 @@ export default function StoryStudio({
               conceptsFound: data.conceptsFound || [],
             },
           });
+        } else if (!data.nextChapter) {
+          // Backend returned null nextChapter - treat as error
+          logger.error("STORY", "Backend returned null nextChapter", {
+            chapter: currentChapterNum,
+          });
+          dispatch({
+            type: ACTION.ERROR,
+            payload: "Story generation hit a snag. Please try again.",
+          });
         } else {
+          // Pipeline: prefetch next chapter prompt TTS before dispatching
+          const nextChapterNum =
+            data.nextChapter.chapterNumber || currentChapterNum + 1;
+          if (data.nextChapter.prompt) {
+            await prefetch(
+              data.nextChapter.prompt,
+              `chapter-${nextChapterNum}-prompt`,
+            );
+          }
+
           // More chapters to go
           dispatch({
             type: ACTION.CHAPTER_READY,
             payload: {
               illustration,
               nextChapter: {
-                chapterNumber:
-                  data.nextChapter?.chapterNumber || currentChapterNum + 1,
+                chapterNumber: nextChapterNum,
                 ...data.nextChapter,
               },
               conceptsFound: data.conceptsFound || [],
@@ -495,7 +735,165 @@ export default function StoryStudio({
     return () => {
       controller.abort();
     };
-  }, [state.currentState, state.selections, state.storySetup, topicName]);
+  }, [
+    state.currentState,
+    state.selections,
+    state.storySetup,
+    topicName,
+    prefetch,
+    fetchNextFunFact,
+  ]);
+
+  // Batch mode: generate all story scenes once after chapter 3 answer.
+  useEffect(() => {
+    if (!STORY_BATCH_MODE || state.currentState !== STATE.FINALIZING) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const finalizeStory = async () => {
+      try {
+        logger.info("STORY", "Finalizing full story in one batch", {
+          answerCount: state.selections.length,
+        });
+
+        void (async () => {
+          const joinedSelections = state.selections
+            .map((selection) => selection.selectedText)
+            .join(" ");
+          const fact = await fetchNextFunFact({
+            signal: controller.signal,
+            query: `${topicName} ${joinedSelections}`.trim(),
+            currentFactText: currentFunFactTextRef.current,
+          });
+
+          if (
+            controller.signal.aborted ||
+            !fact?.text ||
+            fact.text === currentFunFactTextRef.current
+          ) {
+            return;
+          }
+
+          currentFunFactTextRef.current = fact.text;
+          dispatch({ type: ACTION.UPDATE_FUN_FACT, payload: fact });
+        })();
+
+        const answers = state.selections
+          .map((selection) => ({
+            chapterNumber: selection.chapter,
+            choiceId: selection.choice?.id || `${selection.chapter}a`,
+            selectedText: selection.selectedText,
+            conceptHints: Array.isArray(selection.choice?.conceptHints)
+              ? selection.choice.conceptHints
+              : [],
+          }))
+          .sort((a, b) => a.chapterNumber - b.chapterNumber);
+
+        const response = await fetch(toApiUrl('/api/learn/story/finalize'), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topicName,
+            conceptChecklist: state.storySetup?.conceptChecklist || [],
+            imageStyle:
+              state.storySetup?.imageStyle || "children's book illustration",
+            answers,
+          }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          const errorCode =
+            errorData?.error || errorData?.message || "Failed to finalize story";
+          throw new Error(errorCode);
+        }
+
+        const data = await response.json();
+        const scenes = Array.isArray(data.scenes)
+          ? data.scenes.map((scene, index) => ({
+              chapterNumber:
+                typeof scene.chapterNumber === "number"
+                  ? scene.chapterNumber
+                  : index + 1,
+              chapterTitle:
+                typeof scene.chapterTitle === "string" && scene.chapterTitle
+                  ? scene.chapterTitle
+                  : `Chapter ${index + 1}: ${getChapterLabel(index + 1)}`,
+              narrativeText:
+                typeof scene.narrativeText === "string"
+                  ? scene.narrativeText
+                  : state.selections[index]?.selectedText || "",
+              sceneDescription:
+                typeof scene.sceneDescription === "string"
+                  ? scene.sceneDescription
+                  : "",
+              panelCaptions: Array.isArray(scene.panelCaptions)
+                ? scene.panelCaptions
+                : [],
+              imageUrl: scene.imageUrl || null,
+            }))
+          : [];
+
+        if (scenes.length !== 3) {
+          throw new Error("Story finalization returned incomplete scenes.");
+        }
+
+        dispatch({
+          type: ACTION.FINALIZED_STORY,
+          payload: {
+            scenes,
+            conceptsFound: Array.isArray(data.conceptsFound)
+              ? data.conceptsFound
+              : [],
+          },
+        });
+      } catch (error) {
+        if (error.name === "AbortError") {
+          return;
+        }
+
+        logger.error("STORY", "Story finalization failed", {
+          error: error.message,
+        });
+        dispatch({
+          type: ACTION.ERROR,
+          payload:
+            error.message === "RATE_LIMITED"
+              ? "Too many requests. Please wait a moment and try again."
+              : error.message || "Failed to finalize story",
+        });
+      }
+    };
+
+    finalizeStory();
+
+    return () => {
+      controller.abort();
+    };
+  }, [
+    state.currentState,
+    state.selections,
+    state.storySetup,
+    topicName,
+    fetchNextFunFact,
+  ]);
+
+  // Build playback scenes (must be declared before handlers that reference it)
+  const playbackScenes = useMemo(() => {
+    return state.illustrations.map((illustration, index) => ({
+      imageUrl: illustration.imageUrl,
+      sceneDescription: illustration.sceneDescription,
+      panelCaptions: illustration.panelCaptions || [],
+      narrativeText:
+        illustration.narrativeText || state.selections[index]?.selectedText || "",
+      chapterTitle:
+        illustration.chapterTitle ||
+        `Chapter ${index + 1}: ${getChapterLabel(index + 1)}`,
+    }));
+  }, [state.illustrations, state.selections]);
 
   // Handlers
   const handleStartStory = useCallback(() => {
@@ -504,12 +902,37 @@ export default function StoryStudio({
   }, [stop]);
 
   const handleSelectChoice = useCallback((choice, chapter) => {
-    dispatch({ type: ACTION.SELECT_CHOICE, payload: { chapter, choice } });
+    dispatch({
+      type: ACTION.SELECT_CHOICE,
+      payload: { chapter, choice, batchMode: STORY_BATCH_MODE },
+    });
   }, []);
 
   const handleShowShare = useCallback(() => {
+    // Auto-save story (non-blocking)
+    const xpEarned = calculateXP(
+      state.conceptsFound.length,
+      state.storySetup?.conceptChecklist?.length || 0,
+    );
+    const storyDoc = {
+      id: crypto.randomUUID(),
+      topicName,
+      createdAt: Date.now(),
+      scenes: playbackScenes,
+      conceptsFound: [...state.conceptsFound],
+      totalConcepts: state.storySetup?.conceptChecklist?.length || 0,
+      xpEarned,
+      storySetup: {
+        storyPrompt: state.storySetup?.storyPrompt || "",
+        conceptChecklist: [...(state.storySetup?.conceptChecklist || [])],
+        imageStyle: state.storySetup?.imageStyle || "",
+      },
+      version: 2,
+    };
+    saveStory(storyDoc);
+
     dispatch({ type: ACTION.SHOW_SHARE });
-  }, []);
+  }, [state.conceptsFound, state.storySetup, topicName, playbackScenes, saveStory]);
 
   const handleBackToPlayback = useCallback(() => {
     dispatch({ type: ACTION.BACK_TO_PLAYBACK });
@@ -526,8 +949,20 @@ export default function StoryStudio({
       state.conceptsFound.length,
       state.storySetup?.conceptChecklist?.length || 0,
     );
-    onComplete?.({ xpEarned });
-  }, [stop, state.conceptsFound, state.storySetup, onComplete]);
+    const totalConcepts = state.storySetup?.conceptChecklist?.length || 1;
+    onComplete?.({
+      completed: true,
+      xpEarned,
+      score: state.conceptsFound.length / totalConcepts,
+      session: {
+        completedAt: Date.now(),
+        conceptsFound: [...state.conceptsFound],
+        totalConcepts,
+        xpEarned,
+        scenes: playbackScenes,
+      },
+    });
+  }, [stop, state.conceptsFound, state.storySetup, onComplete, playbackScenes]);
 
   const handleBack = useCallback(() => {
     const needsConfirmation = [
@@ -537,6 +972,7 @@ export default function StoryStudio({
       STATE.ILLUSTRATING_1,
       STATE.ILLUSTRATING_2,
       STATE.ILLUSTRATING_3,
+      STATE.FINALIZING,
     ].includes(state.currentState);
 
     if (needsConfirmation) {
@@ -549,16 +985,6 @@ export default function StoryStudio({
     stop();
     onBack?.();
   }, [state.currentState, stop, onBack]);
-
-  // Build playback scenes
-  const playbackScenes = useMemo(() => {
-    return state.illustrations.map((illustration, index) => ({
-      imageUrl: illustration.imageUrl,
-      sceneDescription: illustration.sceneDescription,
-      narrativeText: state.selections[index]?.selectedText || "",
-      chapterTitle: illustration.chapterTitle,
-    }));
-  }, [state.illustrations, state.selections]);
 
   // Render states
   if (state.currentState === STATE.ERROR) {
@@ -594,8 +1020,6 @@ export default function StoryStudio({
       <StoryLoader
         stageText={loaderStages[currentStage]}
         funFact={state.funFact}
-        factSource={state.funFact ? "local" : "local"}
-        onCancel={handleBack}
       />
     );
   }
@@ -625,6 +1049,7 @@ export default function StoryStudio({
     return (
       <>
         <ChapterScreen
+          key="chapter-1"
           chapter={1}
           chapterData={state.chapters[1]}
           conceptCards={state.storySetup?.conceptCards || []}
@@ -644,12 +1069,11 @@ export default function StoryStudio({
   }
 
   if (state.currentState === STATE.ILLUSTRATING_1) {
+    if (STORY_BATCH_MODE) return null;
     return (
       <StoryLoader
         stageText="Illustrating your choice..."
         funFact={state.funFact}
-        factSource="local"
-        onCancel={null}
       />
     );
   }
@@ -658,11 +1082,14 @@ export default function StoryStudio({
     return (
       <>
         <ChapterScreen
+          key="chapter-2"
           chapter={2}
           chapterData={state.chapters[2]}
           conceptCards={state.storySetup?.conceptCards || []}
           conceptsFound={new Set(state.conceptsFound)}
-          previousIllustration={state.illustrations[0]?.imageUrl || null}
+          previousIllustration={
+            STORY_BATCH_MODE ? null : state.illustrations[0]?.imageUrl || null
+          }
           onSelectChoice={(choice) => handleSelectChoice(choice, 2)}
           onCustomInput={(choice) => handleSelectChoice(choice, 2)}
         />
@@ -677,12 +1104,11 @@ export default function StoryStudio({
   }
 
   if (state.currentState === STATE.ILLUSTRATING_2) {
+    if (STORY_BATCH_MODE) return null;
     return (
       <StoryLoader
         stageText="Illustrating your choice..."
         funFact={state.funFact}
-        factSource="local"
-        onCancel={null}
       />
     );
   }
@@ -691,11 +1117,14 @@ export default function StoryStudio({
     return (
       <>
         <ChapterScreen
+          key="chapter-3"
           chapter={3}
           chapterData={state.chapters[3]}
           conceptCards={state.storySetup?.conceptCards || []}
           conceptsFound={new Set(state.conceptsFound)}
-          previousIllustration={state.illustrations[1]?.imageUrl || null}
+          previousIllustration={
+            STORY_BATCH_MODE ? null : state.illustrations[1]?.imageUrl || null
+          }
           onSelectChoice={(choice) => handleSelectChoice(choice, 3)}
           onCustomInput={(choice) => handleSelectChoice(choice, 3)}
         />
@@ -710,12 +1139,20 @@ export default function StoryStudio({
   }
 
   if (state.currentState === STATE.ILLUSTRATING_3) {
+    if (STORY_BATCH_MODE) return null;
     return (
       <StoryLoader
         stageText="Illustrating your choice..."
         funFact={state.funFact}
-        factSource="local"
-        onCancel={null}
+      />
+    );
+  }
+
+  if (state.currentState === STATE.FINALIZING) {
+    return (
+      <StoryLoader
+        stageText="Creating your full 3-page manga story..."
+        funFact={state.funFact}
       />
     );
   }
@@ -746,6 +1183,34 @@ export default function StoryStudio({
   }
 
   return null;
+}
+
+function buildStoryChaptersMap(storyData) {
+  const chapters = {};
+
+  if (Array.isArray(storyData?.questionFlow) && storyData.questionFlow.length > 0) {
+    for (const chapterItem of storyData.questionFlow) {
+      if (!chapterItem || typeof chapterItem !== "object") continue;
+      const chapterNumber = Number(chapterItem.chapterNumber);
+      if (!Number.isInteger(chapterNumber) || chapterNumber < 1 || chapterNumber > 3) continue;
+
+      chapters[chapterNumber] = {
+        prompt: typeof chapterItem.prompt === "string" ? chapterItem.prompt : "",
+        icon: typeof chapterItem.icon === "string" ? chapterItem.icon : "📖",
+        choices: Array.isArray(chapterItem.choices) ? chapterItem.choices : [],
+      };
+    }
+  }
+
+  if (Object.keys(chapters).length === 0 && storyData?.chapters && typeof storyData.chapters === "object") {
+    for (const chapterNumber of [1, 2, 3]) {
+      const chapterData = storyData.chapters?.[String(chapterNumber)];
+      if (!chapterData || typeof chapterData !== "object") continue;
+      chapters[chapterNumber] = chapterData;
+    }
+  }
+
+  return chapters;
 }
 
 // Helper: Map chapter number to label

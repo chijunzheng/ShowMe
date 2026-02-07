@@ -7,10 +7,10 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react'
 import logger from '../../../utils/logger'
+import { toApiUrl } from '../../../utils/api'
 
 // API configuration
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
-const TTS_ENDPOINT = `${API_BASE}/api/voice/speak`
+const TTS_ENDPOINT = toApiUrl('/api/voice/speak')
 const RATE_LIMIT_MS = 3000 // Minimum 3 seconds between API calls
 
 /**
