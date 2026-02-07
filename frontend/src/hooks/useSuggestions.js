@@ -13,11 +13,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { getClientId } from '../utils/clientId'
-
-/**
- * API base URL from environment
- */
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
+import { toApiUrl } from '../utils/api'
 
 /**
  * Extract learned topics from pieces array
@@ -69,9 +65,14 @@ function createPiecesHash(pieces) {
   if (!Array.isArray(pieces) || pieces.length === 0) {
     return 'empty'
   }
-  // Create hash from piece IDs and count
-  const ids = pieces.map(p => p.id || p.topicName || p.name).sort().join(',')
-  return `${pieces.length}:${ids}`
+  // Include zone and topicName so metadata changes invalidate the cache
+  const entries = pieces.map(p => {
+    const id = p.id || p.topicName || p.name
+    const zone = p.zone || ''
+    const topic = p.topicName || p.name || ''
+    return `${id}:${zone}:${topic}`
+  }).sort().join(',')
+  return `${pieces.length}:${entries}`
 }
 
 /**
@@ -122,7 +123,7 @@ export default function useSuggestions({ pieces = [], limit = 5, autoFetch = tru
       setError(null)
 
       const clientId = getClientId()
-      const response = await fetch(`${API_BASE}/api/world/suggestions`, {
+      const response = await fetch(toApiUrl('/api/world/suggestions'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

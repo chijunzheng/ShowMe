@@ -6,8 +6,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getClientId } from '../utils/clientId'
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
+import { toApiUrl } from '../utils/api'
 
 export default function useUserProgress() {
   const [progress, setProgress] = useState(null)
@@ -24,7 +23,7 @@ export default function useUserProgress() {
       try {
         setIsLoading(true)
         const response = await fetch(
-          `${API_BASE}/api/user/progress?clientId=${encodeURIComponent(clientId)}`
+          toApiUrl(`/api/user/progress?clientId=${encodeURIComponent(clientId)}`)
         )
 
         if (!response.ok) {
@@ -42,9 +41,7 @@ export default function useUserProgress() {
         setProgress({
           clientId,
           totalQuestions: 0,
-          totalSocraticAnswers: 0,
           totalTopicsLearned: 0,
-          totalQuizzes: 0,
           storyCompletions: 0,
           mysteryCompletions: 0,
           wonderCompletions: 0,
@@ -66,7 +63,7 @@ export default function useUserProgress() {
   // Record an activity and update progress
   const recordActivity = useCallback(async (action) => {
     try {
-      const response = await fetch(`${API_BASE}/api/user/activity`, {
+      const response = await fetch(toApiUrl('/api/user/activity'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clientId, action })
@@ -101,20 +98,12 @@ export default function useUserProgress() {
     return recordActivity('question_asked')
   }, [recordActivity])
 
-  const recordSocraticAnswered = useCallback(() => {
-    return recordActivity('socratic_answered')
-  }, [recordActivity])
-
   const recordDeepLevelUsed = useCallback(() => {
     return recordActivity('deep_level_used')
   }, [recordActivity])
 
   const recordTopicLearned = useCallback(() => {
     return recordActivity('topic_learned')
-  }, [recordActivity])
-
-  const recordQuizCompleted = useCallback(() => {
-    return recordActivity('quiz_complete')
   }, [recordActivity])
 
   const recordStoryCompleted = useCallback(() => {
@@ -139,10 +128,8 @@ export default function useUserProgress() {
     clearNewBadges,
     recordActivity,
     recordQuestionAsked,
-    recordSocraticAnswered,
     recordDeepLevelUsed,
     recordTopicLearned,
-    recordQuizCompleted,
     recordStoryCompleted,
     recordMysteryCompleted,
     recordWonderCompleted

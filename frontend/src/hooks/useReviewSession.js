@@ -16,17 +16,13 @@
 
 import { useState, useCallback, useMemo } from 'react'
 import { getClientId } from '../utils/clientId'
+import { toApiUrl } from '../utils/api'
 
 /**
  * Number of days before a piece needs review
  * Pieces older than this threshold will appear in the "Strengthen" section
  */
 const REVIEW_THRESHOLD_DAYS = 7
-
-/**
- * API base URL from environment
- */
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
 
 /**
  * useReviewSession - Hook for managing spaced repetition review sessions
@@ -117,7 +113,7 @@ export function useReviewSession(worldPieces = []) {
 
     try {
       // Call API to record review result
-      const response = await fetch(`${API_BASE}/api/world/piece/review`, {
+      const response = await fetch(toApiUrl('/api/world/piece/review'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

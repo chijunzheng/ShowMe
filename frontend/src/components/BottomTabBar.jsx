@@ -52,8 +52,7 @@ function BottomTabBar({ activeTab = 'learn', onTabChange, worldBadge = 0, hasSid
         fixed bottom-0 right-0 z-40
         ${hasSidebar ? 'left-0 md:left-64' : 'left-0'}
         h-16 safe-bottom
-        bg-cream-50 dark:bg-night-800
-        border-t border-cream-200 dark:border-night-600
+        bg-cream-50 dark:bg-night-800 border-t border-cream-200 dark:border-night-600
         shadow-[0_-2px_10px_rgba(0,0,0,0.05)]
       `}
       role="navigation"

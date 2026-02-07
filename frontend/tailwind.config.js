@@ -10,15 +10,15 @@ export default {
       colors: {
         // Curious Explorer: Kid-friendly color palette
         primary: {
-          DEFAULT: '#FF6B4A',
-          50: '#FFF5F2',
-          100: '#FFE8E2',
-          200: '#FFCFC4',
-          300: '#FFB0A0',
-          400: '#FF8A6E',
-          500: '#FF6B4A',
-          600: '#E85A3C',
-          700: '#C44830',
+          DEFAULT: '#6366F1',
+          50: '#EEF2FF',
+          100: '#E0E7FF',
+          200: '#C7D2FE',
+          300: '#A5B4FC',
+          400: '#818CF8',
+          500: '#6366F1',
+          600: '#4F46E5',
+          700: '#4338CA',
         },
         secondary: {
           DEFAULT: '#00B4A0',
@@ -52,6 +52,16 @@ export default {
           800: '#252033',
           700: '#2D2640',
           600: '#3D3555',
+        },
+        stardust: {
+          DEFAULT: '#FFD866',
+          50: '#FFFDF0',
+          100: '#FFF9D6',
+          200: '#FFF3B0',
+          300: '#FFEC88',
+          400: '#FFD866',
+          500: '#E6C24E',
+          600: '#BFA030',
         },
         surface: {
           DEFAULT: '#F8FAFC',
@@ -286,10 +296,10 @@ export default {
       },
       // Curious Explorer: Kid-friendly gradients
       backgroundImage: {
-        'gradient-primary': 'linear-gradient(135deg, #FF6B4A 0%, #FFB830 100%)',
+        'gradient-primary': 'linear-gradient(135deg, #6366F1 0%, #818CF8 100%)',
         'gradient-success': 'linear-gradient(135deg, #4ADE80 0%, #00B4A0 100%)',
         'gradient-mastery': 'linear-gradient(135deg, #00B4A0 0%, #60A5FA 100%)',
-        'gradient-streak': 'linear-gradient(135deg, #FFB830 0%, #FF6B4A 100%)',
+        'gradient-streak': 'linear-gradient(135deg, #FFB830 0%, #F59E0B 100%)',
         'gradient-ambient': 'radial-gradient(ellipse at top, #FFF5EE 0%, #FFF9F5 100%)',
       },
     },

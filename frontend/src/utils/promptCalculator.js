@@ -145,8 +145,8 @@ export function calculateTopPrompt({ pieces = [], streak = {}, tier, totalPieces
     return {
       type: PROMPT_TYPES.STREAK,
       message: `Keep your ${streak.current}-day streak going!`,
-      action: 'Quick Quiz',
-      icon: '🔥',
+      action: 'Test Me',
+      icon: '🧠',
       payload: {
         streakDays: streak.current,
         actionType: 'quick_quiz',

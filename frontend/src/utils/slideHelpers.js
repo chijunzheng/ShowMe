@@ -88,8 +88,6 @@ export function buildTopicSlides(topic) {
     slides.push(...versionSlides)
   }
 
-  // NOTE: Suggestions are now shown in SocraticFeedback instead of as a slide
-  // This allows Socratic mode to trigger after the last content slide
   return slides
 }
 

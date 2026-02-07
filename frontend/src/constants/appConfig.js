@@ -9,7 +9,6 @@ export const UI_STATE = {
   LISTENING: 'listening',
   GENERATING: 'generating',
   SLIDESHOW: 'slideshow',
-  SOCRATIC: 'socratic',
   MODE_SELECTOR: 'mode_selector', // Choose between Mystery Lab, Wonder Lab, Story Studio
   LEARN_MODE: 'learn_mode', // Active learning mode (mystery/whatif/story)
   ERROR: 'error',
@@ -59,6 +58,7 @@ export const PERMISSION_STATE = {
 export const STORAGE_LIMITS = {
   MAX_CACHED_TOPICS: 12,
   MAX_VERSIONS_PER_TOPIC: 5,
+  MAX_CACHED_STORIES: 10,
 }
 
 // localStorage keys
@@ -66,12 +66,15 @@ export const STORAGE_KEYS = {
   TOPICS: 'showme_topics',
   TOPIC_SLIDES_PREFIX: 'showme_topic_slides_',
   CLIENT_ID: 'showme_client_id',
+  STORIES: 'showme_stories',
+  STORY_CONTENT_PREFIX: 'showme_story_content_',
 }
 
 // Storage schema versions
 export const STORAGE_VERSIONS = {
   TOPICS: 3,
   TOPIC_SLIDES: 1,
+  STORIES: 2,
 }
 
 // Audio configuration constants
@@ -168,8 +171,6 @@ export const API_ENDPOINTS = {
   CHITCHAT: '/api/chitchat',
   TRANSCRIBE: '/api/transcribe',
   VOICE_SPEAK: '/api/voice/speak',
-  QUIZ_GENERATE: '/api/quiz/generate',
-  QUIZ_EVALUATE: '/api/quiz/evaluate',
   WORLD_QUICK_XP: '/api/world/quick-xp',
 }
 

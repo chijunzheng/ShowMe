@@ -9,7 +9,14 @@
  * - Review session management
  */
 
-const STORAGE_KEY = 'showme_client_id'
+import { STORAGE_KEYS } from '../constants/appConfig'
+
+const STORAGE_KEY = STORAGE_KEYS.CLIENT_ID
+let memoryClientId = null
+
+function generateClientId() {
+  return `client_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
+}
 
 /**
  * Get or create a unique client ID
@@ -18,14 +25,26 @@ const STORAGE_KEY = 'showme_client_id'
  * @returns {string} Client ID in format: client_{timestamp}_{random}
  */
 export function getClientId() {
-  let clientId = localStorage.getItem(STORAGE_KEY)
-
-  if (!clientId) {
-    clientId = `client_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
-    localStorage.setItem(STORAGE_KEY, clientId)
+  if (typeof window === 'undefined') {
+    if (!memoryClientId) {
+      memoryClientId = generateClientId()
+    }
+    return memoryClientId
   }
 
-  return clientId
+  try {
+    let clientId = localStorage.getItem(STORAGE_KEY)
+    if (!clientId) {
+      clientId = generateClientId()
+      localStorage.setItem(STORAGE_KEY, clientId)
+    }
+    return clientId
+  } catch {
+    if (!memoryClientId) {
+      memoryClientId = generateClientId()
+    }
+    return memoryClientId
+  }
 }
 
 /**
@@ -33,7 +52,13 @@ export function getClientId() {
  * Useful for testing or resetting user state
  */
 export function clearClientId() {
-  localStorage.removeItem(STORAGE_KEY)
+  memoryClientId = null
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+  } catch {
+    // Ignore localStorage failures.
+  }
 }
 
 export default getClientId

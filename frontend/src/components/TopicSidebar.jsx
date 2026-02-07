@@ -498,8 +498,8 @@ function TopicSidebar({
                         className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                         role="menuitem"
                       >
-                        <span className="text-base" role="img" aria-hidden="true">⚡️</span>
-                        Quick Quiz
+                        <span className="text-base" role="img" aria-hidden="true">🧠</span>
+                        Test Me
                       </button>
                       <button
                         onClick={(e) => handleRenameClick(e, topic)}

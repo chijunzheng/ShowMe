@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Plans
-After using the native planning feature to clear context and bypass permissions, always write original plan into the @plans directory first, if it's a debugging task, write into @debugging-plans directory. Finally, use /create-features agent skills first before actual implementation.
+After using the native planning feature to clear context and bypass permissions, always write original plan into the @plans directory first, if it's a debugging task, write into @debugging-plan directory. Finally, use /create-features agent skills first before actual implementation.
 
 ## Responses
 - Only respond with short and concise answers

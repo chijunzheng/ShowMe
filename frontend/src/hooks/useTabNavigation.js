@@ -4,24 +4,23 @@
  *
  * Tabs:
  * - learn: Main learning/slideshow experience
- * - world: World Builder view with collected pieces
- * - tree: Knowledge Tree view for topic connections
+ * - progress: Journey view with constellation/progress insights
  */
 
 import { useState, useCallback } from 'react'
 
 export function useTabNavigation() {
-  // Active tab: 'learn' | 'world' | 'tree'
+  // Active tab: 'learn' | 'progress'
   const [activeTab, setActiveTab] = useState('learn')
 
-  // World tab badge count (new pieces notification)
+  // Journey tab badge count (new activity notification)
   const [worldBadge, setWorldBadge] = useState(0)
 
   // Learn mode: 'quick' | 'full'
   const [learnMode, setLearnMode] = useState('full')
 
   /**
-   * Increment world badge count (new piece unlocked)
+   * Increment Journey badge count
    */
   const incrementWorldBadge = useCallback(() => {
     setWorldBadge(prev => prev + 1)

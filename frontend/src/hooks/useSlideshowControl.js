@@ -64,10 +64,17 @@ export default function useSlideshowControl({
   const segments = useMemo(() => {
     return visibleSlides.map((parent) => {
       const children = allTopicSlides.filter((s) => s.parentId === parent.id)
-      const label =
-        parent.type === 'header'
-          ? parent.topicName || activeTopic?.name || 'Overview'
-          : parent.subtitle || 'Slide'
+      let label
+      if (parent.type === 'header') {
+        label = parent.topicName || activeTopic?.name || 'Overview'
+      } else if (parent.title) {
+        label = parent.title
+      } else if (parent.subtitle) {
+        // Fallback for older slides without title: use first few words
+        label = parent.subtitle.split(' ').slice(0, 4).join(' ').replace(/[.,!?]$/, '')
+      } else {
+        label = 'Slide'
+      }
       return {
         id: parent.id,
         label,

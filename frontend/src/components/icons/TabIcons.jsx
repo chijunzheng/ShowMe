@@ -18,42 +18,6 @@ export function LearnIcon({ active = false, className = '' }) {
   )
 }
 
-export function WorldIcon({ active = false, className = '' }) {
-  return (
-    <span
-      className={`text-2xl transition-opacity ${active ? '' : 'opacity-50'} ${className}`}
-      role="img"
-      aria-label="World"
-    >
-      🌍
-    </span>
-  )
-}
-
-export function TreeIcon({ active = false, className = '' }) {
-  return (
-    <span
-      className={`text-2xl transition-opacity ${active ? '' : 'opacity-50'} ${className}`}
-      role="img"
-      aria-label="Tree"
-    >
-      🌳
-    </span>
-  )
-}
-
-export function QuizIcon({ active = false, className = '' }) {
-  return (
-    <span
-      className={`text-2xl transition-opacity ${active ? '' : 'opacity-50'} ${className}`}
-      role="img"
-      aria-label="Quiz"
-    >
-      🧠
-    </span>
-  )
-}
-
 export function ProgressIcon({ active = false, className = '' }) {
   return (
     <span

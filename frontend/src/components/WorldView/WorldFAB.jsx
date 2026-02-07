@@ -23,8 +23,8 @@ const FAB_ACTIONS = [
   },
   {
     id: 'quick_quiz',
-    icon: '⚡',
-    label: 'Quick Quiz',
+    icon: '🧠',
+    label: 'Test Me',
     description: 'Random topic',
   },
   {

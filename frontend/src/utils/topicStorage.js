@@ -4,6 +4,7 @@
  */
 
 import logger from './logger.js'
+import { getClientId } from './clientId.js'
 import {
   STORAGE_KEYS,
   STORAGE_VERSIONS,
@@ -15,7 +16,6 @@ import {
 
 const TOPIC_SLIDES_STORAGE_PREFIX = STORAGE_KEYS.TOPIC_SLIDES_PREFIX
 const TOPICS_STORAGE_KEY = STORAGE_KEYS.TOPICS
-const CLIENT_ID_STORAGE_KEY = STORAGE_KEYS.CLIENT_ID
 const TOPICS_STORAGE_VERSION = STORAGE_VERSIONS.TOPICS
 const TOPIC_SLIDES_STORAGE_VERSION = STORAGE_VERSIONS.TOPIC_SLIDES
 const MAX_CACHED_TOPICS = STORAGE_LIMITS.MAX_CACHED_TOPICS
@@ -40,13 +40,7 @@ export function getTopicSlidesStorageKey(topicId, versionId) {
 export function getStoredClientId() {
   if (typeof window === 'undefined') return null
   try {
-    const existing = localStorage.getItem(CLIENT_ID_STORAGE_KEY)
-    if (existing) return existing
-
-    const fallback = `client_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
-    const generated = window.crypto?.randomUUID ? window.crypto.randomUUID() : fallback
-    localStorage.setItem(CLIENT_ID_STORAGE_KEY, generated)
-    return generated
+    return getClientId()
   } catch (error) {
     logger.warn('STORAGE', 'Failed to access client ID storage', {
       error: error.message,

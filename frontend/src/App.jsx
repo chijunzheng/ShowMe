@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import Toast from './components/Toast'
 import TopicSidebar from './components/TopicSidebar'
-import { HomeScreen, ListeningScreen, GeneratingScreen, ErrorScreen, LoadingTopicScreen, SlideshowScreen, SocraticScreen, ModeSelectorScreen } from './components/screens'
+import { HomeScreen, ListeningScreen, GeneratingScreen, ErrorScreen, LoadingTopicScreen, SlideshowScreen, ModeSelectorScreen } from './components/screens'
 import { MysteryLab, WonderLab, StoryStudio } from './components/LearnModes'
 import RaiseHandButton from './components/RaiseHandButton'
 import { useWebSocket, PROGRESS_TYPES } from './hooks/useWebSocket'
@@ -9,7 +9,6 @@ import useSlideAudio from './hooks/useSlideAudio.js'
 import useVoiceAgent from './hooks/useVoiceAgent.js'
 import useQuestionHandler from './hooks/useQuestionHandler.js'
 import logger from './utils/logger'
-import { getClientId } from './utils/clientId'
 import { playMicOnSound, playRecordingCompleteSound, playAchievementSound } from './utils/soundEffects'
 import AchievementToast from './components/AchievementToast'
 import Confetti from './components/Confetti'
@@ -23,17 +22,15 @@ import TierUpCelebration from './components/TierUpCelebration'
 import QuickXpToast from './components/QuickXpToast'
 import { ProgressTab } from './components/ProgressTab'
 import useWorldStats from './hooks/useWorldStats'
-import useSocraticHandlers from './hooks/useSocraticHandlers.js'
 import useSlideshowControl from './hooks/useSlideshowControl.js'
 import useCelebrations from './hooks/useCelebrations.js'
 import useTabNavigation from './hooks/useTabNavigation.js'
 import useKnowledgeGraph from './hooks/useKnowledgeGraph'
-// WB020: Evolution and pocket scene gamification
-import useEvolution from './hooks/useEvolution'
-import usePocketScene from './hooks/usePocketScene'
 import useReviewSession from './hooks/useReviewSession'
-import { EvolutionCelebration } from './components/Celebrations'
-import ConnectionSceneReveal from './components/WorldView/ConnectionSceneReveal'
+import { toApiUrl } from './utils/api'
+import { getClientId } from './utils/clientId'
+import { loadGraphFromStorage } from './utils/graphMigration'
+import { loadStoriesFromStorage, loadStoryContent } from './utils/storyStorage'
 // WB021: Quiz flow screens for dedicated quiz experience
 
 // Import constants from centralized config
@@ -47,6 +44,7 @@ import {
   HOME_HEADLINES,
   GENERATION_TIMEOUT,
   STORAGE_LIMITS,
+  STORAGE_KEYS,
   LEVEL_CONFIG,
   API_ENDPOINTS,
   LOCAL_PROGRESS,
@@ -73,7 +71,6 @@ import {
   isTrivialTranscription,
   pruneSlideCache as pruneSlidesCacheHelper,
 } from './utils/slideHelpers.js'
-import { buildLivingWorldSummaryFromSlides } from './utils/livingWorldSummary.js'
 
 // Extract constants from STORAGE_LIMITS for local use
 const MAX_CACHED_TOPICS = STORAGE_LIMITS.MAX_CACHED_TOPICS
@@ -82,6 +79,105 @@ const MAX_VERSIONS_PER_TOPIC = STORAGE_LIMITS.MAX_VERSIONS_PER_TOPIC
 // Extract timing constants from SLIDE_TIMING
 const SLIDE_TRANSITION_PAUSE_MS = SLIDE_TIMING.TRANSITION_PAUSE_MS
 const MANUAL_FINISH_GRACE_MS = SLIDE_TIMING.MANUAL_FINISH_GRACE_MS
+const CLOUD_IMPORT_MARKER_KEY = 'showme_cloud_import_marker'
+const CLOUD_IMPORT_MIGRATION_VERSION = 'cloud-run-persistence-v1'
+
+function stableStringify(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`
+  }
+
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value)
+      .filter(([, entryValue]) => entryValue !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`)
+    return `{${entries.join(',')}}`
+  }
+
+  return JSON.stringify(value)
+}
+
+function collectTopicsForMigration() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.TOPICS)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    const topics = Array.isArray(parsed?.topics) ? parsed.topics : []
+
+    return topics.map((topic) => {
+      const versions = Array.isArray(topic?.versions) ? topic.versions : []
+      const normalizedVersions = versions.map((version) => {
+        const versionId = typeof version?.id === 'string' && version.id.trim()
+          ? version.id.trim()
+          : 'legacy'
+        const slides = loadTopicSlidesFromStorage(topic.id, versionId) || []
+        return {
+          id: versionId,
+          explanationLevel: version?.explanationLevel || EXPLANATION_LEVEL.STANDARD,
+          createdAt: version?.createdAt || topic?.createdAt || Date.now(),
+          slides,
+        }
+      }).filter((version) => Array.isArray(version.slides) && version.slides.length > 0)
+
+      if (normalizedVersions.length === 0) {
+        const legacySlides = loadTopicSlidesFromStorage(topic.id) || []
+        if (legacySlides.length > 0) {
+          normalizedVersions.push({
+            id: 'legacy',
+            explanationLevel: topic?.explanationLevel || EXPLANATION_LEVEL.STANDARD,
+            createdAt: topic?.createdAt || Date.now(),
+            slides: legacySlides,
+          })
+        }
+      }
+
+      return {
+        id: topic?.id || '',
+        name: topic?.name || '',
+        icon: topic?.icon || '',
+        query: topic?.query || topic?.name || '',
+        versions: normalizedVersions,
+      }
+    }).filter((topic) => topic.id && topic.versions.length > 0)
+  } catch (error) {
+    logger.warn('MIGRATION', 'Failed to collect local topics for cloud import', {
+      error: error.message,
+    })
+    return []
+  }
+}
+
+function collectStoriesForMigration() {
+  try {
+    const metadata = loadStoriesFromStorage()
+    return metadata
+      .map((entry) => loadStoryContent(entry?.id))
+      .filter((story) => story && typeof story === 'object' && story.id)
+  } catch (error) {
+    logger.warn('MIGRATION', 'Failed to collect local stories for cloud import', {
+      error: error.message,
+    })
+    return []
+  }
+}
+
+function collectCloudImportPayload() {
+  const topics = collectTopicsForMigration()
+  const graph = loadGraphFromStorage('showme_topics')
+  const stories = collectStoriesForMigration()
+
+  const hasGraphData = Boolean(graph && Array.isArray(graph.nodes) && graph.nodes.length > 0)
+  if (!hasGraphData && topics.length === 0 && stories.length === 0) {
+    return null
+  }
+
+  return {
+    topics,
+    graph: hasGraphData ? graph : null,
+    stories,
+  }
+}
 
 function App() {
   // CORE027: Load persisted topics on initial mount
@@ -118,18 +214,7 @@ function App() {
   const abortControllerRef = useRef(null)
   const stillWorkingTimerRef = useRef(null)
   const currentQueryRef = useRef(null) // Track current query for fun fact refresh
-
-  // Legacy Living World: Stub values for backward compatibility during migration
-  // TODO: Remove these stubs and all worldViewProps after full migration
-  const livingWorldState = null
-  const livingWorldIsLoading = false
-  const livingWorldIsEvolving = false
-  const livingWorldTier = 'barren'
-  const livingWorldHotspots = []
-  const livingWorldError = null
-  const evolveWorld = useCallback(async () => null, [])
-  const initializeWorld = useCallback(async () => null, [])
-  const resetLivingWorld = useCallback(async () => ({ success: true }), [])
+  const cloudImportAttemptedRef = useRef(false)
 
   // Knowledge Graph: New data model for topics as constellation nodes
   const {
@@ -152,9 +237,6 @@ function App() {
     resolveSuggestedGap,
   } = useKnowledgeGraph()
 
-  const [isWorldRegenerating, setIsWorldRegenerating] = useState(false)
-  const [worldRegenProgress, setWorldRegenProgress] = useState({ current: 0, total: 0 })
-
   // F015: Generation progress state from WebSocket
   const [generationProgress, setGenerationProgress] = useState({
     stage: null,  // Current stage name from PROGRESS_TYPES
@@ -172,10 +254,8 @@ function App() {
     clearNewBadges,
     clientId: userClientId,
     recordQuestionAsked,
-    recordSocraticAnswered,
     recordDeepLevelUsed,
     recordTopicLearned,
-    recordQuizCompleted,
     recordStoryCompleted,
     recordMysteryCompleted,
     recordWonderCompleted
@@ -222,15 +302,7 @@ function App() {
     quickXpEarned,
     showQuickXp,
     dismissQuickXpToast,
-    pendingSceneReveal,
-    showSceneReveal,
-    dismissSceneReveal,
   } = celebrations
-
-  // SOCRATIC-003: State for Socratic mode data
-  const [socraticSlides, setSocraticSlides] = useState([])
-  const [socraticTopicName, setSocraticTopicName] = useState('')
-  const [socraticLanguage, setSocraticLanguage] = useState('en')
 
   // WB018: World Builder gamification state (managed by useTabNavigation hook)
   const {
@@ -253,38 +325,11 @@ function App() {
   const [isRegenerating, setIsRegenerating] = useState(false)
   const regeneratingTopicIdRef = useRef(null)
 
-  // WB020: Evolution system - tracks piece evolutions to higher tiers
-  const {
-    currentEvolution,
-    evolutionQueue,
-    checkEvolutions,
-    processNextEvolution,
-  } = useEvolution()
-
-  // WB019: Pocket scenes - generates scene images when pieces form pockets
-  const {
-    generating: generatingScene,
-    generateScene,
-    shouldRegenerateScene,
-  } = usePocketScene()
-
-  // WB019: handlePocketSceneGenerated now uses showSceneReveal from useCelebrations hook
-  const handlePocketSceneGenerated = showSceneReveal
-
   // WB020: Review session - tracks pieces that need spaced repetition review
   const {
     piecesNeedingReview,
     startReviewSession,
   } = useReviewSession(worldPieces)
-
-  const resetLivingWorldState = useCallback(async () => {
-    const result = await resetLivingWorld()
-    if (!result?.success) {
-      logger.warn('WORLD', 'Failed to reset living world', { error: result?.error })
-      return false
-    }
-    return true
-  }, [resetLivingWorld])
 
 
   const generationProgressPercent = useMemo(() => {
@@ -337,6 +382,7 @@ function App() {
   // F041: Topics state - loaded from localStorage if available (CORE027)
   const [topics, setTopics] = useState(() => initialData.topics)
   const [activeTopicId, setActiveTopicId] = useState(null)
+  const [highlightTopicName, setHighlightTopicName] = useState(null)
 
   // Active topic (null = HOME screen)
   const activeTopic = useMemo(() => {
@@ -402,6 +448,7 @@ function App() {
           // Normalized "piece-like" shape expected by ProgressTab components
           topicId,
           topicName,
+          icon: matchedPiece?.icon || topic.icon || null,
           zone: matchedPiece?.zone || getZoneForCategory(topic.category),
           unlockedAt: matchedPiece?.unlockedAt || unlockedAtIso,
           lastReviewedAt: matchedPiece?.lastReviewedAt || null,
@@ -494,6 +541,92 @@ function App() {
       topicCount: topics.length,
     })
   }, [graphIsLoading, topics, reconcileWithTopics])
+
+  useEffect(() => {
+    if (cloudImportAttemptedRef.current) {
+      return
+    }
+    cloudImportAttemptedRef.current = true
+
+    if (import.meta.env.MODE === 'test') {
+      return
+    }
+
+    const clientId = userClientId || getClientId()
+    if (!clientId) {
+      return
+    }
+
+    const payload = collectCloudImportPayload()
+    if (!payload) {
+      return
+    }
+
+    const checksum = stableStringify(payload)
+
+    try {
+      const rawMarker = localStorage.getItem(CLOUD_IMPORT_MARKER_KEY)
+      if (rawMarker) {
+        const marker = JSON.parse(rawMarker)
+        if (
+          marker?.clientId === clientId &&
+          marker?.migrationVersion === CLOUD_IMPORT_MIGRATION_VERSION &&
+          marker?.checksum === checksum
+        ) {
+          logger.debug('MIGRATION', 'Cloud import already completed for current local payload', {
+            clientId,
+          })
+          return
+        }
+      }
+    } catch (error) {
+      logger.warn('MIGRATION', 'Failed to parse cloud import marker', { error: error.message })
+    }
+
+    fetch(toApiUrl('/api/migration/import-local'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientId,
+        topics: payload.topics,
+        graph: payload.graph,
+        stories: payload.stories,
+        migrationVersion: CLOUD_IMPORT_MIGRATION_VERSION,
+        checksum,
+      }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Import failed with status ${response.status}`)
+        }
+        return response.json()
+      })
+      .then((result) => {
+        if (!result?.success) {
+          return
+        }
+
+        localStorage.setItem(CLOUD_IMPORT_MARKER_KEY, JSON.stringify({
+          clientId,
+          migrationVersion: CLOUD_IMPORT_MIGRATION_VERSION,
+          checksum,
+          importedAt: Date.now(),
+        }))
+
+        logger.info('MIGRATION', 'Local browser data imported to cloud persistence', {
+          clientId,
+          imported: result.imported,
+          alreadyImported: result.alreadyImported,
+          summary: result.summary || null,
+        })
+      })
+      .catch((error) => {
+        logger.warn('MIGRATION', 'Cloud import failed', {
+          clientId,
+          error: error.message,
+        })
+      })
+  }, [userClientId])
 
   // Note: activeChildSlides, displayedSlide come from useSlideshowControl hook (after slideAudio hook)
 
@@ -1148,82 +1281,6 @@ function App() {
   const showToast = useCallback((message) => setToast({ visible: true, message }), [])
   const hideToast = useCallback(() => setToast({ visible: false, message: '' }), [])
 
-  const regenerateLivingWorld = useCallback(async () => {
-    if (isWorldRegenerating) return
-
-    if (!evolveWorld) {
-      showToast('World regeneration unavailable')
-      return
-    }
-
-    const topicList = Array.isArray(topics) ? topics : []
-    if (topicList.length === 0) {
-      const resetOk = await resetLivingWorldState()
-      if (resetOk) {
-        showToast('World reset. Add topics to grow it again.')
-      } else {
-        showToast('World reset failed')
-      }
-      return
-    }
-
-    setIsWorldRegenerating(true)
-    showToast('Regenerating world...')
-
-    try {
-      const resetOk = await resetLivingWorldState()
-      if (!resetOk) {
-        showToast('World reset failed')
-        return
-      }
-
-      const orderedTopics = [...topicList].sort((a, b) => {
-        const aTime = a?.createdAt || a?.lastAccessedAt || 0
-        const bTime = b?.createdAt || b?.lastAccessedAt || 0
-        return aTime - bTime
-      })
-
-      const seen = new Set()
-      const uniqueTopics = orderedTopics.filter((topic) => {
-        const name = typeof topic?.name === 'string' ? topic.name.trim() : ''
-        if (!name) return false
-        const key = name.toLowerCase()
-        if (seen.has(key)) return false
-        seen.add(key)
-        return true
-      })
-
-      setWorldRegenProgress({ current: 0, total: uniqueTopics.length })
-
-      for (let index = 0; index < uniqueTopics.length; index += 1) {
-        const topic = uniqueTopics[index]
-        const slides = (Array.isArray(topic.slides) && topic.slides.length > 0)
-          ? topic.slides
-          : (loadSlidesForTopic(topic) || [])
-        const summary = buildLivingWorldSummaryFromSlides(slides)
-
-        setWorldRegenProgress({ current: index + 1, total: uniqueTopics.length })
-        await evolveWorld(topic.name, summary)
-      }
-
-      showToast('World regenerated from current topics')
-    } catch (error) {
-      logger.warn('WORLD', 'Failed to regenerate living world', { error: error.message })
-      showToast('World regeneration failed')
-    } finally {
-      setWorldRegenProgress({ current: 0, total: 0 })
-      setIsWorldRegenerating(false)
-    }
-  }, [
-    buildLivingWorldSummaryFromSlides,
-    evolveWorld,
-    isWorldRegenerating,
-    loadSlidesForTopic,
-    resetLivingWorldState,
-    showToast,
-    topics,
-  ])
-
   /**
    * Toggle a question's queue status (F047)
    * Adds if not in queue, removes if already queued
@@ -1714,7 +1771,6 @@ function App() {
               // If we reach the end, stop playing and mark slideshow as finished
               if (nextIndex >= visibleSlides.length) {
                 setIsPlaying(false)
-                // Trigger state update outside setter for Socratic mode
                 setTimeout(() => triggerSlideshowFinished(), 0)
                 return prev
               }
@@ -1830,7 +1886,7 @@ function App() {
     }
   }, [wsClientId])
 
-  // SOCRATIC-003 + WB018: Trigger quiz prompt (Full mode) when slideshow finishes
+  // WB018: Trigger quiz prompt (Full mode) when slideshow finishes
   useEffect(() => {
     // Only trigger when slideshow just finished and NO queued questions
     if (!slideshowFinished || questionQueue.length > 0) {
@@ -1879,18 +1935,6 @@ function App() {
     return () => clearTimeout(timer)
   }, [slideshowFinished, questionQueue.length, activeTopicId, learnMode, awardQuickXP]) // WB015: Added awardQuickXP dependency
 
-  // SOCRATIC-003: Socratic mode handlers
-  const {
-    handleSocraticComplete,
-    handleSocraticSkip,
-    handleSocraticFollowUp,
-  } = useSocraticHandlers({
-    setUiState,
-    setSocraticSlides,
-    recordSocraticAnswered,
-    handleQuestionRef,
-  })
-
   // Learning Modes: Handle mode selection (Mystery Lab, Wonder Lab, Story Studio)
   const handleModeSelect = useCallback((mode) => {
     logger.info('LEARN_MODE', 'Mode selected', { mode, topicName: activeTopic?.name })
@@ -1902,7 +1946,34 @@ function App() {
     setUiState(UI_STATE.LEARN_MODE)
   }, [activeTopic, setUiState])
 
-  // Learning Modes: Handle learning mode completion with XP and world evolution
+  const persistCompletedModeSession = useCallback((payload) => {
+    const clientId = userClientId || getClientId()
+    if (!clientId || !payload?.mode || !payload?.topicId) {
+      return
+    }
+
+    fetch(toApiUrl('/api/modes/save'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientId,
+        mode: payload.mode,
+        topicId: payload.topicId,
+        topicName: payload.topicName,
+        versionId: payload.versionId,
+        completedAt: payload.completedAt || Date.now(),
+        session: payload.session || {},
+      }),
+    }).catch((error) => {
+      logger.warn('MODES', 'Failed to persist completed mode session', {
+        error: error.message,
+        mode: payload.mode,
+        topicId: payload.topicId,
+      })
+    })
+  }, [userClientId])
+
+  // Learning Modes: Handle learning mode completion with XP + graph mastery updates
   const handleLearningModeComplete = useCallback(async (result) => {
     const origin = learnModeOrigin
 
@@ -1915,6 +1986,7 @@ function App() {
 
     const topicName = activeTopic?.name || ''
     const topicId = activeTopic?.id || topicName
+    const activeVersionId = activeTopic?.versions?.[activeTopic?.currentVersionIndex ?? 0]?.id || ''
 
     const modeCompleted = result?.completed ?? (result?.xpEarned > 0)
 
@@ -1933,8 +2005,38 @@ function App() {
       }
     }
 
+    const persistenceModeMap = { mystery: 'mystery', whatif: 'wonder', story: 'story' }
+    const persistenceMode = persistenceModeMap[selectedLearningMode]
+    if (modeCompleted && persistenceMode && topicId) {
+      const defaultSession = {
+        completedAt: Date.now(),
+        completed: true,
+        xpEarned: result?.xpEarned || 0,
+        correctCount: result?.correctCount ?? null,
+        totalCount: result?.totalCount ?? null,
+        score: typeof result?.score === 'number' ? result.score : null,
+      }
+
+      persistCompletedModeSession({
+        mode: persistenceMode,
+        topicId,
+        topicName,
+        versionId: activeVersionId,
+        completedAt: result?.session?.completedAt || Date.now(),
+        session: result?.session && typeof result.session === 'object'
+          ? result.session
+          : defaultSession,
+      })
+    }
+
+    // Highlight the completed topic on the Journey tab
+    if (modeCompleted && topicName) {
+      setHighlightTopicName(topicName)
+      setTimeout(() => setHighlightTopicName(null), 4000)
+    }
+
     // Update per-mode mastery in Knowledge Graph (Bloom's Taxonomy)
-    if (result?.completed && topicId) {
+    if (modeCompleted && topicId) {
       const masteryScore = typeof result?.score === 'number'
         ? result.score
         : (result?.correctCount && result?.totalCount)
@@ -1957,62 +2059,13 @@ function App() {
       }
     }
 
-    // Evolve Living World on successful completion
-    if (result?.completed && topicName && evolveWorld) {
-      try {
-        const summary = visibleSlidesRef.current
-          ?.filter(s => s.type !== 'header' && s.type !== 'suggestions')
-          .map(s => s.subtitle || s.script || '')
-          .filter(Boolean)
-          .join(' ')
-          .slice(0, 500) || ''
-
-        const evolutionResult = await evolveWorld(topicName, summary)
-
-        if (evolutionResult?.success) {
-          logger.info('LEARN_MODE', 'Living World evolved', { topicName })
-
-          // Check for tier upgrade celebration
-          if (evolutionResult.changesApplied?.tierChanged) {
-            showTierUpgrade({
-              from: evolutionResult.changesApplied.previousTier,
-              to: evolutionResult.changesApplied.newTier
-            })
-          }
-        }
-
-        // Mint world piece
-        const clientId = getClientId()
-        const mintResponse = await fetch('/api/world/piece/mint', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            clientId,
-            topicId: String(topicId),
-            topicName: String(topicName),
-            summary: summary.slice(0, 480),
-          }),
-        })
-
-        if (mintResponse.ok) {
-          const mintData = await mintResponse.json()
-          if (!mintData?.skipped) {
-            setWorldBadge(prev => prev + 1)
-          }
-        }
-      } catch (error) {
-        logger.error('LEARN_MODE', 'World evolution failed', { error: error.message })
-      }
-    }
-
-    // Refresh world stats and reset state
-    refreshWorldStats()
+    // Reset learn-mode state
     setSelectedLearningMode(null)
     setLearnModeOrigin(null)
 
     if (origin === 'after_slideshow') {
-      setActiveTab('learn')
-      setUiState(UI_STATE.MODE_SELECTOR)
+      setActiveTab('progress')
+      setUiState(UI_STATE.HOME)
       return
     }
 
@@ -2027,12 +2080,7 @@ function App() {
     selectedLearningMode,
     learnModeOrigin,
     activeTopic,
-    visibleSlidesRef,
-    evolveWorld,
     showQuickXp,
-    showTierUpgrade,
-    setWorldBadge,
-    refreshWorldStats,
     setActiveTab,
     setUiState,
     getGraphNodeByName,
@@ -2040,6 +2088,7 @@ function App() {
     recordMysteryCompleted,
     recordWonderCompleted,
     recordStoryCompleted,
+    persistCompletedModeSession,
   ])
 
   // Learning Modes: Handle learning mode exit
@@ -2085,13 +2134,7 @@ function App() {
   }, [learnModeOrigin, activeTopic, setActiveTab, setUiState])
 
   /**
-   * Launch a learning mode for a specific topic (from Progress Tab, World, or Tree)
-   * This allows launching modes for previously-learned topics without requiring
-   * a slideshow to be currently active.
-   *
-   * @param {string} topicName - Name of the topic
-   * @param {string} mode - 'mystery' | 'whatif' | 'story'
-   * @param {Object} topicData - { slides, level } from stored topic
+   * Launch a learning mode for a specific topic from the Journey tab.
    */
   const handleLaunchLearningMode = useCallback(async (topicName, mode, topicData) => {
     logger.info('LEARN_MODE', 'Launch learning mode for topic', { topicName, mode })
@@ -3084,10 +3127,6 @@ function App() {
       deleteTopicByName(deletedTopic.name)
     }
 
-    if (remainingTopics.length === 0) {
-      void resetLivingWorldState()
-    }
-
     // If deleting the active topic, switch to another topic or listening state
     if (activeTopicId === topicId) {
       if (remainingTopics.length > 0) {
@@ -3106,7 +3145,7 @@ function App() {
     }
 
     logger.info('STATE', 'Topic deleted', { topicId })
-  }, [activeTopicId, topics, resetLivingWorldState, deleteTopicByName])
+  }, [activeTopicId, topics, deleteTopicByName])
 
   /**
    * Handle regeneration of a topic at a different explanation level.
@@ -3490,18 +3529,6 @@ function App() {
           />
         )}
 
-        {/* SOCRATIC-003: Socratic questioning mode after slideshow */}
-        {uiState === UI_STATE.SOCRATIC && activeTab === 'learn' && socraticSlides.length > 0 && (
-          <SocraticScreen
-            socraticSlides={socraticSlides}
-            socraticTopicName={socraticTopicName}
-            socraticLanguage={socraticLanguage}
-            suggestedQuestions={activeTopic?.suggestedQuestions || []}
-            onComplete={handleSocraticComplete}
-            onFollowUp={handleSocraticFollowUp}
-            onSkip={handleSocraticSkip}
-          />
-        )}
 
         {/* Mode Selector: Choose learning mode (Mystery Lab, Wonder Lab, Story Studio) */}
         {uiState === UI_STATE.MODE_SELECTOR && activeTab === 'learn' && (
@@ -3593,6 +3620,7 @@ function App() {
               graphClusters={graphClusters}
               graphGaps={graphGaps}
               graphIsLoading={graphIsLoading}
+              highlightTopicName={highlightTopicName}
             />
           </div>
         )}
@@ -3667,7 +3695,7 @@ function App() {
           onDismiss={hideToast}
         />
 
-        {/* WB018: Bottom Tab Bar for Learn/World/Tree navigation */}
+        {/* WB018: Bottom Tab Bar for Learn/Journey navigation */}
         <BottomTabBar
           activeTab={activeTab}
           onTabChange={handleTabChange}
@@ -3683,31 +3711,6 @@ function App() {
           toTier={tierUpgradeInfo.to}
           onComplete={handleTierCelebrationClose}
           onViewWorld={handleTierViewWorld}
-        />
-      )}
-
-      {/* WB020: Evolution celebration overlay - shows when a piece evolves to a new tier */}
-      {currentEvolution && (
-        <EvolutionCelebration
-          piece={currentEvolution.piece}
-          oldTier={currentEvolution.oldTier}
-          newTier={currentEvolution.newTier}
-          onComplete={processNextEvolution}
-        />
-      )}
-
-      {/* WB019: Connection scene reveal - shows when a pocket generates a new scene */}
-      {pendingSceneReveal && (
-        <ConnectionSceneReveal
-          scene={pendingSceneReveal.scene}
-          pocketName={pendingSceneReveal.pocketName || 'Knowledge Pocket'}
-          pocketIcon={pendingSceneReveal.pocketIcon || '✨'}
-          pieceCount={pendingSceneReveal.pieceCount || 3}
-          onViewPocket={() => {
-            dismissSceneReveal()
-            setActiveTab('progress')
-          }}
-          onContinue={dismissSceneReveal}
         />
       )}
 

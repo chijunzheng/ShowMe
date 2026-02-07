@@ -12,8 +12,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { LEVEL_CONFIG, EXPLANATION_LEVEL } from '../../constants/appConfig.js'
+import { toApiUrl } from '../../utils/api.js'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
 const RECENT_TOPICS_STORAGE_KEY = 'showme_random_topic_history'
 const MAX_RECENT_TOPICS = 20
 
@@ -93,7 +93,7 @@ export default function RandomTopicModal({
         params.set('exclude', JSON.stringify(excludeTopics))
       }
 
-      const url = `${API_BASE}/api/random-topic${params.toString() ? `?${params.toString()}` : ''}`
+      const url = toApiUrl(`/api/random-topic${params.toString() ? `?${params.toString()}` : ''}`)
       const response = await fetch(url)
 
       if (!response.ok) {

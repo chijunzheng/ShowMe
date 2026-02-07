@@ -65,8 +65,8 @@ export default function GeneratingScreen({
         Cancel
       </button>
 
-      {/* Fun fact card - displays while slides are generating (F045) */}
-      {engagement?.funFact && (
+      {/* Fun fact card - displays only when TTS audio is ready (F045) */}
+      {engagement?.funFact?.audioUrl && (
         <FunFactCard funFact={engagement.funFact} />
       )}
     </div>
