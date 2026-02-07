@@ -112,10 +112,9 @@ describe('mysteryGenerator', () => {
       expect(result).toEqual({ error: 'PARSE_ERROR' })
     })
 
-    it('returns INVALID_RESPONSE when required fields are missing', async () => {
+    it('normalizes incomplete payload with level-aware clues and distinct witness statements', async () => {
       genAiMock.generateContent.mockResolvedValueOnce({
         text: JSON.stringify({
-          // missing mysteryTitle, expectedConcepts, etc.
           mysterySetup: 'Setup only',
         }),
       })
@@ -126,7 +125,31 @@ describe('mysteryGenerator', () => {
         explanationLevel: 'standard',
       })
 
-      expect(result).toEqual({ error: 'INVALID_RESPONSE' })
+      expect(result.error).toBeUndefined()
+      expect(result.mysterySetup).toBe('Setup only')
+      expect(result.clues.length).toBe(5)
+      expect(result.crimeScene.requiredHotspotCount).toBe(5)
+      expect(result.witnesses.length).toBe(2)
+
+      const normalize = (value) => String(value || '')
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .trim()
+
+      const evidenceStatements = new Set(
+        result.crimeScene.evidenceCards.map((card) => normalize(card.text)).filter(Boolean)
+      )
+
+      const witnessStatements = []
+      result.witnesses.forEach((witness) => {
+        witness.responses.forEach((response) => {
+          const normalizedStatement = normalize(response.statement)
+          witnessStatements.push(normalizedStatement)
+          expect(evidenceStatements.has(normalizedStatement)).toBe(false)
+        })
+      })
+
+      expect(new Set(witnessStatements).size).toBe(witnessStatements.length)
     })
   })
 
@@ -174,4 +197,3 @@ describe('mysteryGenerator', () => {
     })
   })
 })
-

@@ -537,6 +537,9 @@ export async function addXP(clientId, amount) {
  * @param {number} score - The quiz score achieved
  * @param {number} maxScore - The maximum possible score
  * @param {number} streak - Current streak count (defaults to 0)
+ * @param {number} xpOverride - When positive, use this value as xpEarned instead of internal calculation (defaults to 0).
+ *   This allows callers (e.g. the quiz route) to pass a pre-computed level-based XP amount so the
+ *   persisted value matches the breakdown reported in the API response.
  * @returns {Promise<{
  *   newXP: number,
  *   totalXP: number,
@@ -545,7 +548,7 @@ export async function addXP(clientId, amount) {
  *   error: string | null
  * }>}
  */
-export async function awardQuizXP(clientId, score, maxScore, streak = 0) {
+export async function awardQuizXP(clientId, score, maxScore, streak = 0, xpOverride = 0) {
   const loadResult = await loadWorldState(clientId)
   if (loadResult.error) {
     return {
@@ -564,12 +567,17 @@ export async function awardQuizXP(clientId, score, maxScore, streak = 0) {
       tierHistory: worldState.tierHistory || [{ tier: 'barren', achievedAt: new Date() }]
     }
 
-    // Calculate XP to award based on quiz performance
+    // Calculate XP to award based on quiz performance.
+    // When xpOverride is positive, the caller has already computed the level-based XP
+    // (including per-correct, pass bonus, perfect bonus, and level bonus), so use it directly.
+    const hasOverride = typeof xpOverride === 'number' && xpOverride > 0
     let xpEarned = 0
     const isPerfect = score === maxScore && maxScore > 0
     const passed = score > 0 // Any correct answer counts as passed
 
-    if (passed) {
+    if (hasOverride) {
+      xpEarned = xpOverride
+    } else if (passed) {
       if (isPerfect) {
         // Perfect score gets bonus XP (replaces base XP, not additional)
         xpEarned = XP_REWARDS.QUIZ_PERFECT
@@ -578,8 +586,9 @@ export async function awardQuizXP(clientId, score, maxScore, streak = 0) {
       }
     }
 
-    // Add streak bonus if applicable
-    if (streak > 0) {
+    // Add streak bonus only when using internal calculation.
+    // When xpOverride is provided, the caller is responsible for including all bonuses.
+    if (streak > 0 && !hasOverride) {
       xpEarned += streak * XP_REWARDS.STREAK_BONUS
     }
 
@@ -635,6 +644,7 @@ export async function awardQuizXP(clientId, score, maxScore, streak = 0) {
       score,
       maxScore,
       xpEarned,
+      xpOverride: hasOverride ? xpOverride : null,
       totalXP: newTotalXP,
       tier: newTier,
       tierUpgrade: tierUpgrade ? `${tierUpgrade.from} -> ${tierUpgrade.to}` : null

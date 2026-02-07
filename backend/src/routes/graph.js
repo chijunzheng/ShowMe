@@ -17,11 +17,62 @@ import {
   identifyKnowledgeGaps,
   clusterKnowledge,
   determineFollowUpPlacement,
-  suggestLearningPath
+  suggestLearningPath,
+  categorizeTopic
 } from '../services/geminiGraph.js'
+import { loadGraphState, saveGraphState } from '../services/graphStorage.js'
 import logger from '../utils/logger.js'
 
 const router = Router()
+
+router.post('/state/load', async (req, res) => {
+  const { clientId } = req.body || {}
+
+  if (!clientId || typeof clientId !== 'string' || !clientId.trim()) {
+    return res.status(400).json({ error: 'clientId is required' })
+  }
+
+  try {
+    const { graph, error } = await loadGraphState(clientId.trim())
+
+    if (error) {
+      return res.status(500).json({ error })
+    }
+
+    return res.json({
+      success: true,
+      graph: graph || null,
+    })
+  } catch (error) {
+    logger.error('GRAPH', 'Error loading graph state', { error: error.message })
+    return res.status(500).json({ error: 'Failed to load graph state' })
+  }
+})
+
+router.post('/state/save', async (req, res) => {
+  const { clientId, graph } = req.body || {}
+
+  if (!clientId || typeof clientId !== 'string' || !clientId.trim()) {
+    return res.status(400).json({ error: 'clientId is required' })
+  }
+
+  if (!graph || typeof graph !== 'object') {
+    return res.status(400).json({ error: 'graph is required' })
+  }
+
+  try {
+    const { success, error } = await saveGraphState(clientId.trim(), graph)
+
+    if (!success) {
+      return res.status(500).json({ error: error || 'Failed to save graph state' })
+    }
+
+    return res.json({ success: true })
+  } catch (error) {
+    logger.error('GRAPH', 'Error saving graph state', { error: error.message })
+    return res.status(500).json({ error: 'Failed to save graph state' })
+  }
+})
 
 /**
  * POST /api/graph
@@ -34,6 +85,8 @@ const router = Router()
  *
  * Request body:
  * - graph: KnowledgeGraph - The user's knowledge graph
+ * - targetCount?: number - Number of suggestions requested (1-10)
+ * - excludeTopics?: string[] - Suggested topic names to avoid
  *
  * Response:
  * - success: boolean
@@ -152,6 +205,61 @@ router.post('/discover', async (req, res) => {
 })
 
 /**
+ * POST /api/graph/categorize
+ *
+ * Batch categorize topics using AI.
+ * Used to re-categorize "general" nodes with proper categories.
+ *
+ * Request body:
+ * - topics: Array<{ id, name }> - Topics to categorize (max 20)
+ * - existingCategories: string[] - Categories already in the graph
+ *
+ * Response:
+ * - success: boolean
+ * - results: Array<{ id, category, icon }>
+ */
+router.post('/categorize', async (req, res) => {
+  try {
+    const { topics, existingCategories } = req.body
+
+    if (!Array.isArray(topics) || topics.length === 0) {
+      return res.status(400).json({ error: 'topics array required' })
+    }
+
+    // Validate each topic has id and name strings
+    const validTopics = topics.filter(
+      t => t && typeof t.id === 'string' && typeof t.name === 'string' && t.name.trim().length > 0
+    )
+    if (validTopics.length === 0) {
+      return res.status(400).json({ error: 'No valid topics provided (each needs id and name strings)' })
+    }
+
+    // Sanitize existingCategories to string array
+    const safeCategories = Array.isArray(existingCategories)
+      ? existingCategories.filter(c => typeof c === 'string')
+      : []
+
+    const batch = validTopics.slice(0, 20)
+
+    logger.info('GRAPH', 'Categorizing topics', { count: batch.length })
+
+    const results = await Promise.all(
+      batch.map(async (t) => {
+        const { category, icon } = await categorizeTopic(t.name, safeCategories)
+        return { id: t.id, category, icon }
+      })
+    )
+
+    logger.info('GRAPH', 'Categorization complete', { resultCount: results.length })
+
+    res.json({ success: true, results })
+  } catch (error) {
+    logger.error('GRAPH', 'Error categorizing topics', { error: error.message })
+    res.status(500).json({ error: 'Failed to categorize topics' })
+  }
+})
+
+/**
  * POST /api/graph/gaps
  *
  * Identify knowledge gaps in the user's graph.
@@ -166,7 +274,7 @@ router.post('/discover', async (req, res) => {
  */
 router.post('/gaps', async (req, res) => {
   try {
-    const { graph } = req.body
+    const { graph, targetCount, excludeTopics } = req.body
 
     // Validate graph
     if (!graph) {
@@ -197,7 +305,21 @@ router.post('/gaps', async (req, res) => {
       edgeCount: graph.edges?.length || 0
     })
 
-    const result = await identifyKnowledgeGaps(graph)
+    const parsedTargetCount = Number.isFinite(Number(targetCount))
+      ? Math.min(10, Math.max(1, Math.trunc(Number(targetCount))))
+      : undefined
+    const safeExcludeTopics = Array.isArray(excludeTopics)
+      ? excludeTopics
+        .filter((topic) => typeof topic === 'string')
+        .map((topic) => topic.trim())
+        .filter(Boolean)
+        .slice(0, 200)
+      : []
+
+    const result = await identifyKnowledgeGaps(graph, {
+      targetCount: parsedTargetCount,
+      excludeTopics: safeExcludeTopics,
+    })
 
     if (result.error) {
       logger.error('GRAPH', 'Gap analysis failed', { error: result.error })

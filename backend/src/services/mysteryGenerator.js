@@ -92,25 +92,112 @@ function toSafeString(value, fallback = '') {
   return fallback
 }
 
-function buildFallbackClues(expectedConcepts, isZh) {
-  const c1 = expectedConcepts[0] || (isZh ? '关键概念' : 'key concept')
-  const c2 = expectedConcepts[1] || (isZh ? '机制' : 'mechanism')
-  const c3 = expectedConcepts[2] || (isZh ? '因果关系' : 'cause and effect')
-
-  return isZh
-    ? [
-        { text: `现场记录显示 ${c1} 在异常发生前就出现变化。`, slideRef: 1, narratorText: `注意第一个证据，${c1} 先发生了变化。` },
-        { text: `第二份记录表明 ${c2} 与异常结果同时出现。`, slideRef: 2, narratorText: `第二条线索指出 ${c2} 和结果同时出现。` },
-        { text: `最终证据把 ${c1} 与 ${c3} 串联起来。`, slideRef: 3, narratorText: `第三条线索把所有证据连成了因果链。` },
-      ]
-    : [
-        { text: `Logs show ${c1} changed before the incident.`, slideRef: 1, narratorText: `Notice this first clue: ${c1} shifted before anything went wrong.` },
-        { text: `A second record shows ${c2} appeared with the visible failure.`, slideRef: 2, narratorText: `The second clue ties ${c2} to the observed failure.` },
-        { text: `The final clue links ${c1} to the full cause-and-effect chain.`, slideRef: 3, narratorText: 'The last clue connects everything into one causal story.' },
-      ]
+function normalizeComparisonText(value) {
+  return toSafeString(value)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
 }
 
-function normalizeClues(rawClues, expectedConcepts, isZh) {
+function getConceptAtIndex(expectedConcepts, index, isZh) {
+  const safeConcepts = Array.isArray(expectedConcepts)
+    ? expectedConcepts.map((concept) => toSafeString(concept)).filter(Boolean)
+    : []
+  if (safeConcepts.length === 0) {
+    return isZh ? '关键概念' : 'core concept'
+  }
+  return safeConcepts[index % safeConcepts.length]
+}
+
+function getEvidenceLead(evidenceCards, index, isZh) {
+  const cards = Array.isArray(evidenceCards) ? evidenceCards : []
+  if (cards.length === 0) {
+    return isZh ? '一个异常读数' : 'an abnormal readout'
+  }
+
+  const text = toSafeString(cards[index % cards.length]?.text)
+  if (!text) {
+    return isZh ? '一个异常读数' : 'an abnormal readout'
+  }
+
+  const firstSentence = text.split(/[。！？.!?]/)[0].trim()
+  if (!firstSentence) {
+    return isZh ? '一个异常读数' : 'an abnormal readout'
+  }
+
+  return firstSentence.length > 90 ? `${firstSentence.slice(0, 87)}...` : firstSentence
+}
+
+function buildFallbackClueAt(index, expectedConcepts, isZh) {
+  const conceptA = getConceptAtIndex(expectedConcepts, index, isZh)
+  const conceptB = getConceptAtIndex(expectedConcepts, index + 1, isZh)
+  const conceptC = getConceptAtIndex(expectedConcepts, index + 2, isZh)
+  const phase = index % 5
+
+  if (isZh) {
+    const variants = [
+      {
+        text: `监测日志显示 ${conceptA} 在警报触发前约 3 分钟就偏离正常区间。`,
+        narratorText: `先看时间线，${conceptA} 的异常先出现，这通常不是巧合。`,
+      },
+      {
+        text: `控制台记录到 ${conceptB} 在故障可见化的同一分钟内出现突变峰值。`,
+        narratorText: `第二条证据把 ${conceptB} 的突变和现场异常对齐到同一时刻。`,
+      },
+      {
+        text: `备用传感器反复确认：${conceptA} 的早期变化随后触发了 ${conceptC} 的连锁反应。`,
+        narratorText: `这条证据解释了为什么小变化会滚雪球成大问题。`,
+      },
+      {
+        text: `维护记录显示关键装置并未机械失效，异常更像由 ${conceptB} 的环境条件变化导致。`,
+        narratorText: `这说明问题不是“突然坏掉”，而是条件一步步被推向失控。`,
+      },
+      {
+        text: `交叉比对现场痕迹后，唯一一致的路径是：${conceptA} 先变化，再出现 ${conceptC} 结果。`,
+        narratorText: `把所有线索拼起来后，因果链条已经非常清晰。`,
+      },
+    ]
+    return variants[phase]
+  }
+
+  const variants = [
+    {
+      text: `Telemetry logs show ${conceptA} drifted out of its safe range about three minutes before the alarm fired.`,
+      narratorText: `Start with timing: ${conceptA} shifted before the visible failure.`,
+    },
+    {
+      text: `Console records capture a sharp ${conceptB} spike in the same minute the malfunction became visible.`,
+      narratorText: `This clue syncs the ${conceptB} spike with the moment students can observe the failure.`,
+    },
+    {
+      text: `A backup sensor confirms the early ${conceptA} shift cascaded into a later ${conceptC} chain reaction.`,
+      narratorText: 'This is the bridge clue that connects early warning signs to the final outcome.',
+    },
+    {
+      text: `Maintenance notes rule out random hardware breakage, pointing instead to changing ${conceptB} conditions.`,
+      narratorText: 'That narrows the case: this looks systemic, not accidental.',
+    },
+    {
+      text: `Cross-checking all traces leaves one consistent sequence: ${conceptA} changed first, then ${conceptC} emerged.`,
+      narratorText: 'Now the full cause-and-effect path is visible from first signal to final effect.',
+    },
+  ]
+  return variants[phase]
+}
+
+function buildFallbackClues(expectedConcepts, clueCount, isZh) {
+  const minimum = Number.isFinite(Number(clueCount)) ? Math.max(3, Math.floor(Number(clueCount))) : 3
+  return Array.from({ length: minimum }).map((_, index) => {
+    const clue = buildFallbackClueAt(index, expectedConcepts, isZh)
+    return {
+      text: clue.text,
+      slideRef: index + 1,
+      narratorText: clue.narratorText,
+    }
+  })
+}
+
+function normalizeClues(rawClues, expectedConcepts, isZh, minimumCount = 3) {
   const input = Array.isArray(rawClues) ? rawClues : []
   const normalized = input
     .map((clue, index) => {
@@ -128,11 +215,25 @@ function normalizeClues(rawClues, expectedConcepts, isZh) {
     })
     .filter(Boolean)
 
-  if (normalized.length > 0) {
-    return normalized
+  const minCount = Math.max(3, Number.isFinite(Number(minimumCount)) ? Math.floor(Number(minimumCount)) : 3)
+  const fallback = buildFallbackClues(expectedConcepts, minCount, isZh)
+
+  const merged = []
+  const seen = new Set()
+  const candidates = [...normalized, ...fallback]
+  for (const clue of candidates) {
+    const key = normalizeComparisonText(clue?.text)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    merged.push(clue)
+    if (merged.length >= minCount) break
   }
 
-  return buildFallbackClues(expectedConcepts, isZh)
+  if (merged.length > 0) {
+    return merged
+  }
+
+  return fallback
 }
 
 function buildFallbackHotspots(evidenceCards, hotspotCount) {
@@ -228,16 +329,266 @@ function normalizeCrimeScene(rawCrimeScene, clues, expectedConcepts, levelRule, 
   }
 }
 
-function buildFallbackWitnessResponses(questionCards, evidenceCards, expectedConcepts, isZh) {
-  const concept = expectedConcepts[0] || (isZh ? '关键概念' : 'core concept')
+function getWitnessLens(index, isZh) {
+  const zhLenses = [
+    { anchor: '在主控台', instrument: '遥测面板' },
+    { anchor: '在维护通道', instrument: '手持诊断器' },
+    { anchor: '在观测窗旁', instrument: '外部监视器' },
+  ]
 
-  return questionCards.map((question, index) => ({
-    question,
-    statement: evidenceCards[index % evidenceCards.length]?.text || (isZh ? '我注意到了一个关键细节。' : 'I noticed a critical detail.'),
-    reliability: Math.max(0.4, 0.9 - index * 0.1),
-    tags: [concept],
-    contradictionKey: index % 2 === 0 ? 'A' : 'B',
-  }))
+  const enLenses = [
+    { anchor: 'From the command console', instrument: 'the telemetry feed' },
+    { anchor: 'Near the maintenance lane', instrument: 'my handheld diagnostics' },
+    { anchor: 'At the observation port', instrument: 'the external monitor' },
+  ]
+
+  const pool = isZh ? zhLenses : enLenses
+  return pool[index % pool.length]
+}
+
+function inferQuestionIntent(question, isZh) {
+  const text = normalizeComparisonText(question)
+  if (!text) return 'general'
+
+  if (isZh) {
+    if (text.includes('先') || text.includes('最先') || text.includes('看到')) return 'first'
+    if (text.includes('何时') || text.includes('什么时候') || text.includes('开始') || text.includes('时间')) return 'timing'
+    if (text.includes('异常') || text.includes('不寻常') || text.includes('奇怪')) return 'anomaly'
+    if (text.includes('对应') || text.includes('关联') || text.includes('连接') || text.includes('证据')) return 'connection'
+    if (text.includes('确定') || text.includes('最有把握') || text.includes('确信')) return 'certainty'
+    if (text.includes('矛盾') || text.includes('冲突')) return 'contradiction'
+    if (text.includes('遗漏') || text.includes('缺少') || text.includes('还可能')) return 'missing'
+    return 'general'
+  }
+
+  if (text.includes('first') || text.includes('see')) return 'first'
+  if (text.includes('when') || text.includes('start') || text.includes('time')) return 'timing'
+  if (text.includes('unusual') || text.includes('odd') || text.includes('strange')) return 'anomaly'
+  if (text.includes('connect') || text.includes('earlier evidence') || text.includes('link')) return 'connection'
+  if (text.includes('certain') || text.includes('sure')) return 'certainty'
+  if (text.includes('contradict') || text.includes('conflict')) return 'contradiction'
+  if (text.includes('missing') || text.includes('still')) return 'missing'
+
+  return 'general'
+}
+
+function buildWitnessStatement({ question, evidenceCards, concept, witnessIndex, responseIndex, isZh, variant = 0 }) {
+  const intent = inferQuestionIntent(question, isZh)
+  const lens = getWitnessLens(witnessIndex, isZh)
+  const detail = getEvidenceLead(evidenceCards, witnessIndex + responseIndex, isZh)
+
+  if (isZh) {
+    switch (intent) {
+      case 'first':
+        return variant % 2 === 0
+          ? `${lens.anchor}，我最先记录到的是 ${concept} 的异常信号，不是最终故障画面。`
+          : `${lens.instrument} 最早捕捉到的线索与“${detail}”一致，但时间点更早。`
+      case 'timing':
+        return variant % 2 === 0
+          ? `按时间戳看，${concept} 先变化，几分钟后才出现肉眼可见的异常。`
+          : `我核对过 ${lens.instrument} 记录：先有早期信号，再有主警报。`
+      case 'anomaly':
+        return variant % 2 === 0
+          ? `最不寻常的是“${detail}”和常规 ${concept} 轨迹不一致。`
+          : `异常点不在结果本身，而在 ${concept} 的变化方式突然偏离基线。`
+      case 'connection':
+        return variant % 2 === 0
+          ? `把前面证据串起来看，${concept} 像是触发链条的前因，而不是后果。`
+          : `前后两条记录都指向同一件事：${concept} 的早期变化推动了后续事件。`
+      case 'certainty':
+        return variant % 2 === 0
+          ? `我最确定的是顺序：先出现 ${concept} 漂移，再出现明显故障。`
+          : `就可靠性而言，时间顺序这点最稳，因为我做了重复比对。`
+      case 'contradiction':
+        return variant % 2 === 0
+          ? `有人说“问题是瞬间发生”，但我的日志显示中间存在可观测延迟。`
+          : `我不同意“同时发生”的说法，${concept} 的信号明显先到。`
+      case 'missing':
+        return variant % 2 === 0
+          ? `我们还缺一条线索：异常触发后第一分钟里，${concept} 如何继续扩散。`
+          : `若要补全证据链，还要追踪 ${concept} 在后段阶段的变化。`
+      default:
+        return variant % 2 === 0
+          ? `${lens.anchor}，我看到的模式支持 ${concept} 是关键驱动因素。`
+          : `从 ${lens.instrument} 的记录看，${concept} 与故障结果并非巧合关联。`
+    }
+  }
+
+  switch (intent) {
+    case 'first':
+      return variant % 2 === 0
+        ? `${lens.anchor}, the first anomaly I logged was tied to ${concept}, before the full failure appeared.`
+        : `${lens.instrument} caught the earliest signal around "${detail}" before anyone called the main alarm.`
+    case 'timing':
+      return variant % 2 === 0
+        ? `My timestamps show ${concept} shifted first, and the visible malfunction followed minutes later.`
+        : `I cross-checked ${lens.instrument}: early signal first, main failure second.`
+    case 'anomaly':
+      return variant % 2 === 0
+        ? `What stood out was "${detail}" behaving unlike normal ${concept} patterns.`
+        : `The unusual part was not the final failure itself, but how ${concept} drifted off baseline.`
+    case 'connection':
+      return variant % 2 === 0
+        ? `When I line this up with earlier evidence, ${concept} looks like the trigger, not a side effect.`
+        : `Both records point the same way: an early ${concept} shift drives the later outcome.`
+    case 'certainty':
+      return variant % 2 === 0
+        ? `The detail I trust most is the sequence: ${concept} drift first, visible failure second.`
+        : `I am most certain about order, because I verified those timestamps twice.`
+    case 'contradiction':
+      return variant % 2 === 0
+        ? `Another account says it happened instantly, but my logs show a clear delay before the final failure.`
+        : `I disagree with the "all at once" story; ${concept} changed first and the result came later.`
+    case 'missing':
+      return variant % 2 === 0
+        ? `What we still need is the first-minute trace after the trigger to map how ${concept} spread.`
+        : `There is a gap right after the trigger event, and that gap likely explains the ${concept} chain.`
+    default:
+      return variant % 2 === 0
+        ? `${lens.anchor}, the pattern I observed supports ${concept} as a key driver.`
+        : `From ${lens.instrument}, ${concept} tracks too closely with the incident to be coincidence.`
+  }
+}
+
+function buildGuaranteedWitnessStatement({ concept, witnessIndex, responseIndex, isZh }) {
+  if (isZh) {
+    return `第 ${witnessIndex + 1} 位证人的第 ${responseIndex + 1} 次核查确认：${concept} 的变化先于最终异常。`
+  }
+  return `Witness ${witnessIndex + 1}, checkpoint ${responseIndex + 1}: ${concept} changed before the final failure signal.`
+}
+
+function buildFallbackWitnessResponses(
+  questionCards,
+  evidenceCards,
+  expectedConcepts,
+  isZh,
+  witnessIndex = 0,
+  globalStatementSet = new Set()
+) {
+  const concept = getConceptAtIndex(expectedConcepts, witnessIndex, isZh)
+  const secondaryConcept = getConceptAtIndex(expectedConcepts, witnessIndex + 1, isZh)
+  const evidenceSet = new Set(
+    (Array.isArray(evidenceCards) ? evidenceCards : [])
+      .map((card) => normalizeComparisonText(card?.text))
+      .filter(Boolean)
+  )
+  const localStatementSet = new Set()
+
+  return questionCards.map((question, index) => {
+    let statement = ''
+    let normalized = ''
+    let variant = 0
+
+    while (variant < 6) {
+      statement = buildWitnessStatement({
+        question,
+        evidenceCards,
+        concept,
+        witnessIndex,
+        responseIndex: index,
+        isZh,
+        variant,
+      })
+      normalized = normalizeComparisonText(statement)
+      if (normalized && !evidenceSet.has(normalized) && !localStatementSet.has(normalized) && !globalStatementSet.has(normalized)) {
+        break
+      }
+      variant += 1
+    }
+
+    if (!normalized || evidenceSet.has(normalized) || localStatementSet.has(normalized) || globalStatementSet.has(normalized)) {
+      statement = buildGuaranteedWitnessStatement({
+        concept,
+        witnessIndex,
+        responseIndex: index,
+        isZh,
+      })
+      normalized = normalizeComparisonText(statement)
+    }
+
+    if (normalized) {
+      localStatementSet.add(normalized)
+      globalStatementSet.add(normalized)
+    }
+
+    const tags = [concept, secondaryConcept].filter((tag, idx, arr) => tag && arr.indexOf(tag) === idx).slice(0, 2)
+
+    return {
+      question,
+      statement,
+      reliability: Math.max(0.45, 0.88 - index * 0.08),
+      tags,
+      contradictionKey: index % 2 === 0 ? 'A' : 'B',
+    }
+  })
+}
+
+function enforceWitnessStatementVariety(witnesses, evidenceCards, expectedConcepts, isZh) {
+  const inputWitnesses = Array.isArray(witnesses) ? witnesses : []
+  const evidenceSet = new Set(
+    (Array.isArray(evidenceCards) ? evidenceCards : [])
+      .map((card) => normalizeComparisonText(card?.text))
+      .filter(Boolean)
+  )
+  const seenStatements = new Set()
+
+  return inputWitnesses.map((witness, witnessIndex) => {
+    const questionCards = Array.isArray(witness?.questionCards)
+      ? witness.questionCards.map((question) => toSafeString(question)).filter(Boolean)
+      : []
+
+    const responses = (Array.isArray(witness?.responses) ? witness.responses : []).map((response, responseIndex) => {
+      const question = toSafeString(response?.question, questionCards[responseIndex] || (isZh ? '你观察到了什么？' : 'What did you observe?'))
+      const reliabilityRaw = Number(response?.reliability)
+      const reliability = Number.isFinite(reliabilityRaw)
+        ? Math.max(0, Math.min(1, reliabilityRaw))
+        : Math.max(0.45, 0.88 - responseIndex * 0.08)
+      const tags = Array.isArray(response?.tags)
+        ? response.tags.map((tag) => toSafeString(tag)).filter(Boolean)
+        : []
+      const concept = tags[0] || getConceptAtIndex(expectedConcepts, witnessIndex, isZh)
+
+      let statement = toSafeString(response?.statement)
+      let normalized = normalizeComparisonText(statement)
+      let variant = 0
+      while (variant < 6 && (!normalized || evidenceSet.has(normalized) || seenStatements.has(normalized))) {
+        statement = buildWitnessStatement({
+          question,
+          evidenceCards,
+          concept,
+          witnessIndex,
+          responseIndex,
+          isZh,
+          variant,
+        })
+        normalized = normalizeComparisonText(statement)
+        variant += 1
+      }
+
+      if (!normalized || evidenceSet.has(normalized) || seenStatements.has(normalized)) {
+        statement = buildGuaranteedWitnessStatement({ concept, witnessIndex, responseIndex, isZh })
+        normalized = normalizeComparisonText(statement)
+      }
+
+      if (normalized) {
+        seenStatements.add(normalized)
+      }
+
+      return {
+        question,
+        statement,
+        reliability,
+        tags: tags.length > 0 ? tags : [concept],
+        contradictionKey: toSafeString(response?.contradictionKey, responseIndex % 2 === 0 ? 'A' : 'B'),
+      }
+    })
+
+    return {
+      ...witness,
+      questionCards,
+      responses,
+    }
+  })
 }
 
 function normalizeWitnesses(rawWitnesses, crimeScene, expectedConcepts, levelRule, isZh) {
@@ -254,6 +605,7 @@ function normalizeWitnesses(rawWitnesses, crimeScene, expectedConcepts, levelRul
       ]
 
   const input = Array.isArray(rawWitnesses) ? rawWitnesses : []
+  const fallbackStatementSet = new Set()
 
   const normalized = input
     .map((witness, index) => {
@@ -292,9 +644,25 @@ function normalizeWitnesses(rawWitnesses, crimeScene, expectedConcepts, levelRul
         ? questionCards
         : defaultQuestions.slice(0, Math.min(levelRule.questionCards, defaultQuestions.length))
 
-      const effectiveResponses = responses.length > 0
-        ? responses
-        : buildFallbackWitnessResponses(effectiveQuestions, crimeScene.evidenceCards, expectedConcepts, isZh)
+      const fallbackResponses = buildFallbackWitnessResponses(
+        effectiveQuestions,
+        crimeScene.evidenceCards,
+        expectedConcepts,
+        isZh,
+        index,
+        fallbackStatementSet
+      )
+
+      const responseByQuestion = new Map(
+        responses.map((response) => [normalizeComparisonText(response?.question), response])
+      )
+
+      const effectiveResponses = effectiveQuestions
+        .map((question, responseIndex) => {
+          const byQuestion = responseByQuestion.get(normalizeComparisonText(question))
+          return byQuestion || responses[responseIndex] || fallbackResponses[responseIndex]
+        })
+        .filter(Boolean)
 
       return {
         id,
@@ -307,19 +675,38 @@ function normalizeWitnesses(rawWitnesses, crimeScene, expectedConcepts, levelRul
     .filter(Boolean)
 
   if (normalized.length > 0) {
-    return normalized.slice(0, levelRule.witnesses)
+    return enforceWitnessStatementVariety(
+      normalized.slice(0, levelRule.witnesses),
+      crimeScene.evidenceCards,
+      expectedConcepts,
+      isZh
+    )
   }
 
-  return Array.from({ length: levelRule.witnesses }).map((_, index) => {
+  const fallbackWitnesses = Array.from({ length: levelRule.witnesses }).map((_, index) => {
     const questionCards = defaultQuestions.slice(0, Math.min(levelRule.questionCards, defaultQuestions.length))
     return {
       id: `w${index + 1}`,
       name: isZh ? `证人 ${index + 1}` : `Witness ${index + 1}`,
       role: isZh ? '现场目击者' : 'Scene witness',
       questionCards,
-      responses: buildFallbackWitnessResponses(questionCards, crimeScene.evidenceCards, expectedConcepts, isZh),
+      responses: buildFallbackWitnessResponses(
+        questionCards,
+        crimeScene.evidenceCards,
+        expectedConcepts,
+        isZh,
+        index,
+        fallbackStatementSet
+      ),
     }
   })
+
+  return enforceWitnessStatementVariety(
+    fallbackWitnesses,
+    crimeScene.evidenceCards,
+    expectedConcepts,
+    isZh
+  )
 }
 
 function normalizeTimeline(rawTimeline, clues, levelRule, isZh) {
@@ -469,7 +856,7 @@ function normalizeCrimeSceneOpsPayload(rawMystery, explanationLevel, isZh) {
     ? expectedConcepts
     : (isZh ? ['关键线索', '因果关系'] : ['key clue', 'cause and effect'])
 
-  const clues = normalizeClues(rawMystery?.clues, fallbackConcepts, isZh)
+  const clues = normalizeClues(rawMystery?.clues, fallbackConcepts, isZh, levelRule.hotspots)
   const crimeScene = normalizeCrimeScene(rawMystery?.crimeScene, clues, fallbackConcepts, levelRule, isZh, imagePrompt)
   const witnesses = normalizeWitnesses(rawMystery?.witnesses, crimeScene, fallbackConcepts, levelRule, isZh)
   const timeline = normalizeTimeline(rawMystery?.timeline, clues, levelRule, isZh)
@@ -568,6 +955,10 @@ ${slideContent}
 5. timeline.events 包含 id/text/order，可选 isRedHerring
 6. timeline.causalLinks 使用 from/to 事件 id
 7. verdict.options 数量至少 ${levelRule.verdictOptions}
+8. clues 必须是具体、可观察的现场证据（包含时间/位置/变化），不要使用“第一条/第二条/最后一条”的模板句
+9. 证人回应不能逐字复制 evidenceCards 文本；不同证人必须有不同视角和措辞
+10. 每位证人至少有一条回应补充 evidenceCards 之外的上下文（如时间、位置、顺序或冲突）
+11. deep 难度至少提供一组可追踪的 contradictionKey 冲突对
 
 仅返回 JSON。`
       : `You are designing a kid-friendly detective game in a Crime Scene Ops format.
@@ -598,6 +989,10 @@ Rules:
 5. timeline.events include id/text/order and optional isRedHerring
 6. timeline.causalLinks reference event ids via from/to
 7. verdict.options count must be at least ${levelRule.verdictOptions}
+8. clues must be concrete, observable evidence with timing/location/change details, not generic "first/second/final clue" templates
+9. witness responses must not copy evidenceCards text verbatim, and each witness needs a distinct perspective/voice
+10. each witness must provide at least one contextual detail not already present in evidenceCards (timing, location, sequence, or contradiction)
+11. deep difficulty must include at least one contradictionKey pair that can be resolved by the player
 
 Return JSON only.`
 

@@ -334,7 +334,9 @@ function createDefaultClusters(nodes) {
   const categoryMap = new Map()
 
   nodes.forEach(node => {
-    const category = node.category || inferCluster(node.name)
+    const category = String(node.category || inferCluster(node.name))
+      .trim()
+      .toLowerCase()
     if (!categoryMap.has(category)) {
       categoryMap.set(category, [])
     }
@@ -352,6 +354,7 @@ function createDefaultClusters(nodes) {
     arts: { icon: '\u{1F3A8}', color: '#EC4899' },
     language: { icon: '\u{1F4DA}', color: '#A855F7' },
     'marine biology': { icon: '\u{1F433}', color: '#0EA5E9' },
+    civilization: { icon: '\u{1F3DB}\u{FE0F}', color: '#F97316' },
     general: { icon: '\u{1F4A1}', color: '#64748B' }
   }
 
@@ -366,7 +369,11 @@ function createDefaultClusters(nodes) {
     }
     clusters.push({
       id: `cluster_${category}`,
-      name: category.charAt(0).toUpperCase() + category.slice(1),
+      name: category
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' '),
       icon: cfg.icon,
       nodeIds,
       color: cfg.color
@@ -494,39 +501,51 @@ Return empty relationships array if no meaningful connections exist. Maximum 5 r
   }
 }
 
-/**
- * Identify knowledge gaps in the user's graph
- * Suggests new topics that would strengthen their understanding
- *
- * @param {Object} graph - The full knowledge graph
- * @param {Object[]} graph.nodes - Array of knowledge nodes
- * @param {Object[]} graph.clusters - Array of clusters
- * @returns {Promise<{ gaps: Object[] }>}
- */
-export async function identifyKnowledgeGaps(graph) {
-  // Validate inputs
-  if (!graph || !graph.nodes || graph.nodes.length < 3) {
-    logger.debug('GEMINI_GRAPH', 'Not enough nodes for gap analysis', {
-      nodeCount: graph?.nodes?.length || 0
-    })
-    return { gaps: [] }
-  }
+const DEFAULT_GAP_TARGET_COUNT = 6
+const MIN_GAP_TARGET_COUNT = 1
+const MAX_GAP_TARGET_COUNT = 10
+const GAP_ATTEMPT_LIMIT = 3
 
-  const ai = getAIClient()
-  if (!ai) {
-    return { gaps: [] }
-  }
+function normalizeGapTargetCount(value) {
+  const parsed = Number.isFinite(Number(value))
+    ? Math.trunc(Number(value))
+    : DEFAULT_GAP_TARGET_COUNT
+  return Math.min(MAX_GAP_TARGET_COUNT, Math.max(MIN_GAP_TARGET_COUNT, parsed))
+}
 
-  const existingTopicNames = graph.nodes.map((n) => n.name).slice(0, 40)
-  const basePrompt = `You are an educational advisor analyzing a student's knowledge map.
+function sanitizeExcludeTopics(excludeTopics = []) {
+  if (!Array.isArray(excludeTopics)) return []
+  return excludeTopics
+    .filter((topic) => typeof topic === 'string')
+    .map((topic) => topic.trim())
+    .filter(Boolean)
+}
+
+function buildGapPrompt({ graph, targetCount, avoidTopicNames }) {
+  const learnedTopics = (graph.nodes || [])
+    .slice(0, 30)
+    .map((n) => `- ${n.name} (mastery: ${Math.round((n.mastery || 0) * 100)}%)`)
+    .join('\n')
+
+  const clusterSummary = (graph.clusters || [])
+    .map((c) => `- ${c.name}: ${c.nodeIds?.length || 0} topics`)
+    .join('\n') || 'No clusters yet'
+
+  const avoidLines = avoidTopicNames
+    .slice(0, 120)
+    .map((name) => `- ${name}`)
+    .join('\n')
+
+  return `You are an educational advisor analyzing a student's knowledge map.
 
 LEARNED TOPICS (${graph.nodes.length} total):
-${graph.nodes.slice(0, 30).map(n => `- ${n.name} (mastery: ${Math.round((n.mastery || 0) * 100)}%)`).join('\n')}
+${learnedTopics}
 
 EXISTING CLUSTERS:
-${(graph.clusters || []).map(c => `- ${c.name}: ${c.nodeIds?.length || 0} topics`).join('\n') || 'No clusters yet'}
+${clusterSummary}
 
-Identify 6 knowledge gaps - topics the student should learn next. Ensure the suggestions span at least 2 different categories/clusters from the student's existing knowledge and avoid duplicating any existing topic names. For each gap:
+Identify ${targetCount} knowledge gaps - topics the student should learn next. Ensure suggestions span at least 2 categories/clusters from the student's existing knowledge.
+For each gap:
 1. Suggest a specific topic name
 2. Classify the gap type:
    - "bridge": Connects two existing knowledge areas
@@ -535,8 +554,8 @@ Identify 6 knowledge gaps - topics the student should learn next. Ensure the sug
 3. Explain reasoning
 4. Write an intriguing "curiosity hook" - a question that makes them want to learn it
 
-Existing topics to avoid re-suggesting:
-${existingTopicNames.map((name) => `- ${name}`).join('\n')}
+Topic names to avoid re-suggesting:
+${avoidLines}
 
 Output JSON:
 {
@@ -551,131 +570,128 @@ Output JSON:
   ]
 }
 
-Make suggestions interesting and relevant to their existing knowledge.
-Keep reasoning and curiosity hook to a single short sentence each (max 120 characters).
-
-IMPORTANT:
-- Return exactly 6 gaps.
+Rules:
+- Return exactly ${targetCount} gaps.
 - Each gap must include at least 1 valid entry in connectsTo.
-- connectsTo must only include topics from the list above.
-- Ensure at least 2 different categories are represented.`
+- connectsTo must only include learned topics listed above.
+- Output ONLY valid JSON. No markdown or extra text.`
+}
 
-  const strictPrompt = `${basePrompt}
+/**
+ * Identify knowledge gaps in the user's graph
+ * Suggests new topics that would strengthen their understanding
+ *
+ * @param {Object} graph - The full knowledge graph
+ * @param {Object[]} graph.nodes - Array of knowledge nodes
+ * @param {Object[]} graph.clusters - Array of clusters
+ * @param {Object} [options]
+ * @param {number} [options.targetCount] - Desired gap count (1-10)
+ * @param {string[]} [options.excludeTopics] - Suggested topics to avoid
+ * @returns {Promise<{ gaps: Object[] }>}
+ */
+export async function identifyKnowledgeGaps(graph, options = {}) {
+  if (!graph || !graph.nodes || graph.nodes.length < 3) {
+    logger.debug('GEMINI_GRAPH', 'Not enough nodes for gap analysis', {
+      nodeCount: graph?.nodes?.length || 0
+    })
+    return { gaps: [] }
+  }
 
-IMPORTANT: Output ONLY valid JSON. Do not include explanations or markdown.`
+  const ai = getAIClient()
+  if (!ai) {
+    return { gaps: [] }
+  }
+
+  const targetCount = normalizeGapTargetCount(options?.targetCount)
+  const excludedTopicNames = sanitizeExcludeTopics(options?.excludeTopics)
+  const existingNames = new Set(graph.nodes.map((node) => normalizeTopicName(node.name)))
+  const excludedNames = new Set(excludedTopicNames.map((name) => normalizeTopicName(name)))
+
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]))
+  const mapConnectIds = (gap) => {
+    const names = Array.isArray(gap?.connectsTo) ? gap.connectsTo : []
+    return names
+      .map((name) => {
+        const normalized = normalizeTopicName(name)
+        const exact = graph.nodes.find(
+          (node) => normalizeTopicName(node.name) === normalized
+        )
+        if (exact) return exact.id
+        const fuzzy = graph.nodes.find((node) => {
+          const nodeNorm = normalizeTopicName(node.name)
+          return nodeNorm.includes(normalized) || normalized.includes(nodeNorm)
+        })
+        return fuzzy?.id || null
+      })
+      .filter(Boolean)
+  }
+
+  const collectedByName = new Map()
 
   try {
     logger.time('GEMINI_GRAPH', 'identify-knowledge-gaps')
 
-    const response = await ai.models.generateContent({
-      model: FAST_MODEL,
-      contents: basePrompt,
-      config: {
-        temperature: 0.7,
-        maxOutputTokens: 1024,
-        responseMimeType: 'application/json'
-      }
-    })
+    for (let attempt = 0; attempt < GAP_ATTEMPT_LIMIT; attempt += 1) {
+      if (collectedByName.size >= targetCount) break
 
-    logger.timeEnd('GEMINI_GRAPH', 'identify-knowledge-gaps')
-
-    const text = response.text || ''
-    let result = safeParseJSON(text)
-    let didRetry = false
-
-    const existingNames = new Set(
-      graph.nodes.map((node) => normalizeTopicName(node.name))
-    )
-    const nodeById = new Map(graph.nodes.map((node) => [node.id, node]))
-    const mapConnectIds = (gap) => {
-      const names = Array.isArray(gap.connectsTo) ? gap.connectsTo : []
-      return names
-        .map((name) => {
-          const normalized = normalizeTopicName(name)
-          const exact = graph.nodes.find(
-            (node) => normalizeTopicName(node.name) === normalized
-          )
-          if (exact) return exact.id
-          const fuzzy = graph.nodes.find((node) => {
-            const nodeNorm = normalizeTopicName(node.name)
-            return nodeNorm.includes(normalized) || normalized.includes(nodeNorm)
-          })
-          return fuzzy?.id || null
-        })
-        .filter(Boolean)
-    }
-    const gapsArray = Array.isArray(result.gaps) ? result.gaps : []
-    const filteredInitial = gapsArray.filter((gap) => {
-      const normalized = normalizeTopicName(gap.suggestedTopic)
-      return normalized && !existingNames.has(normalized)
-    })
-    const initialMapped = filteredInitial.map((gap) => ({
-      gap,
-      connectsTo: mapConnectIds(gap),
-    }))
-    const categories = new Set(
-      initialMapped
-        .flatMap((item) => item.connectsTo)
-        .map((id) => nodeById.get(id)?.category || null)
-        .filter(Boolean)
-    )
-    const invalidCount = initialMapped.filter((item) => item.connectsTo.length === 0).length
-    const hasInvalidConnects = invalidCount > initialMapped.length / 2
-
-    if (filteredInitial.length < 6 || categories.size < 2 || hasInvalidConnects) {
-      logger.warn('GEMINI_GRAPH', 'Gap parse insufficient, retrying with strict prompt', {
-        gapCount: filteredInitial.length,
-        categoryCount: categories.size,
-        invalidConnects: hasInvalidConnects,
+      const remaining = targetCount - collectedByName.size
+      const avoidTopicNames = [
+        ...graph.nodes.map((node) => node.name),
+        ...excludedTopicNames,
+        ...Array.from(collectedByName.values()).map((item) => item.gap.suggestedTopic),
+      ]
+      const prompt = buildGapPrompt({
+        graph,
+        targetCount: Math.max(1, remaining),
+        avoidTopicNames,
       })
-      didRetry = true
 
-      const retryResponse = await ai.models.generateContent({
+      const response = await ai.models.generateContent({
         model: FAST_MODEL,
-        contents: strictPrompt,
+        contents: prompt,
         config: {
-          temperature: 0.2,
+          temperature: attempt === 0 ? 0.7 : 0.2,
           maxOutputTokens: 1024,
           responseMimeType: 'application/json'
         }
       })
 
-      const retryText = retryResponse.text || ''
-      result = safeParseJSON(retryText)
-    }
+      const text = response.text || ''
+      const result = safeParseJSON(text)
+      const gapsArray = Array.isArray(result.gaps) ? result.gaps : []
 
-    const retryGaps = Array.isArray(result.gaps) ? result.gaps : []
-    const filteredRetry = retryGaps.filter((gap) => {
-      const normalized = normalizeTopicName(gap.suggestedTopic)
-      return normalized && !existingNames.has(normalized)
-    })
-    const retryMapped = filteredRetry.map((gap) => ({
-      gap,
-      connectsTo: mapConnectIds(gap),
-    }))
-    const retryCategories = new Set(
-      retryMapped
-        .flatMap((item) => item.connectsTo)
-        .map((id) => nodeById.get(id)?.category || null)
-        .filter(Boolean)
-    )
-    const retryInvalidCount = retryMapped.filter((item) => item.connectsTo.length === 0).length
-    const retryInvalidConnects = retryInvalidCount > retryMapped.length / 2
+      gapsArray.forEach((gap) => {
+        const normalized = normalizeTopicName(gap?.suggestedTopic)
+        if (!normalized) return
+        if (existingNames.has(normalized)) return
+        if (excludedNames.has(normalized)) return
+        if (collectedByName.has(normalized)) return
 
-    if (didRetry && (filteredRetry.length < 6 || retryCategories.size < 2 || retryInvalidConnects)) {
-      logger.warn('GEMINI_GRAPH', 'Gap parse insufficient after retry', {
-        gapCount: filteredRetry.length,
-        categoryCount: retryCategories.size,
-        invalidConnects: retryInvalidConnects,
+        const connectsTo = mapConnectIds(gap)
+        if (connectsTo.length === 0) return
+
+        collectedByName.set(normalized, {
+          gap,
+          connectsTo,
+        })
+      })
+
+      logger.info('GEMINI_GRAPH', 'Gap attempt processed', {
+        attempt: attempt + 1,
+        requested: remaining,
+        received: gapsArray.length,
+        collected: collectedByName.size,
       })
     }
 
-    const finalMapped = didRetry ? retryMapped : initialMapped
-    const gaps = finalMapped
+    logger.timeEnd('GEMINI_GRAPH', 'identify-knowledge-gaps')
+
+    const gaps = Array.from(collectedByName.values())
+      .slice(0, targetCount)
       .map((item, index) => {
         const connectsTo = item.connectsTo.length > 0
           ? item.connectsTo
-          : graph.nodes.slice(0, 2).map(n => n.id)
+          : graph.nodes.slice(0, 2).map((node) => node.id)
         return {
           id: `gap_${Date.now()}_${index}`,
           suggestedTopic: item.gap.suggestedTopic,
@@ -686,7 +702,30 @@ IMPORTANT: Output ONLY valid JSON. Do not include explanations or markdown.`
         }
       })
 
-    logger.info('GEMINI_GRAPH', 'Identified knowledge gaps', { gapCount: gaps.length })
+    const categories = new Set(
+      gaps
+        .flatMap((gap) => gap.connectsTo || [])
+        .map((id) => nodeById.get(id)?.category || null)
+        .filter(Boolean)
+    )
+
+    if (gaps.length < targetCount) {
+      logger.warn('GEMINI_GRAPH', 'Insufficient unique gaps after attempts', {
+        requested: targetCount,
+        returned: gaps.length,
+      })
+    }
+    if (categories.size < 2 && gaps.length > 1) {
+      logger.warn('GEMINI_GRAPH', 'Gap categories are less diverse than requested', {
+        categoryCount: categories.size,
+      })
+    }
+
+    logger.info('GEMINI_GRAPH', 'Identified knowledge gaps', {
+      gapCount: gaps.length,
+      targetCount,
+      excludedCount: excludedTopicNames.length,
+    })
 
     return { gaps }
   } catch (error) {

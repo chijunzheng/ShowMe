@@ -5,7 +5,6 @@
  * Data Schema (userProgress collection):
  * - clientId: string
  * - totalQuestions: number
- * - totalSocraticAnswers: number
  * - streakCount: number
  * - longestStreak: number
  * - lastActiveDate: timestamp
@@ -149,14 +148,6 @@ const BADGES = {
     criteriaText: 'Complete 1 topic',
     criteria: { totalTopicsLearned: 1 }
   },
-  FIRST_QUIZ: {
-    id: 'FIRST_QUIZ',
-    name: 'First Quiz',
-    description: 'Finished your first quiz',
-    icon: 'trophy',
-    criteriaText: 'Finish 1 quiz',
-    criteria: { totalQuizzes: 1 }
-  },
   STREAK_3: {
     id: 'STREAK_3',
     name: 'Getting Started',
@@ -229,21 +220,13 @@ const BADGES = {
     criteriaText: 'Ask 10 questions',
     criteria: { totalQuestions: 10 }
   },
-  SOCRATIC_5: {
-    id: 'SOCRATIC_5',
-    name: 'Critical Thinker',
-    description: 'Answered 5 Socratic questions',
-    icon: 'thought-bubble',
-    criteriaText: 'Answer 5 Socratic questions',
-    criteria: { totalSocraticAnswers: 5 }
-  },
-  QUIZ_CADENCE: {
-    id: 'QUIZ_CADENCE',
-    name: 'Quiz Cadence',
-    description: 'Completed 5 quizzes',
-    icon: 'medal',
-    criteriaText: 'Complete 5 quizzes',
-    criteria: { totalQuizzes: 5 }
+  CATEGORY_COLLECTOR: {
+    id: 'CATEGORY_COLLECTOR',
+    name: 'Category Collector',
+    description: 'Learned topics in 5+ different categories',
+    icon: 'compass',
+    criteriaText: 'Learn topics in 5+ categories',
+    criteria: { categoriesLearned: 5 }
   },
   TOPIC_EXPLORER: {
     id: 'TOPIC_EXPLORER',
@@ -260,16 +243,54 @@ const BADGES = {
     icon: 'star',
     criteriaText: 'Learn 50 topics',
     criteria: { totalTopicsLearned: 50 }
-  }
+  },
+  PERFECT_PREDICTION: {
+    id: 'PERFECT_PREDICTION',
+    name: 'Perfect Prediction',
+    description: 'Got all predictions correct in Wonder Lab',
+    icon: 'star',
+    criteriaText: 'Get all predictions correct in Wonder Lab',
+    criteria: { perfectPredictions: 1 }
+  },
+  SPEED_LEARNER: {
+    id: 'SPEED_LEARNER',
+    name: 'Speed Learner',
+    description: 'Learned 5 topics in one day',
+    icon: 'rocket',
+    criteriaText: 'Learn 5 topics in one day',
+    criteria: { topicsLearnedToday: 5 }
+  },
+  MULTI_MODE: {
+    id: 'MULTI_MODE',
+    name: 'Mode Master',
+    description: 'Completed all 3 learn modes for a topic',
+    icon: 'medal',
+    criteriaText: 'Complete all 3 learn modes for one topic',
+    criteria: { multiModeTopics: 1 }
+  },
+  DETECTIVE_ACE: {
+    id: 'DETECTIVE_ACE',
+    name: 'Detective Ace',
+    description: 'Solved a Mystery Lab case with all clues found',
+    icon: 'fire',
+    criteriaText: 'Solve a mystery with all clues found',
+    criteria: { detectiveAceCount: 1 }
+  },
+  NIGHT_OWL: {
+    id: 'NIGHT_OWL',
+    name: 'Night Owl',
+    description: 'Learned after 10 PM',
+    icon: 'star',
+    criteriaText: 'Learn something after 10 PM',
+    criteria: { nightOwlActivity: true }
+  },
 }
 
 // Points awarded for actions
 const POINTS = {
   QUESTION_ASKED: 10,
-  SOCRATIC_ANSWERED: 5,
   DEEP_LEVEL_USED: 15,
   TOPIC_LEARNED: 20,
-  QUIZ_COMPLETE: 15,
   STORY_COMPLETE: 25,
   MYSTERY_COMPLETE: 25,
   WONDER_COMPLETE: 25,
@@ -320,9 +341,7 @@ function createDefaultProgress(clientId) {
   return {
     clientId,
     totalQuestions: 0,
-    totalSocraticAnswers: 0,
     totalTopicsLearned: 0,
-    totalQuizzes: 0,
     storyCompletions: 0,
     mysteryCompletions: 0,
     wonderCompletions: 0,
@@ -333,6 +352,14 @@ function createDefaultProgress(clientId) {
     badges: [],
     badgeUnlockDates: {},
     deepLevelUsed: false,
+    categoriesLearned: 0,
+    perfectPredictions: 0,
+    topicsLearnedToday: 0,
+    topicsLearnedTodayDate: null,
+    multiModeTopics: 0,
+    detectiveAceCount: 0,
+    nightOwlActivity: false,
+    activeDates: [],
     createdAt: new Date(),
     updatedAt: new Date()
   }
@@ -362,7 +389,7 @@ function normalizeProgress(data, clientId) {
 
   const merged = { ...base, ...data, clientId }
 
-  return {
+  let result = {
     ...merged,
     lastActiveDate: merged.lastActiveDate?.toDate?.() || merged.lastActiveDate,
     createdAt: merged.createdAt?.toDate?.() || merged.createdAt,
@@ -370,11 +397,33 @@ function normalizeProgress(data, clientId) {
     badges: Array.isArray(merged.badges) ? merged.badges : [],
     badgeUnlockDates: Object.fromEntries(
       Object.entries(merged.badgeUnlockDates || {}).map(([k, v]) => [k, v?.toDate?.() || v])
-    )
+    ),
+    activeDates: Array.isArray(merged.activeDates) ? merged.activeDates : [],
+    categoriesLearned: merged.categoriesLearned || 0,
+    perfectPredictions: merged.perfectPredictions || 0,
+    topicsLearnedToday: merged.topicsLearnedToday || 0,
+    topicsLearnedTodayDate: merged.topicsLearnedTodayDate?.toDate?.() || merged.topicsLearnedTodayDate || null,
+    multiModeTopics: merged.multiModeTopics || 0,
+    detectiveAceCount: merged.detectiveAceCount || 0,
+    nightOwlActivity: merged.nightOwlActivity || false,
   }
+
+  // Backfill activeDates from lastActiveDate + streakCount if empty
+  if (result.activeDates.length === 0 && result.lastActiveDate) {
+    const lastDate = new Date(result.lastActiveDate)
+    const dates = []
+    for (let i = Math.min(result.streakCount, 30) - 1; i >= 0; i--) {
+      const d = new Date(lastDate)
+      d.setDate(d.getDate() - i)
+      dates.push(getDateKey(d))
+    }
+    result = { ...result, activeDates: dates }
+  }
+
+  return result
 }
 
-function applyActivityUpdate(progress, action, now) {
+function applyActivityUpdate(progress, action, now, metadata = {}) {
   const updated = {
     ...progress,
     badges: Array.isArray(progress.badges) ? [...progress.badges] : [],
@@ -400,15 +449,31 @@ function applyActivityUpdate(progress, action, now) {
     updated.longestStreak = 1
   }
 
+  // Track active dates
+  const todayKey = getDateKey(now)
+  if (!Array.isArray(updated.activeDates)) {
+    updated.activeDates = []
+  }
+  if (!updated.activeDates.includes(todayKey)) {
+    updated.activeDates = [...updated.activeDates, todayKey]
+  }
+
+  // Track night owl activity (after 10 PM)
+  if (now.getHours() >= 22) {
+    updated.nightOwlActivity = true
+  }
+
+  // Track topics learned today (reset if new day)
+  if (updated.topicsLearnedTodayDate && !isSameDay(updated.topicsLearnedTodayDate, now)) {
+    updated.topicsLearnedToday = 0
+    updated.topicsLearnedTodayDate = null
+  }
+
   // Update based on action
   switch (action) {
     case 'question_asked':
       updated.totalQuestions += 1
       updated.points += POINTS.QUESTION_ASKED
-      break
-    case 'socratic_answered':
-      updated.totalSocraticAnswers += 1
-      updated.points += POINTS.SOCRATIC_ANSWERED
       break
     case 'deep_level_used':
       updated.deepLevelUsed = true
@@ -417,10 +482,8 @@ function applyActivityUpdate(progress, action, now) {
     case 'topic_learned':
       updated.totalTopicsLearned += 1
       updated.points += POINTS.TOPIC_LEARNED
-      break
-    case 'quiz_complete':
-      updated.totalQuizzes += 1
-      updated.points += POINTS.QUIZ_COMPLETE
+      updated.topicsLearnedToday += 1
+      updated.topicsLearnedTodayDate = now
       break
     case 'story_complete':
       updated.storyCompletions += 1
@@ -429,10 +492,16 @@ function applyActivityUpdate(progress, action, now) {
     case 'mystery_complete':
       updated.mysteryCompletions += 1
       updated.points += POINTS.MYSTERY_COMPLETE
+      if (metadata.allCluesFound) {
+        updated.detectiveAceCount += 1
+      }
       break
     case 'wonder_complete':
       updated.wonderCompletions += 1
       updated.points += POINTS.WONDER_COMPLETE
+      if (metadata.perfectPrediction) {
+        updated.perfectPredictions += 1
+      }
       break
     default:
       logger.warn('PROGRESS', 'Unknown action type', { action })
@@ -539,10 +608,10 @@ export async function getUserProgress(clientId) {
  * @param {string} action - progress action key (question_asked, topic_learned, quiz_complete, etc.)
  * @returns {Promise<{progress: Object|null, newBadges: string[], error: string|null}>}
  */
-export async function recordActivity(clientId, action) {
+export async function recordActivity(clientId, action, metadata = {}) {
   if (shouldUseLocalProgress()) {
     const now = new Date()
-    const { progress, newBadges } = applyActivityUpdate(getLocalProgress(clientId), action, now)
+    const { progress, newBadges } = applyActivityUpdate(getLocalProgress(clientId), action, now, metadata)
     setLocalProgress(clientId, progress)
     return { progress, newBadges, error: null }
   }
@@ -552,7 +621,7 @@ export async function recordActivity(clientId, action) {
     if (process.env.NODE_ENV !== 'production') {
       firestoreUnavailable = true
       const now = new Date()
-      const { progress, newBadges } = applyActivityUpdate(getLocalProgress(clientId), action, now)
+      const { progress, newBadges } = applyActivityUpdate(getLocalProgress(clientId), action, now, metadata)
       setLocalProgress(clientId, progress)
       return { progress, newBadges, error: null }
     }
@@ -571,7 +640,7 @@ export async function recordActivity(clientId, action) {
     }
 
     const now = new Date()
-    const { progress: updatedProgress, newBadges } = applyActivityUpdate(progress, action, now)
+    const { progress: updatedProgress, newBadges } = applyActivityUpdate(progress, action, now, metadata)
 
     // Save to Firestore
     await docRef.set(updatedProgress)
@@ -589,7 +658,7 @@ export async function recordActivity(clientId, action) {
     markFirestoreUnavailable(error)
     if (shouldUseLocalProgress()) {
       const now = new Date()
-      const { progress, newBadges } = applyActivityUpdate(getLocalProgress(clientId), action, now)
+      const { progress, newBadges } = applyActivityUpdate(getLocalProgress(clientId), action, now, metadata)
       setLocalProgress(clientId, progress)
       return { progress, newBadges, error: null }
     }

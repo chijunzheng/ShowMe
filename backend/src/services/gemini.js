@@ -337,6 +337,7 @@ async function generateScriptWithModel(ai, prompt, model, fallbackTopic) {
 
     // Validate each slide has required fields
     const validSlides = parsed.slides.map((slide, index) => ({
+      title: slide.title || `Slide ${index + 1}`,
       // Strip markdown formatting from subtitles (they're spoken by TTS)
       subtitle: (slide.subtitle || `Slide ${index + 1}`).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1'),
       imagePrompt: slide.imagePrompt || `Educational diagram about ${fallbackTopic}`,
@@ -449,14 +450,18 @@ IMPORTANT: Always end with a CONCLUSION slide that:
 
 CRITICAL: Subtitles are spoken aloud by TTS. Do NOT use markdown formatting (no **bold**, *italics*, or other markup). Write plain text only.
 
+TITLE FIELD: Each slide MUST include a "title" field — a short (2-5 words) descriptive chapter heading for navigation. Examples: "Initial Breakdown", "Stomach Acids", "Nutrient Absorption", "Key Takeaways". Do NOT repeat the subtitle — the title is a concise label, not narration.
+
 Output Format (JSON):
 {
   "slides": [
     {
+      "title": "Short Chapter Title",
       "subtitle": "Conversational explanation text that sounds natural when spoken aloud",
       "imagePrompt": "Description of educational diagram showing [concept], with labeled parts including [details]. Style: clean, colorful educational illustration."
     },
     {
+      "title": "Key Takeaways",
       "subtitle": "Alright, let's wrap this up. First thing to remember... [key point 1]. Second... [key point 2]. And the big takeaway? [key point 3].",
       "imagePrompt": "Summary infographic with three key points highlighted in boxes or icons. Clean, minimal design with bullet points.",
       "isConclusion": true
@@ -498,6 +503,7 @@ Important: Image prompts should describe detailed educational diagrams with labe
  * @param {string} options.topic - The overall topic for context
  * @param {string} options.explanationLevel - Level of visual complexity: 'simple', 'standard', or 'deep'
  * @param {string} options.language - Language code for text labels: 'en' or 'zh'
+ * @param {boolean} options.comicPanel - Whether to force a 4-panel comic page layout
  * @returns {Promise<{imageUrl: string|null, error: string|null}>}
  */
 export async function generateEducationalImage(imagePrompt, options = {}) {
@@ -506,7 +512,7 @@ export async function generateEducationalImage(imagePrompt, options = {}) {
     return { imageUrl: null, error: 'API_NOT_AVAILABLE' }
   }
 
-  const { topic = '', explanationLevel = 'standard', language = 'en' } = options
+  const { topic = '', explanationLevel = 'standard', language = 'en', comicPanel = false } = options
 
   // Validate and normalize explanation level
   const validLevels = ['simple', 'standard', 'deep']
@@ -520,6 +526,14 @@ export async function generateEducationalImage(imagePrompt, options = {}) {
     ? '- IMPORTANT: All text labels, annotations, and captions on the diagram must be in Simplified Chinese (简体中文)'
     : ''
 
+  const comicPanelInstructions = comicPanel
+    ? `- Format as a 4-panel manga/comic page arranged in a 2x2 grid
+- Use clear, visible panel borders separating each panel
+- Show sequential storytelling progression from top-left to top-right to bottom-left to bottom-right
+- NO text, speech bubbles, labels, or captions inside the image
+- Use a wide/landscape composition so all four panels are readable`
+    : ''
+
   // Enhance the prompt for better educational diagrams
   const enhancedPrompt = `Create an educational diagram illustration: ${imagePrompt}
 
@@ -527,6 +541,7 @@ Style requirements:
 ${levelStyleInstructions}
 - No photorealistic elements - use illustrated/diagrammatic style
 - White or light colored background for clarity
+${comicPanelInstructions}
 ${languageInstruction}
 ${topic ? `- Topic context: ${topic}` : ''}`
 
@@ -1744,204 +1759,6 @@ Random seed: ${seed}`
 }
 
 /**
- * Generate a Socratic question based on slideshow content
- * SOCRATIC-001: Probing questions to deepen understanding
- *
- * @param {Object} params - Parameters for question generation
- * @param {Array} params.slides - The generated slides with script and imageUrl
- * @param {string} params.topicName - The topic being explored
- * @param {string} params.language - Language code: 'en' or 'zh'
- * @returns {Promise<{question: string, questionType: string, expectedTopics: string[], error: string|null}>}
- */
-export async function generateSocraticQuestion(params) {
-  const ai = getAIClient()
-  if (!ai) {
-    return { question: null, questionType: null, expectedTopics: null, error: 'API_NOT_AVAILABLE' }
-  }
-
-  const { slides = [], topicName = '', language = 'en' } = params
-
-  // Build context from slides
-  const slideContext = slides
-    .map((slide, i) => `Slide ${i + 1}: ${slide.subtitle || slide.script || ''}`)
-    .join('\n')
-
-  const languageInstruction = language === 'zh'
-    ? 'Generate the question and all text in Simplified Chinese (简体中文).'
-    : 'Generate the question and all text in English.'
-
-  const prompt = `You are a Socratic tutor helping students think deeply about what they've learned.
-
-The student just watched a slideshow about "${topicName}":
-${slideContext}
-
-${languageInstruction}
-
-Generate ONE thought-provoking question that:
-1. Encourages the student to think critically about the content
-2. Cannot be answered by simply repeating what was shown
-3. Connects the topic to real-world applications or deeper understanding
-
-Question types:
-- comprehension: Tests understanding of core concepts
-- application: Asks how to apply the knowledge
-- analysis: Asks to break down or compare aspects
-- prediction: Asks what would happen in a scenario
-
-Output Format (JSON):
-{
-  "question": "Your thought-provoking question here?",
-  "questionType": "comprehension|application|analysis|prediction",
-  "expectedTopics": ["concept1", "concept2", "concept3"]
-}
-
-The expectedTopics should list 2-4 key concepts that a good answer should mention.`
-
-  try {
-    const response = await ai.models.generateContent({
-      model: FAST_MODEL,
-      contents: prompt,
-      config: {
-        temperature: 0.7,
-        maxOutputTokens: 256,
-      }
-    })
-
-    const text = response.text || ''
-    const jsonStr = repairJSON(extractJSON(text))
-    const parsed = JSON.parse(jsonStr)
-
-    const validTypes = ['comprehension', 'application', 'analysis', 'prediction']
-    const questionType = validTypes.includes(parsed.questionType) ? parsed.questionType : 'comprehension'
-
-    return {
-      question: parsed.question || null,
-      questionType,
-      expectedTopics: Array.isArray(parsed.expectedTopics) ? parsed.expectedTopics : [],
-      error: parsed.question ? null : 'EMPTY_RESPONSE'
-    }
-  } catch (error) {
-    console.error('[Gemini] Socratic question generation error:', error.message)
-
-    if (error.message?.includes('quota') || error.message?.includes('rate')) {
-      return { question: null, questionType: null, expectedTopics: null, error: 'RATE_LIMITED' }
-    }
-
-    return { question: null, questionType: null, expectedTopics: null, error: error.message || 'UNKNOWN_ERROR' }
-  }
-}
-
-/**
- * Evaluate a user's answer to a Socratic question
- * SOCRATIC-002: Encouraging feedback with scoring
- *
- * @param {Object} params - Parameters for evaluation
- * @param {string} params.answer - User's transcribed answer
- * @param {string} params.question - The original Socratic question
- * @param {string[]} params.expectedTopics - Expected concepts from question generation
- * @param {Object} params.slideContext - The slide content for context
- * @param {string} params.language - Language code: 'en' or 'zh'
- * @returns {Promise<{feedback: string, score: number, correctAspects: string[], suggestions: string[], followUpQuestion: string|null, error: string|null}>}
- */
-export async function evaluateSocraticAnswer(params) {
-  const ai = getAIClient()
-  if (!ai) {
-    return { feedback: null, score: null, correctAspects: null, suggestions: null, followUpQuestion: null, error: 'API_NOT_AVAILABLE' }
-  }
-
-  const { answer = '', question = '', expectedTopics = [], slideContext = {}, language = 'en' } = params
-
-  // Handle empty answer
-  if (!answer || answer.trim().length === 0) {
-    const emptyResponse = language === 'zh'
-      ? '没关系！想一想刚才学到的内容，再试一次吧。你可以从最让你印象深刻的部分开始说起。'
-      : "That's okay! Take a moment to think about what you just learned, and give it another try. Start with whatever part stood out to you most."
-
-    return {
-      feedback: emptyResponse,
-      score: 1,
-      correctAspects: [],
-      suggestions: [],
-      followUpQuestion: null,
-      error: null
-    }
-  }
-
-  const languageInstruction = language === 'zh'
-    ? 'Generate all feedback and text in Simplified Chinese (简体中文). Be warm and encouraging.'
-    : 'Generate all feedback and text in English. Be warm and encouraging.'
-
-  const slideContextStr = typeof slideContext === 'object'
-    ? JSON.stringify(slideContext)
-    : slideContext
-
-  const prompt = `You are an encouraging Socratic tutor evaluating a student's answer.
-
-Question asked: "${question}"
-Expected topics/concepts: ${expectedTopics.join(', ')}
-Slide context: ${slideContextStr}
-
-Student's answer: "${answer}"
-
-${languageInstruction}
-
-Evaluate the answer and provide:
-1. Encouraging feedback (2-3 sentences) - focus on what they got right first
-2. Score from 1-5 (1=needs work, 3=good understanding, 5=excellent)
-3. What aspects they got correct
-4. Gentle suggestions for improvement (if any)
-5. Optional follow-up question for deeper exploration (only if score >= 3)
-
-TONE: Be warm, supportive, and celebratory for good answers. Never be critical or discouraging.
-
-Output Format (JSON):
-{
-  "feedback": "Your encouraging feedback here",
-  "score": 3,
-  "correctAspects": ["aspect1", "aspect2"],
-  "suggestions": ["suggestion1"],
-  "followUpQuestion": "Optional deeper question?" or null
-}`
-
-  try {
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: prompt,
-      config: {
-        temperature: 0.6,
-        maxOutputTokens: 512,
-      }
-    })
-
-    const text = response.text || ''
-    const jsonStr = repairJSON(extractJSON(text))
-    const parsed = JSON.parse(jsonStr)
-
-    // Validate score is in range
-    let score = parseInt(parsed.score, 10)
-    if (isNaN(score) || score < 1) score = 1
-    if (score > 5) score = 5
-
-    return {
-      feedback: parsed.feedback || 'Great effort! Keep exploring.',
-      score,
-      correctAspects: Array.isArray(parsed.correctAspects) ? parsed.correctAspects : [],
-      suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
-      followUpQuestion: parsed.followUpQuestion || null,
-      error: null
-    }
-  } catch (error) {
-    console.error('[Gemini] Socratic evaluation error:', error.message)
-
-    if (error.message?.includes('quota') || error.message?.includes('rate')) {
-      return { feedback: null, score: null, correctAspects: null, suggestions: null, followUpQuestion: null, error: 'RATE_LIMITED' }
-    }
-
-    return { feedback: null, score: null, correctAspects: null, suggestions: null, followUpQuestion: null, error: error.message || 'UNKNOWN_ERROR' }
-  }
-}
-
-/**
  * Classify a topic into a world zone for World Builder gamification
  * WB007: Topic to zone mapping
  *
@@ -2481,570 +2298,6 @@ IMPORTANT: Evolve from the provided reference image.
   return { imageUrl: null, error: lastError || 'NO_IMAGE_GENERATED' }
 }
 
-// Level-specific quiz generation instructions
-const QUIZ_LEVEL_INSTRUCTIONS = {
-  simple: `
-LEVEL: SIMPLE (Ages 5-10, K-5 students)
-Generate 3-4 questions that are visual, fun, and encouraging.
-
-REQUIRED QUESTION TYPES (pick from these):
-- yes_no: Thought-provoking true/false claims (see guidelines below)
-- odd_one_out: "Which one doesn't belong?" - 4 items, one is different (GREAT for visual thinking!)
-- sort_groups: Sort items into 2 categories (e.g., "Hot vs Cold", "Living vs Non-living")
-- picture_match: "Which picture shows [concept]?" (references slide images)
-- fill_blank: Single-word answers only
-
-ODD ONE OUT GUIDELINES (engaging categorization game!):
-- Show 4 items where 3 belong to a category and 1 is clearly different
-- Can use text only, or text with images (imageUrl is optional)
-- Make the odd item obviously different but still related to the topic
-- GOOD examples:
-  * Animals: Dog, Cat, Fish, Chair (Chair is not an animal!)
-  * Planets: Earth, Mars, Moon, Venus (Moon is not a planet!)
-  * Fruits: Apple, Banana, Carrot, Orange (Carrot is a vegetable!)
-
-SORT GROUPS GUIDELINES (fun categorization activity!):
-- Give 4-6 items to sort into exactly 2 groups
-- Groups should have clear, distinct categories
-- Use simple icons/emojis for groups
-- GOOD examples:
-  * "Hot vs Cold": Sun, Ice cream, Fire, Snowman
-  * "Living vs Non-living": Dog, Rock, Tree, Car
-  * "Day vs Night": Sun, Moon, Stars, Sunrise
-
-YES/NO QUESTION GUIDELINES (CRITICAL - make these engaging!):
-- Present interesting CLAIMS about the topic, not obvious facts
-- Include COMMON MISCONCEPTIONS as false statements (things kids often get wrong)
-- Reference specific visuals: "Looking at the diagram, [claim about what it shows]"
-- Test understanding, not just memory: "Based on what you learned, [surprising claim]"
-- Mix counter-intuitive truths with plausible-sounding falsehoods
-- GOOD examples:
-  * FALSE: "Dinosaurs and humans lived at the same time" (common misconception)
-  * TRUE: "Some dinosaurs were smaller than chickens" (surprising but true)
-  * FALSE: "The Sun moves around the Earth" (addresses misconception)
-  * TRUE: "Plants breathe in what we breathe out" (requires connecting ideas)
-- BAD examples (too obvious, boring):
-  * "Plants need water" - too easy, no thought required
-  * "Dogs are animals" - trivially true
-  * "Fish can fly" - obviously false, no one believes this
-
-STYLE GUIDELINES:
-- Use everyday language a child can understand
-- Keep question text under 15 words
-- Use encouraging, playful language ("Can you find...", "Which one doesn't belong?")
-- Focus on visual recognition and deeper understanding
-- No technical terminology`,
-
-  standard: `
-LEVEL: STANDARD (Ages 10-14, Middle school)
-Generate 4-5 questions with balanced difficulty.
-
-REQUIRED QUESTION TYPES:
-- 2-3 mcq questions (standard multiple choice)
-- 1-2 fill_blank questions
-- Optionally 1 voice question
-
-STYLE GUIDELINES:
-- Clear, direct language
-- Mix recall with comprehension questions
-- Can use key vocabulary but explain if technical
-- Progress from easier to harder`,
-
-  deep: `
-LEVEL: DEEP (Ages 14+, High school and advanced)
-Generate 5-6 challenging questions that test deep understanding.
-
-REQUIRED QUESTION TYPES:
-- 2-3 mcq questions (analytical, "which is BEST", "what would happen if...")
-- 1-2 find_error questions (spot the mistake in a statement)
-- 1 apply_concept question (apply knowledge to new scenario)
-
-STYLE GUIDELINES:
-- Use proper technical terminology
-- Focus on WHY and HOW, not just WHAT
-- Include questions requiring reasoning and analysis
-- Test ability to apply concepts to new situations`
-}
-
-// Level-specific question type examples for the prompt
-const LEVEL_QUESTION_EXAMPLES = {
-  simple: `
-QUESTION TYPE EXAMPLES:
-
-yes_no (True/False) - MUST be thought-provoking!:
-Example 1 - Counter-intuitive truth:
-{
-  "id": "q1",
-  "type": "yes_no",
-  "question": "Think about this claim:",
-  "statement": "Some plants can survive without any soil at all.",
-  "slideReference": 0,
-  "correctAnswer": true,
-  "hint": "Look at the diagram showing different ways plants grow.",
-  "explanation": "Surprise! Plants like air plants and water lilies don't need soil - they get nutrients from air or water!"
-}
-
-Example 2 - Common misconception (FALSE):
-{
-  "id": "q2",
-  "type": "yes_no",
-  "question": "Is this true or false?",
-  "statement": "Plants sleep at night just like people do.",
-  "slideReference": 1,
-  "correctAnswer": false,
-  "hint": "Remember what the slide said about how plants work all the time.",
-  "explanation": "Tricky! Plants don't sleep, but they DO work differently at night - they keep breathing but can't make food without sunlight."
-}
-
-Example 3 - Tests deeper understanding:
-{
-  "id": "q3",
-  "type": "yes_no",
-  "question": "Based on what you learned:",
-  "statement": "A plant in a dark closet could still stay alive for a little while.",
-  "slideReference": 0,
-  "correctAnswer": true,
-  "hint": "Think about the stored energy the slide mentioned.",
-  "explanation": "Yes! Plants store energy, so they can survive in darkness for a short time - but they'll eventually need light to make more food."
-}
-
-picture_match:
-{
-  "id": "q2",
-  "type": "picture_match",
-  "question": "Which picture shows photosynthesis happening?",
-  "slideReference": 1,
-  "imageOptions": [0, 1, 2, 3],
-  "correctSlideIndex": 1,
-  "correctAnswer": "Slide 1 shows photosynthesis",
-  "explanation": "This picture shows a plant using sunlight!"
-}
-
-fill_blank (simple):
-{
-  "id": "q3",
-  "type": "fill_blank",
-  "question": "Fill in the word:",
-  "slideReference": 2,
-  "blankSentence": "Plants are colored ___.",
-  "correctAnswer": "green",
-  "acceptableAnswers": ["green", "Green"],
-  "wordOptions": ["green", "blue", "red", "yellow"],
-  "explanation": "Plants are green because of chlorophyll!"
-}
-
-odd_one_out (Find what doesn't belong - HIGHLY ENGAGING!):
-{
-  "id": "q4",
-  "type": "odd_one_out",
-  "question": "Which one doesn't belong?",
-  "slideReference": 0,
-  "items": [
-    { "text": "Sunlight", "isOdd": false },
-    { "text": "Water", "isOdd": false },
-    { "text": "Carbon dioxide", "isOdd": false },
-    { "text": "Pizza", "isOdd": true }
-  ],
-  "explanation": "Pizza is not something plants need! Plants need sunlight, water, and carbon dioxide to make food."
-}
-
-sort_groups (Category sorting - FUN and INTERACTIVE!):
-{
-  "id": "q5",
-  "type": "sort_groups",
-  "question": "Sort these into the right groups!",
-  "slideReference": 1,
-  "items": ["Sunlight", "Oxygen", "Water", "Sugar"],
-  "groups": [
-    { "name": "Plants Need", "icon": "🌱" },
-    { "name": "Plants Make", "icon": "✨" }
-  ],
-  "correctSorting": {
-    "Plants Need": ["Sunlight", "Water"],
-    "Plants Make": ["Oxygen", "Sugar"]
-  },
-  "explanation": "Plants take in sunlight and water, then use photosynthesis to make oxygen and sugar!"
-}
-
-ODD_ONE_OUT REQUIREMENTS:
-- MUST have exactly 4 items
-- Exactly ONE item must have "isOdd": true
-- The odd item should be obviously different from the others
-- Text field is required, imageUrl is optional
-
-SORT_GROUPS REQUIREMENTS:
-- MUST have exactly 2 groups with name and icon
-- 4-6 items to sort between the groups
-- correctSorting must map each group name to its correct items
-
-FILL_BLANK REQUIREMENTS:
-- MUST include wordOptions array with 4 words: the correct answer + 3 plausible distractors
-- Distractors should be related to the topic but incorrect for this specific blank
-- Keep words simple and at the same difficulty level`,
-
-  standard: `
-QUESTION TYPE EXAMPLES:
-
-mcq (Multiple Choice):
-{
-  "id": "q1",
-  "type": "mcq",
-  "question": "What is the main purpose of photosynthesis?",
-  "slideReference": 0,
-  "options": ["To produce oxygen", "To convert sunlight into food", "To absorb water", "To release carbon dioxide"],
-  "correctIndex": 1,
-  "correctAnswer": "To convert sunlight into food",
-  "explanation": "Photosynthesis converts light energy into chemical energy (glucose) that plants use for food."
-}
-
-fill_blank:
-{
-  "id": "q2",
-  "type": "fill_blank",
-  "question": "Complete the statement:",
-  "slideReference": 1,
-  "blankSentence": "The process of ___ allows plants to convert sunlight into energy.",
-  "correctAnswer": "photosynthesis",
-  "acceptableAnswers": ["photosynthesis", "photo-synthesis"],
-  "wordOptions": ["photosynthesis", "respiration", "digestion", "evaporation"],
-  "explanation": "This is the key process described in the slide."
-}
-
-FILL_BLANK REQUIREMENTS:
-- MUST include wordOptions array with 4 words: the correct answer + 3 plausible distractors
-- Distractors should be scientifically-related but incorrect terms for this context
-- Words should be at appropriate vocabulary level for middle schoolers
-
-voice (Open-ended):
-{
-  "id": "q3",
-  "type": "voice",
-  "question": "In your own words, explain how photosynthesis works.",
-  "slideReference": 2,
-  "expectedTopics": ["sunlight", "carbon dioxide", "glucose", "oxygen"],
-  "sampleAnswer": "Plants absorb sunlight and carbon dioxide, then produce glucose for energy and release oxygen.",
-  "correctAnswer": "A good answer mentions sunlight, CO2 absorption, glucose production, and oxygen release",
-  "explanation": "This tests deeper understanding of the complete process."
-}`,
-
-  deep: `
-QUESTION TYPE EXAMPLES:
-
-mcq (Analytical):
-{
-  "id": "q1",
-  "type": "mcq",
-  "question": "Which statement BEST explains why plants appear green?",
-  "slideReference": 0,
-  "options": [
-    "Chlorophyll absorbs green light and reflects other colors",
-    "Chlorophyll reflects green light and absorbs other wavelengths",
-    "Plants produce green pigments as a waste product",
-    "Green light is the most efficient for photosynthesis"
-  ],
-  "correctIndex": 1,
-  "correctAnswer": "Chlorophyll reflects green light and absorbs other wavelengths",
-  "explanation": "Chlorophyll primarily absorbs red and blue light for photosynthesis, reflecting green wavelengths which is why we see plants as green."
-}
-
-find_error:
-{
-  "id": "q2",
-  "type": "find_error",
-  "question": "What is wrong with this statement?",
-  "slideReference": 1,
-  "incorrectStatement": "During photosynthesis, plants release carbon dioxide and absorb oxygen from the air.",
-  "correctAnswer": "It's reversed - plants absorb carbon dioxide and release oxygen during photosynthesis",
-  "explanation": "Photosynthesis uses CO2 as an input and produces O2 as a byproduct. Respiration is the opposite process."
-}
-
-apply_concept:
-{
-  "id": "q3",
-  "type": "apply_concept",
-  "question": "Apply what you learned:",
-  "slideReference": 2,
-  "scenario": "A scientist places a plant in a sealed container with no carbon dioxide. What would happen to the plant's ability to photosynthesize, and why?",
-  "expectedTopics": ["CO2 required", "photosynthesis stops", "glucose production", "starvation"],
-  "sampleAnswer": "The plant would be unable to photosynthesize because CO2 is a required reactant. Without it, the plant cannot produce glucose and would eventually starve.",
-  "correctAnswer": "Photosynthesis would stop because CO2 is essential for the process",
-  "explanation": "This tests the ability to apply knowledge of photosynthesis requirements to a novel situation."
-}`
-}
-
-/**
- * Generate quiz questions based on slideshow content
- * WB001: Quiz generation from slides for World Builder gamification
- *
- * Now level-aware: generates different question types based on explanation level
- * - Simple: yes_no, picture_match, simple fill_blank (K-5)
- * - Standard: mcq, fill_blank, voice (Middle school)
- * - Deep: analytical mcq, find_error, apply_concept (High school+)
- *
- * @param {Object} params - Parameters for quiz generation
- * @param {Array} params.slides - The generated slides with script, subtitle, and imageUrl
- * @param {string} params.topicName - The topic being quizzed
- * @param {string} params.language - Language code: 'en' or 'zh'
- * @param {string} params.explanationLevel - 'simple' | 'standard' | 'deep'
- * @param {string} [params.slideContent] - Legacy newline-delimited slide text (fallback)
- * @returns {Promise<{questions: Array, error: string|null}>}
- */
-export async function generateQuizQuestions(params) {
-  const ai = getAIClient()
-  if (!ai) {
-    return { questions: null, error: 'API_NOT_AVAILABLE' }
-  }
-
-  const { slides = [], topicName = '', language = 'en', explanationLevel = 'standard', slideContent = '' } = params
-
-  // Normalize level
-  const level = ['simple', 'standard', 'deep'].includes(explanationLevel) ? explanationLevel : 'standard'
-
-  // Normalize slide input (supports legacy slideContent string)
-  let normalizedSlides = Array.isArray(slides) ? slides : []
-  if (normalizedSlides.length === 0 && typeof slideContent === 'string' && slideContent.trim()) {
-    normalizedSlides = slideContent
-      .split('\n')
-      .map(line => line.trim())
-      .filter(Boolean)
-      .map(text => ({ subtitle: text }))
-  }
-
-  // Validate slides input
-  const usableSlides = normalizedSlides.filter(slide =>
-    slide && (typeof slide.subtitle === 'string' || typeof slide.script === 'string')
-  )
-
-  if (usableSlides.length === 0) {
-    return { questions: null, error: 'INVALID_SLIDES' }
-  }
-
-  // Build context from slides with clear numbering (0-indexed for slideReference)
-  const slideContext = usableSlides
-    .map((slide, i) => {
-      const content = slide.subtitle || slide.script || ''
-      return `[Slide ${i}]: ${content}`
-    })
-    .join('\n\n')
-
-  const languageInstruction = language === 'zh'
-    ? 'Generate all questions, options, and explanations in Simplified Chinese (简体中文).'
-    : 'Generate all questions, options, and explanations in English.'
-
-  // Get level-specific instructions and examples
-  const levelInstructions = QUIZ_LEVEL_INSTRUCTIONS[level]
-  const levelExamples = LEVEL_QUESTION_EXAMPLES[level]
-
-  const prompt = `You are an educational quiz generator. Based on the slideshow content below, generate quiz questions that test comprehension of the material.
-
-TOPIC: "${topicName}"
-
-SLIDE CONTENT:
-${slideContext}
-
-${languageInstruction}
-
-${levelInstructions}
-
-GENERAL REQUIREMENTS:
-1. Each question MUST reference a specific slide number (0-indexed: Slide 0, Slide 1, etc.)
-2. Questions should test understanding, not just recall of exact words
-3. Every question MUST have a correctAnswer field
-4. For picture_match questions, imageOptions should reference existing slide indices (0 to ${usableSlides.length - 1})
-
-${levelExamples}
-
-OUTPUT FORMAT: Return a JSON object with a "questions" array containing the questions.
-
-Generate the quiz questions now:`
-
-  try {
-    const response = await ai.models.generateContent({
-      model: FAST_MODEL,
-      contents: prompt,
-      config: {
-        temperature: 0.6,
-        maxOutputTokens: 2048,
-      }
-    })
-
-    const text = response.text || ''
-    const jsonStr = repairJSON(extractJSON(text))
-    const parsed = JSON.parse(jsonStr)
-
-    // Validate the response structure
-    if (!parsed.questions || !Array.isArray(parsed.questions)) {
-      return { questions: null, error: 'INVALID_RESPONSE' }
-    }
-
-    // Validate and normalize each question
-    // Extended types: simple level adds yes_no, picture_match, odd_one_out, sort_groups, spot_it; standard adds sequence; deep level adds find_error, apply_concept
-    const validTypes = ['mcq', 'fill_blank', 'voice', 'yes_no', 'picture_match', 'find_error', 'apply_concept', 'odd_one_out', 'sort_groups', 'spot_it', 'sequence']
-    const validatedQuestions = parsed.questions
-      .filter(q => q && typeof q === 'object')
-      .map((q, index) => {
-        // Ensure required fields
-        const question = {
-          id: q.id || `q${index + 1}`,
-          type: validTypes.includes(q.type) ? q.type : 'mcq',
-          question: q.question || '',
-          slideReference: typeof q.slideReference === 'number'
-            ? Math.max(0, Math.min(usableSlides.length - 1, q.slideReference))
-            : 0,
-          correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : '',
-          explanation: q.explanation || '',
-        }
-
-        // Add type-specific fields
-        if (question.type === 'mcq') {
-          question.options = Array.isArray(q.options) ? q.options.slice(0, 4) : []
-          question.correctIndex = typeof q.correctIndex === 'number'
-            ? Math.max(0, Math.min(3, q.correctIndex))
-            : 0
-          // Ensure correctAnswer matches the selected option
-          if (question.options.length > question.correctIndex) {
-            question.correctAnswer = question.options[question.correctIndex]
-          }
-        } else if (question.type === 'fill_blank') {
-          question.blankSentence = q.blankSentence || ''
-          question.acceptableAnswers = Array.isArray(q.acceptableAnswers)
-            ? q.acceptableAnswers
-            : [question.correctAnswer]
-          // Word options for tap-to-select UI (correct answer + distractors)
-          // Ensure wordOptions includes the correct answer
-          if (Array.isArray(q.wordOptions) && q.wordOptions.length >= 2) {
-            question.wordOptions = q.wordOptions.slice(0, 5) // Max 5 options
-            // Ensure correct answer is in the options
-            if (!question.wordOptions.includes(question.correctAnswer)) {
-              question.wordOptions[0] = question.correctAnswer
-            }
-          } else {
-            // Generate default word options if not provided
-            question.wordOptions = [question.correctAnswer]
-          }
-        } else if (question.type === 'voice') {
-          question.expectedTopics = Array.isArray(q.expectedTopics)
-            ? q.expectedTopics
-            : []
-          question.sampleAnswer = q.sampleAnswer || ''
-        } else if (question.type === 'yes_no') {
-          // Simple level: true/false statement with optional hint for diagram reference
-          question.statement = q.statement || question.question
-          question.correctAnswer = typeof q.correctAnswer === 'boolean' ? q.correctAnswer : true
-          // Include hint if provided (references slide diagram for visual learning)
-          if (q.hint && typeof q.hint === 'string') {
-            question.hint = q.hint
-          }
-        } else if (question.type === 'picture_match') {
-          // Simple level: match concept to slide image
-          question.imageOptions = Array.isArray(q.imageOptions)
-            ? q.imageOptions.map(i => Math.max(0, Math.min(usableSlides.length - 1, i))).slice(0, 4)
-            : [0, 1, 2, 3].filter(i => i < usableSlides.length)
-          question.correctSlideIndex = typeof q.correctSlideIndex === 'number'
-            ? Math.max(0, Math.min(usableSlides.length - 1, q.correctSlideIndex))
-            : 0
-        } else if (question.type === 'find_error') {
-          // Deep level: identify incorrect statement
-          question.incorrectStatement = q.incorrectStatement || ''
-        } else if (question.type === 'apply_concept') {
-          // Deep level: apply knowledge to new scenario
-          question.scenario = q.scenario || ''
-          question.expectedTopics = Array.isArray(q.expectedTopics)
-            ? q.expectedTopics
-            : []
-          question.sampleAnswer = q.sampleAnswer || ''
-        } else if (question.type === 'odd_one_out') {
-          // Simple level: find what doesn't belong (4 items, 1 is odd)
-          question.items = Array.isArray(q.items)
-            ? q.items.slice(0, 4).map(item => ({
-                text: item.text || '',
-                imageUrl: item.imageUrl || null,
-                isOdd: !!item.isOdd
-              }))
-            : []
-          // Ensure exactly one item is marked as odd
-          const oddItems = question.items.filter(item => item.isOdd)
-          if (oddItems.length !== 1 && question.items.length > 0) {
-            // Fix: mark the last item as odd if none marked
-            question.items.forEach((item, i) => {
-              item.isOdd = i === question.items.length - 1
-            })
-          }
-          // Set correctAnswer to the odd item's text
-          const oddItem = question.items.find(item => item.isOdd)
-          if (oddItem) {
-            question.correctAnswer = oddItem.text
-          }
-        } else if (question.type === 'sort_groups') {
-          // Simple level: sort items into 2 categories
-          question.items = Array.isArray(q.items) ? q.items.slice(0, 6) : []
-          question.groups = Array.isArray(q.groups)
-            ? q.groups.slice(0, 2).map(g => ({
-                name: g.name || '',
-                icon: g.icon || ''
-              }))
-            : []
-          question.correctSorting = q.correctSorting && typeof q.correctSorting === 'object'
-            ? q.correctSorting
-            : {}
-          // Set correctAnswer to a summary for display
-          question.correctAnswer = question.groups.map(g =>
-            `${g.name}: ${(question.correctSorting[g.name] || []).join(', ')}`
-          ).join(' | ')
-        } else if (question.type === 'spot_it') {
-          // Simple level: find/tap a specific area in an image
-          question.correctArea = q.correctArea && typeof q.correctArea === 'object'
-            ? {
-                x: q.correctArea.x || 0.5,
-                y: q.correctArea.y || 0.5,
-                radius: q.correctArea.radius || 0.15
-              }
-            : { x: 0.5, y: 0.5, radius: 0.15 }
-          if (q.hint) question.hint = q.hint
-        } else if (question.type === 'sequence') {
-          // Standard level: put items in correct order
-          question.items = Array.isArray(q.items) ? q.items.slice(0, 6) : []
-          question.correctSequence = Array.isArray(q.correctSequence)
-            ? q.correctSequence
-            : question.items.map((_, i) => i) // Default: current order is correct
-          question.correctAnswer = question.correctSequence.map(i => question.items[i] || '').join(' → ')
-        }
-
-        return question
-      })
-      .filter(q => q.question && (q.correctAnswer !== undefined && q.correctAnswer !== '')) // Only keep valid questions
-
-    // Validate we have minimum questions (varies by level)
-    const minQuestions = level === 'simple' ? 3 : 4
-    if (validatedQuestions.length < minQuestions) {
-      return { questions: null, error: 'INSUFFICIENT_QUESTIONS' }
-    }
-
-    // Validate we have mixed question types
-    const types = new Set(validatedQuestions.map(q => q.type))
-    if (types.size < 2) {
-      // If all same type, this is still valid but not ideal
-      // The prompt should prevent this, but we allow it
-    }
-
-    return {
-      questions: validatedQuestions.slice(0, 6), // Cap at 6 questions
-      error: null
-    }
-  } catch (error) {
-    console.error('[Gemini] Quiz generation error:', error.message)
-
-    if (error.message?.includes('quota') || error.message?.includes('rate')) {
-      return { questions: null, error: 'RATE_LIMITED' }
-    }
-    if (error.message?.includes('JSON')) {
-      return { questions: null, error: 'PARSE_ERROR' }
-    }
-
-    return { questions: null, error: error.message || 'UNKNOWN_ERROR' }
-  }
-}
-
 /**
  * Generate a "What If?" scenario with prediction cards.
  * Creates an engaging hypothetical scenario with 4 prediction cards (2 correct, 2 wrong).
@@ -3317,6 +2570,24 @@ ${slideContext}
         {"id": "1b", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]},
         {"id": "1c", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]}
       ]
+    },
+    "2": {
+      "prompt": "下一步会发生什么？",
+      "icon": "表情符号",
+      "choices": [
+        {"id": "2a", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]},
+        {"id": "2b", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]},
+        {"id": "2c", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]}
+      ]
+    },
+    "3": {
+      "prompt": "故事如何收尾？",
+      "icon": "表情符号",
+      "choices": [
+        {"id": "3a", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]},
+        {"id": "3b", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]},
+        {"id": "3c", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]}
+      ]
     }
   }
 }
@@ -3329,7 +2600,7 @@ ${slideContext}
 - missionHook应该激动人心且适合儿童，最多2-3句话
 - sceneImagePrompt应该描述生成插图的生动场景
 - conceptCards应该为每个概念配一张卡片，带有相关的表情符号图标
-- 第1章应该有正好3个选择，每个都融入不同的概念
+- 第1、2、3章都应有正好3个选择，每个都融入不同的概念
 - 每个选择应该是1-2句引人入胜的叙述
 
 只返回JSON，不要其他文本。`
@@ -3358,6 +2629,24 @@ Return a JSON object with:
         {"id": "1b", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]},
         {"id": "1c", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]}
       ]
+    },
+    "2": {
+      "prompt": "What challenge appears next?",
+      "icon": "emoji",
+      "choices": [
+        {"id": "2a", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]},
+        {"id": "2b", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]},
+        {"id": "2c", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]}
+      ]
+    },
+    "3": {
+      "prompt": "How should the story end?",
+      "icon": "emoji",
+      "choices": [
+        {"id": "3a", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]},
+        {"id": "3b", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]},
+        {"id": "3c", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]}
+      ]
     }
   }
 }
@@ -3371,7 +2660,7 @@ Requirements:
 - missionHook should be exciting and kid-friendly, 2-3 sentences max
 - sceneImagePrompt should describe a vivid scene for generating an illustration
 - conceptCards should have one card per concept with a relevant emoji icon
-- Chapter 1 should have exactly 3 choices, each weaving in different concepts
+- Chapters 1, 2, and 3 should each have exactly 3 choices, each weaving in different concepts
 - Each choice should be 1-2 sentences of engaging narrative
 
 ${languageNote}
@@ -3412,20 +2701,51 @@ Return ONLY the JSON object, no other text.`
         })).filter(c => c.concept)
       : conceptChecklist.map(c => ({ concept: c, icon: '📝', description: '' }))
 
-    const chapters = parsed.chapters && typeof parsed.chapters === 'object' ? {} : {}
-    if (parsed.chapters && parsed.chapters['1']) {
-      const ch1 = parsed.chapters['1']
-      chapters['1'] = {
-        prompt: typeof ch1.prompt === 'string' ? ch1.prompt.trim() : 'Where does our story begin?',
-        icon: typeof ch1.icon === 'string' ? ch1.icon.trim() : '📖',
-        choices: Array.isArray(ch1.choices)
-          ? ch1.choices.filter(c => c && typeof c === 'object').map(c => ({
-              id: typeof c.id === 'string' ? c.id : '',
-              emoji: typeof c.emoji === 'string' ? c.emoji : '📖',
-              text: typeof c.text === 'string' ? c.text.trim() : '',
-              conceptHints: Array.isArray(c.conceptHints) ? c.conceptHints.filter(h => typeof h === 'string') : []
-            })).filter(c => c.text).slice(0, 3)
+    const defaultChapterPrompts = language === 'zh'
+      ? {
+          1: '我们的故事从哪里开始？',
+          2: '下一步会发生什么？',
+          3: '故事如何收尾？',
+        }
+      : {
+          1: 'Where does our story begin?',
+          2: 'What challenge appears next?',
+          3: 'How should the story end?',
+        }
+
+    const chapters = {}
+    if (parsed.chapters && typeof parsed.chapters === 'object') {
+      for (const chapterNumber of [1, 2, 3]) {
+        const chapterKey = String(chapterNumber)
+        const chapterData = parsed.chapters?.[chapterKey]
+        if (!chapterData || typeof chapterData !== 'object') {
+          continue
+        }
+
+        const chapterChoices = Array.isArray(chapterData.choices)
+          ? chapterData.choices.filter(c => c && typeof c === 'object').map((choice, choiceIndex) => ({
+              id: typeof choice.id === 'string' && choice.id.trim()
+                ? choice.id.trim()
+                : `${chapterNumber}${String.fromCharCode(97 + choiceIndex)}`,
+              emoji: typeof choice.emoji === 'string' && choice.emoji.trim()
+                ? choice.emoji.trim()
+                : '📖',
+              text: typeof choice.text === 'string' ? choice.text.trim() : '',
+              conceptHints: Array.isArray(choice.conceptHints)
+                ? choice.conceptHints.filter(h => typeof h === 'string' && h.trim()).map(h => h.trim()).slice(0, 3)
+                : []
+            })).filter(choice => choice.text).slice(0, 3)
           : []
+
+        chapters[chapterKey] = {
+          prompt: typeof chapterData.prompt === 'string' && chapterData.prompt.trim()
+            ? chapterData.prompt.trim()
+            : defaultChapterPrompts[chapterNumber],
+          icon: typeof chapterData.icon === 'string' && chapterData.icon.trim()
+            ? chapterData.icon.trim()
+            : '📖',
+          choices: chapterChoices,
+        }
       }
     }
 
@@ -3456,15 +2776,15 @@ Return ONLY the JSON object, no other text.`
  * @param {string} params.topicName
  * @param {string[]} params.conceptChecklist
  * @param {Array<{chapter: number, selectedText: string}>} params.previousChapters
- * @param {number} params.currentChapter - 2 or 3
+ * @param {number} params.currentChapter - 2, 3, or 4
  * @param {string} params.imageStyle
  * @param {string} params.language - 'en' or 'zh'
- * @returns {Promise<{illustration: {imagePrompt: string, sceneDescription: string}, nextChapter: Object|null, conceptsFound: string[], error: string|null}>}
+ * @returns {Promise<{illustration: {imagePrompt: string, sceneDescription: string, panelCaptions: string[]}, nextChapter: Object|null, conceptsFound: string[], error: string|null}>}
  */
 export async function generateStoryChapter({ topicName, conceptChecklist = [], previousChapters = [], currentChapter, imageStyle, language = 'en' }) {
   const ai = getAIClient()
   if (!ai) {
-    return { illustration: { imagePrompt: '', sceneDescription: '' }, nextChapter: null, conceptsFound: [], error: 'API_NOT_AVAILABLE' }
+    return { illustration: { imagePrompt: '', sceneDescription: '', panelCaptions: [] }, nextChapter: null, conceptsFound: [], error: 'API_NOT_AVAILABLE' }
   }
 
   try {
@@ -3475,10 +2795,10 @@ export async function generateStoryChapter({ topicName, conceptChecklist = [], p
 
     const conceptList = conceptChecklist.join(', ')
 
-    const chapterNames = { 2: 'The Adventure', 3: 'The Ending' }
+    const chapterNames = { 2: 'The Adventure', 3: 'The Ending', 4: 'Final Illustration' }
     const chapterName = chapterNames[currentChapter] || `Chapter ${currentChapter}`
 
-    const isLastChapter = currentChapter >= 3
+    const isLastChapter = currentChapter >= 4
 
     // Build the prompt
     const nextChapterSection = isLastChapter
@@ -3506,8 +2826,14 @@ ${previousContext}
 返回JSON:
 {
   "illustration": {
-    "imagePrompt": "为上一个选择生成插图的详细提示（${imageStyle}）",
-    "sceneDescription": "简短的场景描述"
+    "imagePrompt": "4格漫画页插图提示：描述一个2x2网格，包含Panel 1到Panel 4连续剧情（${imageStyle}）",
+    "sceneDescription": "本页场景摘要（1句话）",
+    "panelCaptions": [
+      "Panel 1 字幕（1句话）",
+      "Panel 2 字幕（1句话）",
+      "Panel 3 字幕（1句话）",
+      "Panel 4 字幕（1句话）"
+    ]
   },
   ${isLastChapter ? '"nextChapter": null' : `"nextChapter": {
     "prompt": "下一章的问题",
@@ -3520,8 +2846,10 @@ ${previousContext}
 }
 
 要求:
-- 插图提示应该详细，适合生成${imageStyle}风格的图片
-- 场景描述简洁
+- 插图提示应明确描述4格漫画页（2x2布局），每格展示连续剧情，风格为${imageStyle}
+- imagePrompt应强调：清晰分格边框、从左上到右上再到左下到右下的阅读顺序、画面中不含文字
+- 场景描述简洁（1句话）
+- panelCaptions必须有4条短句，每条对应一个分镜
 - 如果不是最后一章，下一章应有3个选择
 - 选择应与之前的故事连贯
 - 每个选择应融入不同的概念
@@ -3540,22 +2868,30 @@ Current chapter: ${currentChapter} - ${chapterName}
 Return a JSON object:
 {
   "illustration": {
-    "imagePrompt": "Detailed prompt for illustrating the previous selection (${imageStyle})",
-    "sceneDescription": "Brief scene description"
+    "imagePrompt": "4-panel manga page prompt: describe a 2x2 grid with sequential beats [Panel 1]...[Panel 4] (${imageStyle})",
+    "sceneDescription": "Overall scene summary in 1 sentence",
+    "panelCaptions": [
+      "Panel 1 caption (1 sentence)",
+      "Panel 2 caption (1 sentence)",
+      "Panel 3 caption (1 sentence)",
+      "Panel 4 caption (1 sentence)"
+    ]
   },
   ${nextChapterSection},
   "conceptsFound": ["concepts detected in previous selections"]
 }
 
 Requirements:
-- illustration imagePrompt should be detailed, suitable for generating a ${imageStyle} style image
+- illustration imagePrompt should explicitly describe a 4-panel manga/comic page in a 2x2 grid, suitable for ${imageStyle}
+- imagePrompt should enforce: clear panel borders, sequential flow (top-left -> top-right -> bottom-left -> bottom-right), and no text in the image
 - sceneDescription should be concise (1 sentence)
+- panelCaptions must contain exactly 4 short sentences (one per panel) that narrate sequential story beats
 - If not the last chapter, nextChapter should have exactly 3 choices
 - Choices must be coherent with the story so far
 - Each choice should weave in different concepts from the checklist
 - conceptsFound should list concepts from the checklist that appeared in previous selections
 - Keep choice text to 1-2 engaging sentences
-${isLastChapter ? '- This is the final chapter, so nextChapter should be null' : `- Chapter ${currentChapter + 1} name: ${currentChapter + 1 === 3 ? 'The Ending' : 'Next'}`}
+${isLastChapter ? '- This is the final chapter, so nextChapter should be null' : currentChapter === 3 ? '- nextChapter choices should be about how the story concludes - these are the final choices before the ending' : `- Chapter ${currentChapter + 1} name: ${chapterNames[currentChapter + 1] || 'Next'}`}
 
 Return ONLY the JSON object, no other text.`
 
@@ -3574,18 +2910,24 @@ Return ONLY the JSON object, no other text.`
     const parsed = JSON.parse(jsonStr)
 
     if (!parsed || typeof parsed !== 'object') {
-      return { illustration: { imagePrompt: '', sceneDescription: '' }, nextChapter: null, conceptsFound: [], error: 'INVALID_RESPONSE' }
+      return { illustration: { imagePrompt: '', sceneDescription: '', panelCaptions: [] }, nextChapter: null, conceptsFound: [], error: 'INVALID_RESPONSE' }
     }
 
     // Parse illustration
     const illustration = {
       imagePrompt: typeof parsed.illustration?.imagePrompt === 'string' ? parsed.illustration.imagePrompt.trim() : '',
-      sceneDescription: typeof parsed.illustration?.sceneDescription === 'string' ? parsed.illustration.sceneDescription.trim() : ''
+      sceneDescription: typeof parsed.illustration?.sceneDescription === 'string' ? parsed.illustration.sceneDescription.trim() : '',
+      panelCaptions: Array.isArray(parsed.illustration?.panelCaptions)
+        ? parsed.illustration.panelCaptions
+          .filter((caption) => typeof caption === 'string' && caption.trim())
+          .map((caption) => caption.trim())
+          .slice(0, 4)
+        : []
     }
 
     // Parse next chapter (null for last chapter)
     let nextChapter = null
-    if (!isLastChapter && parsed.nextChapter && typeof parsed.nextChapter === 'object') {
+    if (parsed.nextChapter && typeof parsed.nextChapter === 'object') {
       nextChapter = {
         prompt: typeof parsed.nextChapter.prompt === 'string' ? parsed.nextChapter.prompt.trim() : 'What happens next?',
         icon: typeof parsed.nextChapter.icon === 'string' ? parsed.nextChapter.icon.trim() : '📖',
@@ -3610,13 +2952,135 @@ Return ONLY the JSON object, no other text.`
     console.error('[Gemini] Story chapter generation error:', error.message)
 
     if (error.message?.includes('quota') || error.message?.includes('rate')) {
-      return { illustration: { imagePrompt: '', sceneDescription: '' }, nextChapter: null, conceptsFound: [], error: 'RATE_LIMITED' }
+      return { illustration: { imagePrompt: '', sceneDescription: '', panelCaptions: [] }, nextChapter: null, conceptsFound: [], error: 'RATE_LIMITED' }
     }
     if (error.message?.includes('JSON')) {
-      return { illustration: { imagePrompt: '', sceneDescription: '' }, nextChapter: null, conceptsFound: [], error: 'PARSE_ERROR' }
+      return { illustration: { imagePrompt: '', sceneDescription: '', panelCaptions: [] }, nextChapter: null, conceptsFound: [], error: 'PARSE_ERROR' }
     }
 
-    return { illustration: { imagePrompt: '', sceneDescription: '' }, nextChapter: null, conceptsFound: [], error: error.message || 'UNKNOWN_ERROR' }
+    return { illustration: { imagePrompt: '', sceneDescription: '', panelCaptions: [] }, nextChapter: null, conceptsFound: [], error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
+ * Generate finalized story scenes from all selected answers in a single pass.
+ *
+ * @param {Object} params
+ * @param {string} params.topicName
+ * @param {string[]} params.conceptChecklist
+ * @param {Array<{chapterNumber: number, selectedText: string, conceptHints?: string[]}>} params.answers
+ * @param {string} params.imageStyle
+ * @param {string} params.language - 'en' or 'zh'
+ * @returns {Promise<{scenes: Array<{chapterNumber: number, chapterTitle: string, narrativeText: string, sceneDescription: string, imagePrompt: string, panelCaptions: string[]}>, conceptsFound: string[], error: string|null}>}
+ */
+export async function generateFinalStoryFromAnswers({
+  topicName,
+  conceptChecklist = [],
+  answers = [],
+  imageStyle,
+  language = 'en',
+}) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { scenes: [], conceptsFound: [], error: 'API_NOT_AVAILABLE' }
+  }
+
+  try {
+    const normalizedAnswers = Array.isArray(answers)
+      ? answers
+        .filter(answer => answer && typeof answer === 'object' && typeof answer.selectedText === 'string' && answer.selectedText.trim())
+        .map((answer, index) => ({
+          chapterNumber: typeof answer.chapterNumber === 'number' && Number.isFinite(answer.chapterNumber)
+            ? answer.chapterNumber
+            : index + 1,
+          selectedText: answer.selectedText.trim(),
+          conceptHints: Array.isArray(answer.conceptHints)
+            ? answer.conceptHints.filter((hint) => typeof hint === 'string' && hint.trim()).map((hint) => hint.trim()).slice(0, 4)
+            : [],
+        }))
+      : []
+
+    const answerContext = normalizedAnswers
+      .map(answer => {
+        const hints = answer.conceptHints.length > 0 ? ` (concept hints: ${answer.conceptHints.join(', ')})` : ''
+        return `Chapter ${answer.chapterNumber} answer: ${answer.selectedText}${hints}`
+      })
+      .join('\n')
+
+    const conceptList = conceptChecklist.join(', ')
+
+    const prompt = language === 'zh'
+      ? `你是一个儿童故事助手。请根据用户已经选择的三段剧情，生成完整的三页漫画故事（每页4格）。\n\n主题: ${topicName}\n概念清单: ${conceptList}\n用户选择:\n${answerContext}\n\n请返回JSON:\n{\n  \"scenes\": [\n    {\n      \"chapterNumber\": 1,\n      \"chapterTitle\": \"第1章标题\",\n      \"narrativeText\": \"该章完整叙述（2-4句）\",\n      \"sceneDescription\": \"本页场景摘要（1句）\",\n      \"imagePrompt\": \"4格漫画页提示：描述2x2网格，按顺序讲述剧情（${imageStyle}）\",\n      \"panelCaptions\": [\"第1格字幕\", \"第2格字幕\", \"第3格字幕\", \"第4格字幕\"]\n    },\n    {\n      \"chapterNumber\": 2,\n      \"chapterTitle\": \"第2章标题\",\n      \"narrativeText\": \"该章完整叙述（2-4句）\",\n      \"sceneDescription\": \"本页场景摘要（1句）\",\n      \"imagePrompt\": \"4格漫画页提示：描述2x2网格，按顺序讲述剧情（${imageStyle}）\",\n      \"panelCaptions\": [\"第1格字幕\", \"第2格字幕\", \"第3格字幕\", \"第4格字幕\"]\n    },\n    {\n      \"chapterNumber\": 3,\n      \"chapterTitle\": \"第3章标题\",\n      \"narrativeText\": \"该章完整叙述（2-4句）\",\n      \"sceneDescription\": \"本页场景摘要（1句）\",\n      \"imagePrompt\": \"4格漫画页提示：描述2x2网格，按顺序讲述剧情（${imageStyle}）\",\n      \"panelCaptions\": [\"第1格字幕\", \"第2格字幕\", \"第3格字幕\", \"第4格字幕\"]\n    }\n  ],\n  \"conceptsFound\": [\"命中的概念\"]\n}\n\n要求:\n- scenes必须正好3章，对应chapterNumber 1,2,3\n- 每章都必须有panelCaptions且正好4条短句\n- imagePrompt必须强调：2x2分格、清晰边框、从左上到右上再到左下到右下、画面里不要文字\n- chapterTitle要简短有趣\n- narrativeText要和用户选择一致\n- conceptsFound仅包含概念清单中的词\n\n只返回JSON。`
+      : `You are a children's story assistant. Based on the user's selected answers, generate a complete 3-page manga story (4 panels per page).\n\nTopic: ${topicName}\nConcept checklist: ${conceptList}\nSelected answers:\n${answerContext}\n\nReturn JSON:\n{\n  \"scenes\": [\n    {\n      \"chapterNumber\": 1,\n      \"chapterTitle\": \"Chapter 1 title\",\n      \"narrativeText\": \"Full chapter narration (2-4 sentences)\",\n      \"sceneDescription\": \"One-sentence scene summary\",\n      \"imagePrompt\": \"4-panel manga page prompt describing a 2x2 sequential layout (${imageStyle})\",\n      \"panelCaptions\": [\"Panel 1 caption\", \"Panel 2 caption\", \"Panel 3 caption\", \"Panel 4 caption\"]\n    },\n    {\n      \"chapterNumber\": 2,\n      \"chapterTitle\": \"Chapter 2 title\",\n      \"narrativeText\": \"Full chapter narration (2-4 sentences)\",\n      \"sceneDescription\": \"One-sentence scene summary\",\n      \"imagePrompt\": \"4-panel manga page prompt describing a 2x2 sequential layout (${imageStyle})\",\n      \"panelCaptions\": [\"Panel 1 caption\", \"Panel 2 caption\", \"Panel 3 caption\", \"Panel 4 caption\"]\n    },\n    {\n      \"chapterNumber\": 3,\n      \"chapterTitle\": \"Chapter 3 title\",\n      \"narrativeText\": \"Full chapter narration (2-4 sentences)\",\n      \"sceneDescription\": \"One-sentence scene summary\",\n      \"imagePrompt\": \"4-panel manga page prompt describing a 2x2 sequential layout (${imageStyle})\",\n      \"panelCaptions\": [\"Panel 1 caption\", \"Panel 2 caption\", \"Panel 3 caption\", \"Panel 4 caption\"]\n    }\n  ],\n  \"conceptsFound\": [\"matched concepts\"]\n}\n\nRequirements:\n- scenes must include exactly 3 chapters with chapterNumber 1, 2, and 3\n- each scene must contain exactly 4 short panelCaptions\n- imagePrompt must enforce: 2x2 panel grid, clear panel borders, top-left -> top-right -> bottom-left -> bottom-right story flow, and no text in the image\n- chapterTitle should be short and kid-friendly\n- narrativeText must stay coherent with the selected answers\n- conceptsFound must only include concepts from the checklist\n\nReturn ONLY JSON.`
+
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.85,
+        maxOutputTokens: 2400,
+        responseMimeType: 'application/json',
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    if (!parsed || typeof parsed !== 'object') {
+      return { scenes: [], conceptsFound: [], error: 'INVALID_RESPONSE' }
+    }
+
+    const scenes = Array.isArray(parsed.scenes)
+      ? parsed.scenes
+        .filter(scene => scene && typeof scene === 'object')
+        .slice(0, 3)
+        .map((scene, index) => {
+          const chapterNumber = index + 1
+          return {
+            chapterNumber,
+            chapterTitle: typeof scene.chapterTitle === 'string' && scene.chapterTitle.trim()
+              ? scene.chapterTitle.trim()
+              : `Chapter ${chapterNumber}`,
+            narrativeText: typeof scene.narrativeText === 'string' && scene.narrativeText.trim()
+              ? scene.narrativeText.trim()
+              : normalizedAnswers[index]?.selectedText || '',
+            sceneDescription: typeof scene.sceneDescription === 'string' ? scene.sceneDescription.trim() : '',
+            imagePrompt: typeof scene.imagePrompt === 'string' ? scene.imagePrompt.trim() : '',
+            panelCaptions: Array.isArray(scene.panelCaptions)
+              ? scene.panelCaptions
+                .filter((caption) => typeof caption === 'string' && caption.trim())
+                .map((caption) => caption.trim())
+                .slice(0, 4)
+              : [],
+          }
+        })
+      : []
+
+    if (scenes.length !== 3 || scenes.some((scene) => !scene.imagePrompt || scene.panelCaptions.length === 0)) {
+      return { scenes: [], conceptsFound: [], error: 'INVALID_RESPONSE' }
+    }
+
+    const checklistSet = new Set(conceptChecklist.map((concept) => String(concept || '').trim()).filter(Boolean))
+    const conceptsFound = Array.isArray(parsed.conceptsFound)
+      ? parsed.conceptsFound
+        .filter(concept => typeof concept === 'string' && concept.trim())
+        .map(concept => concept.trim())
+        .filter(concept => checklistSet.size === 0 || checklistSet.has(concept))
+      : []
+
+    return { scenes, conceptsFound, error: null }
+  } catch (error) {
+    console.error('[Gemini] Final story generation error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { scenes: [], conceptsFound: [], error: 'RATE_LIMITED' }
+    }
+    if (error.message?.includes('JSON')) {
+      return { scenes: [], conceptsFound: [], error: 'PARSE_ERROR' }
+    }
+
+    return { scenes: [], conceptsFound: [], error: error.message || 'UNKNOWN_ERROR' }
   }
 }
 
@@ -3755,9 +3219,6 @@ export default {
   generateSuggestedQuestions,
   determineQueryComplexity,
   determineSemanticRelation,
-  generateSocraticQuestion,
-  evaluateSocraticAnswer,
-  generateQuizQuestions,
   classifyTopicZone,
   generateWorldPiecePrompt,
   generateWorldPieceImage,
@@ -3767,5 +3228,6 @@ export default {
   detectLanguage,
   generateStoryPrompt,
   generateStoryChapter,
+  generateFinalStoryFromAnswers,
   extractStoryScene,
 }

@@ -146,13 +146,14 @@ import topicRoutes from './routes/topic.js'
 import voiceRoutes from './routes/voice.js'
 import chitchatRoutes from './routes/chitchat.js'
 import slidesRoutes from './routes/slides.js'
-import socraticRoutes from './routes/socratic.js'
 import userRoutes from './routes/user.js'
-import quizRoutes from './routes/quiz.js'
 import worldRoutes from './routes/world.js'
 import randomTopicRoutes from './routes/randomTopic.js'
 import learnRoutes from './routes/learn.js'
 import graphRoutes from './routes/graph.js'
+import storiesRoutes from './routes/stories.js'
+import modesRoutes from './routes/modes.js'
+import migrationRoutes from './routes/migration.js'
 
 app.use('/api/generate', generateRoutes)
 app.use('/api/classify', classifyRoutes)
@@ -162,13 +163,14 @@ app.use('/api/topic', topicRoutes)
 app.use('/api/voice', voiceRoutes)
 app.use('/api/chitchat', chitchatRoutes)
 app.use('/api/slides', slidesRoutes)
-app.use('/api/socratic', socraticRoutes)
 app.use('/api/user', userRoutes)
-app.use('/api/quiz', quizRoutes)
 app.use('/api/world', worldRoutes)
 app.use('/api/random-topic', randomTopicRoutes)
 app.use('/api/learn', learnRoutes)
 app.use('/api/graph', graphRoutes)
+app.use('/api/stories', storiesRoutes)
+app.use('/api/modes', modesRoutes)
+app.use('/api/migration', migrationRoutes)
 
 // Serve frontend static files in production
 if (process.env.NODE_ENV === 'production') {

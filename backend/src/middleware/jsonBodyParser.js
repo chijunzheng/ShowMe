@@ -26,11 +26,20 @@ export function createJsonBodyParserMiddleware() {
   return function jsonBodyParser(req, res, next) {
     const path = req.path || ''
 
-    if (path.startsWith('/api/slides') || path.startsWith('/api/world/piece')) {
+    if (
+      path.startsWith('/api/slides') ||
+      path.startsWith('/api/world/piece') ||
+      path.startsWith('/api/migration')
+    ) {
       return largeJson(req, res, next)
     }
 
-    if (path.startsWith('/api/learn')) {
+    if (
+      path.startsWith('/api/learn') ||
+      path.startsWith('/api/graph') ||
+      path.startsWith('/api/stories') ||
+      path.startsWith('/api/modes')
+    ) {
       return learnJson(req, res, next)
     }
 
@@ -39,4 +48,3 @@ export function createJsonBodyParserMiddleware() {
 }
 
 export default createJsonBodyParserMiddleware
-
