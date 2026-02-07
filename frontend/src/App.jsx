@@ -1,1007 +1,182 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import FunFactCard from './components/FunFactCard'
-import SuggestionCard from './components/SuggestionCard'
 import Toast from './components/Toast'
-import TopicHeader from './components/TopicHeader'
-import SectionDivider from './components/SectionDivider'
 import TopicSidebar from './components/TopicSidebar'
-import HighlightOverlay from './components/HighlightOverlay'
-import LevelCard from './components/LevelCard'
-import RegenerateDropdown from './components/RegenerateDropdown'
-import StreamingSubtitle from './components/StreamingSubtitle'
+import { HomeScreen, ListeningScreen, GeneratingScreen, ErrorScreen, LoadingTopicScreen, SlideshowScreen, ModeSelectorScreen } from './components/screens'
+import { MysteryLab, WonderLab, StoryStudio } from './components/LearnModes'
+import RaiseHandButton from './components/RaiseHandButton'
 import { useWebSocket, PROGRESS_TYPES } from './hooks/useWebSocket'
+import useSlideAudio from './hooks/useSlideAudio.js'
+import useVoiceAgent from './hooks/useVoiceAgent.js'
+import useQuestionHandler from './hooks/useQuestionHandler.js'
 import logger from './utils/logger'
 import { playMicOnSound, playRecordingCompleteSound, playAchievementSound } from './utils/soundEffects'
-import SocraticMode from './components/SocraticMode'
-import StreakCounter from './components/StreakCounter'
 import AchievementToast from './components/AchievementToast'
 import Confetti from './components/Confetti'
 import useUserProgress from './hooks/useUserProgress'
+// WB018: World Builder gamification imports
+import BottomTabBar from './components/BottomTabBar'
+// Category utilities (migrated from MagicalTree)
+import { calculateTreeLevel, getZoneForCategory } from './utils/categoryUtils'
+import TierUpCelebration from './components/TierUpCelebration'
+// WB015: Quick mode XP toast
+import QuickXpToast from './components/QuickXpToast'
+import { ProgressTab } from './components/ProgressTab'
+import useWorldStats from './hooks/useWorldStats'
+import useSlideshowControl from './hooks/useSlideshowControl.js'
+import useCelebrations from './hooks/useCelebrations.js'
+import useTabNavigation from './hooks/useTabNavigation.js'
+import useKnowledgeGraph from './hooks/useKnowledgeGraph'
+import useReviewSession from './hooks/useReviewSession'
+import { toApiUrl } from './utils/api'
+import { getClientId } from './utils/clientId'
+import { loadGraphFromStorage } from './utils/graphMigration'
+import { loadStoriesFromStorage, loadStoryContent } from './utils/storyStorage'
+// WB021: Quiz flow screens for dedicated quiz experience
 
-// App states
-const UI_STATE = {
-  HOME: 'home',
-  LISTENING: 'listening',
-  GENERATING: 'generating',
-  SLIDESHOW: 'slideshow',
-  SOCRATIC: 'socratic', // SOCRATIC-003: Socratic questioning after slideshow
-  ERROR: 'error',
-}
+// Import constants from centralized config
+import {
+  UI_STATE,
+  EXPLANATION_LEVEL,
+  PERMISSION_STATE,
+  AUDIO_CONFIG,
+  TTS_PREFETCH_CONFIG,
+  SLIDE_TIMING,
+  HOME_HEADLINES,
+  GENERATION_TIMEOUT,
+  STORAGE_LIMITS,
+  STORAGE_KEYS,
+  LEVEL_CONFIG,
+  API_ENDPOINTS,
+  LOCAL_PROGRESS,
+  GENERATION_PROGRESS_PERCENT,
+  PROGRESS_MESSAGES,
+} from './constants/appConfig.js'
 
-// Explanation level options
-const EXPLANATION_LEVEL = {
-  SIMPLE: 'simple',
-  STANDARD: 'standard',
-  DEEP: 'deep',
-}
+// Import storage utilities
+import {
+  getStoredClientId,
+  persistTopicSlides,
+  loadTopicSlidesFromStorage,
+  loadSlidesForTopic,
+  removeTopicSlides,
+  loadPersistedTopics,
+  saveTopicsToStorage,
+  createHeaderSlide,
+} from './utils/topicStorage.js'
 
-// Level card configuration
-const LEVEL_CONFIG = {
-  [EXPLANATION_LEVEL.SIMPLE]: {
-    icon: '🌱',
-    title: 'Simple',
-    description: 'Everyday language, no jargon',
-  },
-  [EXPLANATION_LEVEL.STANDARD]: {
-    icon: '📚',
-    title: 'Standard',
-    description: 'Balanced with key concepts',
-  },
-  [EXPLANATION_LEVEL.DEEP]: {
-    icon: '🔬',
-    title: 'Deep',
-    description: 'Technical depth and nuance',
-  },
-}
+// Import slide helpers
+import {
+  getCurrentVersionLevel,
+  buildTopicSlides,
+  isTrivialTranscription,
+  pruneSlideCache as pruneSlidesCacheHelper,
+} from './utils/slideHelpers.js'
 
-// Generation timeout configuration (F053)
-const GENERATION_TIMEOUT = {
-  // Time before showing "Still working..." message (15 seconds)
-  STILL_WORKING_MS: 15000,
-  // Maximum time before allowing user to cancel (60 seconds)
-  MAX_TIMEOUT_MS: 60000,
-  // Delay before refreshing fun fact (60 seconds)
-  FUN_FACT_REFRESH_DELAY_MS: 60000,
-}
+// Extract constants from STORAGE_LIMITS for local use
+const MAX_CACHED_TOPICS = STORAGE_LIMITS.MAX_CACHED_TOPICS
+const MAX_VERSIONS_PER_TOPIC = STORAGE_LIMITS.MAX_VERSIONS_PER_TOPIC
 
-// Local progress stage for TTS loading (not from WebSocket)
-const LOCAL_PROGRESS = {
-  TTS_LOADING: 'tts_loading',
-}
+// Extract timing constants from SLIDE_TIMING
+const SLIDE_TRANSITION_PAUSE_MS = SLIDE_TIMING.TRANSITION_PAUSE_MS
+const MANUAL_FINISH_GRACE_MS = SLIDE_TIMING.MANUAL_FINISH_GRACE_MS
+const CLOUD_IMPORT_MARKER_KEY = 'showme_cloud_import_marker'
+const CLOUD_IMPORT_MIGRATION_VERSION = 'cloud-run-persistence-v1'
 
-const GENERATION_PROGRESS_PERCENT = {
-  [PROGRESS_TYPES.START]: 10,
-  [PROGRESS_TYPES.SCRIPT_READY]: 35,
-  [PROGRESS_TYPES.IMAGES_GENERATING]: 65,
-  [PROGRESS_TYPES.AUDIO_GENERATING]: 85,
-  [LOCAL_PROGRESS.TTS_LOADING]: 92,
-  [PROGRESS_TYPES.COMPLETE]: 100,
-  [PROGRESS_TYPES.ERROR]: 100,
-}
-
-// Microphone permission states
-const PERMISSION_STATE = {
-  PROMPT: 'prompt',
-  GRANTED: 'granted',
-  DENIED: 'denied',
-}
-
-// Maximum number of topics with slides cached in memory (LRU eviction beyond this)
-const MAX_CACHED_TOPICS = 12
-
-// Maximum number of versions per topic to prevent unbounded storage growth
-const MAX_VERSIONS_PER_TOPIC = 5
-
-// CORE027: localStorage key for persisting topics across page refresh
-const TOPICS_STORAGE_KEY = 'showme_topics'
-// CORE027: localStorage key prefix for per-topic slide storage
-const TOPIC_SLIDES_STORAGE_PREFIX = 'showme_topic_slides_'
-// CORE027: localStorage key for stable client ID (server-side slide storage)
-const CLIENT_ID_STORAGE_KEY = 'showme_client_id'
-
-const SLIDES_API_BASE = '/api/slides'
-
-const FALLBACK_SLIDE_IMAGE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect fill="#f0f0f0" width="400" height="300"/><text x="200" y="150" text-anchor="middle" fill="#999">Image unavailable</text></svg>'
-const FALLBACK_SLIDE_IMAGE_URL = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(FALLBACK_SLIDE_IMAGE_SVG)}`
-
-// CORE027: Storage version for schema migration
-// Version 3 adds versions array support for regeneration feature
-const TOPICS_STORAGE_VERSION = 3
-const TOPIC_SLIDES_STORAGE_VERSION = 1
-
-// Default questions (fallback when API fails or rate limited)
-const DEFAULT_QUESTIONS = [
-  "How do black holes work?",
-  "Why do we dream?",
-  "How does WiFi work?",
-]
-
-// Display greetings - matches voice greetings for consistency
-const DISPLAY_GREETINGS = [
-  "What would you like to learn today?",
-  "Ready to explore something new?",
-  "What's on your curious mind?",
-  "Let's discover something together!",
-  "What would you like to understand?",
-  "Ready for a learning adventure?",
-]
-
-// Home screen headlines - randomly selected on each visit
-const HOME_HEADLINES = [
-  "What do you want me to show you?",
-  "What would you like to learn?",
-  "What are you curious about?",
-  "What should we explore today?",
-  "What do you want to understand?",
-  "What can I explain for you?",
-]
-
-// Pause duration between slide transitions (ms)
-// This gives users a brief mental break between concepts
-const SLIDE_TRANSITION_PAUSE_MS = 400
-const MANUAL_FINISH_GRACE_MS = 500
-
-// Audio configuration constants
-const AUDIO_CONFIG = {
-  // Number of bars in the waveform visualization
-  WAVEFORM_BARS: 20,
-  // Silence detection threshold (0-255 range from analyser)
-  SILENCE_THRESHOLD: 15,
-  // Duration of silence before triggering generation (ms)
-  SILENCE_DURATION: 1500,
-  // Minimum detected speech duration to treat recording as valid (ms)
-  MIN_SPEECH_DURATION_MS: 300,
-  // Minimum speech frames (50ms per frame) before sending to STT
-  MIN_SPEECH_FRAMES: 5,
-  // Retry listening when no speech is detected
-  NO_SPEECH_RETRY_MAX: 2,
-  NO_SPEECH_RETRY_DELAY_MS: 350,
-  // Audio analyser FFT size (must be power of 2)
-  FFT_SIZE: 256,
-  // Animation frame interval for waveform updates (ms)
-  ANIMATION_INTERVAL: 50,
-  // Minimum audio size in bytes (~0.5s of audio)
-  MIN_AUDIO_SIZE: 5000,
-  // Maximum audio size in bytes (matches backend 10MB limit)
-  MAX_AUDIO_SIZE: 10 * 1024 * 1024,
-}
-
-const TTS_PREFETCH_CONFIG = {
-  MAX_CONCURRENCY: 1,        // Reduced from 2 to avoid rate limits
-  DELAY_MS: 2000,            // Increased to 2s between requests for 20 RPM (10 per model)
-  MAX_PREFETCH_AHEAD: 1,     // Only prefetch next 1 slide to minimize concurrent requests
-  RATE_LIMIT_BACKOFF_MS: 10000, // Wait 10s after rate limit before retrying
-  MIN_REQUEST_INTERVAL_MS: 3000, // Minimum 3s between any TTS requests (20 RPM = 3s/request)
-}
-
-// Voice agent script templates
-const VOICE_AGENT_SCRIPT = {
-  GENERATION_START: "",
-  PREPARING_FOLLOW_UP: "Preparing your follow-up now.",
-  // Dynamic slides ready message based on topic and count
-  getSlidesReadyMessage: (topicName, slideCount) => {
-    if (topicName && slideCount > 1) {
-      return `Slides about ${topicName} are ready.`
-    } else if (slideCount > 1) {
-      return "Your slides are ready."
-    }
-    return "Your explanation is ready."
-  },
-  // Suggestions slide TTS disabled to conserve quota.
-}
-
-/**
- * Build a localStorage key for a topic's slide archive.
- * @param {string} topicId - Topic ID
- * @param {string} [versionId] - Optional version ID for per-version storage
- * @returns {string} Storage key for topic slides
- */
-function getTopicSlidesStorageKey(topicId, versionId) {
-  if (versionId) {
-    return `${TOPIC_SLIDES_STORAGE_PREFIX}${topicId}_${versionId}`
+function stableStringify(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`
   }
-  return `${TOPIC_SLIDES_STORAGE_PREFIX}${topicId}`
+
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value)
+      .filter(([, entryValue]) => entryValue !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`)
+    return `{${entries.join(',')}}`
+  }
+
+  return JSON.stringify(value)
 }
 
-/**
- * Get or create a stable client ID for server-side slide storage.
- * @returns {string|null} Stable client ID or null when unavailable
- */
-function getStoredClientId() {
-  if (typeof window === 'undefined') return null
+function collectTopicsForMigration() {
   try {
-    const existing = localStorage.getItem(CLIENT_ID_STORAGE_KEY)
-    if (existing) return existing
+    const raw = localStorage.getItem(STORAGE_KEYS.TOPICS)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    const topics = Array.isArray(parsed?.topics) ? parsed.topics : []
 
-    const fallback = `client_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
-    const generated = window.crypto?.randomUUID ? window.crypto.randomUUID() : fallback
-    localStorage.setItem(CLIENT_ID_STORAGE_KEY, generated)
-    return generated
-  } catch (error) {
-    logger.warn('STORAGE', 'Failed to access client ID storage', {
-      error: error.message,
-    })
-    return null
-  }
-}
+    return topics.map((topic) => {
+      const versions = Array.isArray(topic?.versions) ? topic.versions : []
+      const normalizedVersions = versions.map((version) => {
+        const versionId = typeof version?.id === 'string' && version.id.trim()
+          ? version.id.trim()
+          : 'legacy'
+        const slides = loadTopicSlidesFromStorage(topic.id, versionId) || []
+        return {
+          id: versionId,
+          explanationLevel: version?.explanationLevel || EXPLANATION_LEVEL.STANDARD,
+          createdAt: version?.createdAt || topic?.createdAt || Date.now(),
+          slides,
+        }
+      }).filter((version) => Array.isArray(version.slides) && version.slides.length > 0)
 
-/**
- * Normalize slides for storage (strip large audio payloads).
- * @param {Array} slides - Slide objects
- * @param {string} topicId - Topic ID for fallback association
- * @returns {Array} Sanitized slides for storage
- */
-function sanitizeSlidesForStorage(slides, topicId) {
-  if (!Array.isArray(slides)) {
-    console.log('[DEBUG SANITIZE] Input not array:', { topicId, slides })
-    return []
-  }
-  console.log('[DEBUG SANITIZE] Processing slides:', { topicId, inputCount: slides.length })
-  return slides
-    .filter((slide) => slide && typeof slide === 'object')
-    .map((slide, index) => ({
-      // Use fallback ID if missing to ensure slide is always persisted
-      id: slide.id || `slide_${topicId}_${index}_${Date.now()}`,
-      // Use placeholder image if missing - slide content is more important than image
-      imageUrl: slide.imageUrl || FALLBACK_SLIDE_IMAGE_URL,
-      subtitle: slide.subtitle || '',
-      duration: slide.duration || 5000,
-      topicId: slide.topicId || topicId,
-      // F091: Preserve conclusion slide marker
-      ...(slide.isConclusion && { isConclusion: true }),
-      // Persist audioUrl for instant playback of historical slides
-      ...(slide.audioUrl && { audioUrl: slide.audioUrl }),
-      // Preserve slide type for section dividers and other special slides
-      ...(slide.type && { type: slide.type }),
-      // Preserve parent relationship for follow-up slides
-      ...(slide.parentId && { parentId: slide.parentId }),
-    }))
-    // Only filter out completely invalid slides (no content at all)
-    .filter((slide) => slide.id && (slide.subtitle || slide.imageUrl))
-}
-
-/**
- * Persist slides to the backend for durable storage.
- * @param {string} topicId - Topic ID
- * @param {Array} slides - Sanitized slides
- * @param {string} [versionId] - Optional version ID
- * @param {Object} [options] - Persistence options
- */
-async function persistSlidesToServer(topicId, slides, versionId, options = {}) {
-  const clientId = getStoredClientId()
-  if (!clientId || !topicId || !Array.isArray(slides) || slides.length === 0) {
-    return
-  }
-
-  if (options.skipRemote) {
-    return
-  }
-
-  try {
-    const response = await fetch(`${SLIDES_API_BASE}/save`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        clientId,
-        topicId,
-        versionId,
-        slides,
-      }),
-    })
-
-    if (!response.ok) {
-      logger.warn('STORAGE', 'Failed to persist slides to server', {
-        status: response.status,
-        topicId,
-        versionId,
-      })
-    }
-  } catch (error) {
-    logger.warn('STORAGE', 'Slides server persistence failed', {
-      error: error.message,
-      topicId,
-      versionId,
-    })
-  }
-}
-
-/**
- * Persist slides for a topic into localStorage.
- * @param {string} topicId - Topic ID
- * @param {Array} slides - Slide objects to store
- * @param {string} [versionId] - Optional version ID for per-version storage
- * @param {Object} [options] - Persistence options
- */
-function persistTopicSlides(topicId, slides, versionId, options = {}) {
-  const storageKey = getTopicSlidesStorageKey(topicId, versionId)
-  console.log('[DEBUG PERSIST] Saving slides:', { topicId, versionId, storageKey, slidesCount: slides?.length })
-  if (!topicId || !Array.isArray(slides)) {
-    logger.warn('STORAGE', 'Cannot persist slides: invalid input', { topicId, slidesType: typeof slides })
-    return false
-  }
-
-  const sanitizedSlides = sanitizeSlidesForStorage(slides, topicId)
-  if (sanitizedSlides.length === 0) {
-    logger.warn('STORAGE', 'No valid slides to persist after sanitization', {
-      topicId,
-      originalCount: slides.length
-    })
-    return false
-  }
-
-  void persistSlidesToServer(topicId, sanitizedSlides, versionId, options)
-
-  const payload = {
-    version: TOPIC_SLIDES_STORAGE_VERSION,
-    slides: sanitizedSlides,
-    savedAt: Date.now(),
-  }
-
-  try {
-    const key = getTopicSlidesStorageKey(topicId, versionId)
-    localStorage.setItem(key, JSON.stringify(payload))
-    // Verify the save worked
-    const verification = localStorage.getItem(key)
-    console.log('[DEBUG PERSIST] Saved and verified:', {
-      key,
-      savedSuccessfully: !!verification,
-      payloadSize: JSON.stringify(payload).length
-    })
-    logger.debug('STORAGE', 'Slides persisted successfully', {
-      topicId,
-      versionId,
-      slidesCount: sanitizedSlides.length,
-    })
-    return true
-  } catch (error) {
-    if (error.name === 'QuotaExceededError') {
-      logger.warn('STORAGE', 'Slides archive quota exceeded, skipping storage', {
-        topicId,
-        versionId,
-        slidesCount: sanitizedSlides.length,
-      })
-    } else {
-      logger.error('STORAGE', 'Failed to persist topic slides', {
-        topicId,
-        versionId,
-        error: error.message,
-      })
-    }
-    return false
-  }
-}
-
-/**
- * Validate and normalize slide payloads loaded from storage.
- * @param {Object} parsed - Parsed storage payload
- * @returns {Array|null} Valid slides or null
- */
-function extractValidSlidesFromPayload(parsed) {
-  if (!parsed || typeof parsed !== 'object') return null
-
-  const version = parsed.version || 0
-  if (version > TOPIC_SLIDES_STORAGE_VERSION) return null
-
-  const slides = Array.isArray(parsed.slides) ? parsed.slides : null
-  if (!slides) return null
-
-  // Lenient validation - only require slide to have id and some content
-  const validSlides = slides.filter((slide) =>
-    slide &&
-    typeof slide === 'object' &&
-    slide.id &&
-    (slide.subtitle || slide.imageUrl)
-  )
-
-  return validSlides.length > 0 ? validSlides : null
-}
-
-/**
- * Load cached slides for a topic from localStorage.
- * @param {string} topicId - Topic ID
- * @param {string} [versionId] - Optional version ID for per-version storage
- * @returns {Array|null} Slides array or null when unavailable
- */
-function loadTopicSlidesFromStorage(topicId, versionId) {
-  if (!topicId) return null
-
-  try {
-    const storageKey = getTopicSlidesStorageKey(topicId, versionId)
-    console.log('[DEBUG LOAD] Looking for slides:', { topicId, versionId, storageKey })
-    const stored = localStorage.getItem(storageKey)
-    if (!stored) {
-      console.log('[DEBUG LOAD] NOT FOUND:', storageKey)
-      return null
-    }
-    console.log('[DEBUG LOAD] FOUND:', { storageKey, size: stored.length })
-
-    const parsed = JSON.parse(stored)
-    return extractValidSlidesFromPayload(parsed)
-  } catch (error) {
-    logger.warn('STORAGE', 'Failed to load topic slides', {
-      topicId,
-      versionId,
-      error: error.message,
-    })
-    return null
-  }
-}
-
-/**
- * Find the most recent versioned slide archive for a topic.
- * @param {string} topicId - Topic ID
- * @returns {Object|null} { slides, key, savedAt } or null
- */
-function loadLatestVersionedSlides(topicId) {
-  if (!topicId) return null
-
-  try {
-    const prefix = `${TOPIC_SLIDES_STORAGE_PREFIX}${topicId}_`
-    const keys = Object.keys(localStorage)
-    let latest = null
-
-    keys.forEach((key) => {
-      if (!key.startsWith(prefix)) return
-      const stored = localStorage.getItem(key)
-      if (!stored) return
-
-      let parsed
-      try {
-        parsed = JSON.parse(stored)
-      } catch {
-        return
-      }
-
-      const slides = extractValidSlidesFromPayload(parsed)
-      if (!slides) return
-
-      const savedAt = typeof parsed.savedAt === 'number' ? parsed.savedAt : 0
-      if (!latest || savedAt > latest.savedAt) {
-        latest = { slides, key, savedAt }
-      }
-    })
-
-    return latest
-  } catch (error) {
-    logger.warn('STORAGE', 'Failed to scan versioned slides', {
-      topicId,
-      error: error.message,
-    })
-    return null
-  }
-}
-
-/**
- * Load slides for a topic, trying version-specific storage first, then legacy.
- * This is the canonical way to load slides for a topic - use this instead of
- * calling loadTopicSlidesFromStorage directly.
- * @param {Object} topic - Topic object with id, versions, and currentVersionIndex
- * @returns {Array|null} Slides array or null when unavailable
- */
-function loadSlidesForTopic(topic) {
-  if (!topic?.id) return null
-
-  // Try version-specific storage first
-  const currentVersion = topic.versions?.[topic.currentVersionIndex ?? 0]
-  if (currentVersion?.id) {
-    const versionedSlides = loadTopicSlidesFromStorage(topic.id, currentVersion.id)
-    if (versionedSlides) {
-      logger.debug('STORAGE', 'Loaded slides from versioned storage', {
-        topicId: topic.id,
-        versionId: currentVersion.id,
-        slidesCount: versionedSlides.length,
-      })
-      return versionedSlides
-    }
-  }
-
-  // If current version is missing, try any other known versions
-  if (Array.isArray(topic.versions)) {
-    for (const version of topic.versions) {
-      if (!version?.id || version.id === currentVersion?.id) continue
-      const otherSlides = loadTopicSlidesFromStorage(topic.id, version.id)
-      if (otherSlides) {
-        logger.debug('STORAGE', 'Loaded slides from alternate version', {
-          topicId: topic.id,
-          versionId: version.id,
-          slidesCount: otherSlides.length,
-        })
-        return otherSlides
-      }
-    }
-  }
-
-  // Fall back to legacy (non-versioned) storage
-  const legacySlides = loadTopicSlidesFromStorage(topic.id)
-  if (legacySlides) {
-    logger.debug('STORAGE', 'Loaded slides from legacy storage', {
-      topicId: topic.id,
-      slidesCount: legacySlides.length,
-    })
-    return legacySlides
-  }
-
-  // Last resort: scan versioned keys for this topic (handles mismatched metadata)
-  const fallback = loadLatestVersionedSlides(topic.id)
-  if (fallback?.slides) {
-    logger.debug('STORAGE', 'Loaded slides from version scan fallback', {
-      topicId: topic.id,
-      storageKey: fallback.key,
-      slidesCount: fallback.slides.length,
-    })
-    return fallback.slides
-  }
-
-  logger.debug('STORAGE', 'No slides found in storage', {
-    topicId: topic.id,
-    versionId: currentVersion?.id,
-    hasVersions: !!topic.versions?.length,
-  })
-
-  return null
-}
-
-/**
- * Remove slide archives for topics that no longer exist.
- * @param {Set<string>} validTopicIds - Active topic IDs
- */
-function removeStaleTopicSlides(validTopicIds) {
-  console.log('[DEBUG CLEANUP] Valid topic IDs:', Array.from(validTopicIds))
-  try {
-    const keys = Object.keys(localStorage)
-    keys.forEach((key) => {
-      if (!key.startsWith(TOPIC_SLIDES_STORAGE_PREFIX)) return
-      // Extract topicId from key, handling both legacy and versioned formats:
-      // - Legacy: showme_topic_slides_{topicId}
-      // - Versioned: showme_topic_slides_{topicId}_{versionId} where versionId starts with "v_"
-      const afterPrefix = key.slice(TOPIC_SLIDES_STORAGE_PREFIX.length)
-      // Find the first occurrence of "_v_" which marks the start of a versionId
-      const versionSeparatorIndex = afterPrefix.indexOf('_v_')
-      const topicId = versionSeparatorIndex !== -1
-        ? afterPrefix.slice(0, versionSeparatorIndex)
-        : afterPrefix
-      const isValid = validTopicIds.has(topicId)
-      console.log('[DEBUG CLEANUP] Checking key:', { key, extractedTopicId: topicId, isValid, willRemove: !isValid })
-      if (!validTopicIds.has(topicId)) {
-        localStorage.removeItem(key)
-      }
-    })
-  } catch (error) {
-    logger.warn('STORAGE', 'Failed to clean up stale topic slides', {
-      error: error.message,
-    })
-  }
-}
-
-/**
- * Remove cached slides for a specific topic, including all versioned storage keys.
- * @param {string} topicId - Topic ID to remove slides for
- */
-function removeTopicSlides(topicId) {
-  try {
-    // Remove legacy (non-versioned) key
-    const legacyKey = getTopicSlidesStorageKey(topicId)
-    localStorage.removeItem(legacyKey)
-
-    // Also remove any versioned keys for this topic
-    const keys = Object.keys(localStorage)
-    keys.forEach((key) => {
-      if (!key.startsWith(TOPIC_SLIDES_STORAGE_PREFIX)) return
-      // Check if this key belongs to the target topicId
-      const afterPrefix = key.slice(TOPIC_SLIDES_STORAGE_PREFIX.length)
-      const versionSeparatorIndex = afterPrefix.indexOf('_v_')
-      const extractedTopicId = versionSeparatorIndex !== -1
-        ? afterPrefix.slice(0, versionSeparatorIndex)
-        : afterPrefix
-      if (extractedTopicId === topicId) {
-        localStorage.removeItem(key)
-      }
-    })
-  } catch (error) {
-    logger.warn('STORAGE', 'Failed to remove topic slides', {
-      topicId,
-      error: error.message,
-    })
-  }
-}
-
-/**
- * CORE027: Load persisted topics from localStorage
- * Handles corrupted data, schema validation, and migration.
- * @returns {Object} { topics: Array, hadPersistedData: boolean }
- */
-function loadPersistedTopics() {
-  // Debug: list all slide-related keys in localStorage
-  const allKeys = Object.keys(localStorage)
-  const slideKeys = allKeys.filter(k => k.startsWith(TOPIC_SLIDES_STORAGE_PREFIX))
-  console.log('[DEBUG STARTUP] All slide keys in localStorage:', slideKeys)
-
-  try {
-    const stored = localStorage.getItem(TOPICS_STORAGE_KEY)
-    if (!stored) {
-      return { topics: [], hadPersistedData: false }
-    }
-
-    const parsed = JSON.parse(stored)
-
-    // Validate storage structure
-    if (!parsed || typeof parsed !== 'object') {
-      logger.warn('STORAGE', 'Invalid storage structure, resetting')
-      localStorage.removeItem(TOPICS_STORAGE_KEY)
-      return { topics: [], hadPersistedData: false }
-    }
-
-    // Check version for future schema migration
-    const version = parsed.version || 0
-    if (version > TOPICS_STORAGE_VERSION) {
-      logger.warn('STORAGE', 'Storage version newer than supported, resetting', {
-        storedVersion: version,
-        supportedVersion: TOPICS_STORAGE_VERSION,
-      })
-      localStorage.removeItem(TOPICS_STORAGE_KEY)
-      return { topics: [], hadPersistedData: false }
-    }
-
-    const topics = parsed.topics
-    if (!Array.isArray(topics)) {
-      logger.warn('STORAGE', 'Topics not an array, resetting')
-      localStorage.removeItem(TOPICS_STORAGE_KEY)
-      return { topics: [], hadPersistedData: false }
-    }
-
-    // Validate each topic has required fields
-    const validTopics = topics.filter((topic) => {
-      if (!topic || typeof topic !== 'object') return false
-      if (!topic.id || typeof topic.id !== 'string') return false
-      if (!topic.name || typeof topic.name !== 'string') return false
-      // Icon is optional but should be string if present
-      if (topic.icon && typeof topic.icon !== 'string') return false
-      // Legacy storage may include slides array
-      if (topic.slides && !Array.isArray(topic.slides)) return false
-      return true
-    })
-
-    const now = Date.now()
-    const normalizedTopics = validTopics.map((topic) => {
-      // Handle legacy slides migration (v1->v2)
-      if (Array.isArray(topic.slides) && topic.slides.length > 0) {
-        // Legacy schema migration: move slides to per-topic storage
-        persistTopicSlides(topic.id, topic.slides)
-      }
-
-      const createdAt = typeof topic.createdAt === 'number' ? topic.createdAt : now
-      const lastAccessedAt = typeof topic.lastAccessedAt === 'number'
-        ? topic.lastAccessedAt
-        : createdAt
-
-      // Migration to v3: Add versions array support
-      // If topic already has versions array, preserve it; otherwise create one
-      let versions = topic.versions
-      let currentVersionIndex = topic.currentVersionIndex ?? 0
-      const query = topic.query || topic.name // Use name as fallback query
-
-      // Validate versions array - filter out any without valid IDs
-      if (Array.isArray(versions)) {
-        versions = versions.filter((v) => v && typeof v.id === 'string' && v.id.length > 0)
-      }
-
-      if (!Array.isArray(versions) || versions.length === 0) {
-        // Migrate from non-versioned to versioned format
-        // Create initial version from existing data
-        versions = [{
-          id: `v_${topic.id}_${now}`,
-          explanationLevel: topic.explanationLevel || EXPLANATION_LEVEL.STANDARD,
-          slides: null, // Will be loaded from storage
-          createdAt: createdAt,
-        }]
-        currentVersionIndex = 0
-      }
-
-      // Ensure currentVersionIndex is within bounds
-      if (currentVersionIndex >= versions.length) {
-        currentVersionIndex = versions.length - 1
+      if (normalizedVersions.length === 0) {
+        const legacySlides = loadTopicSlidesFromStorage(topic.id) || []
+        if (legacySlides.length > 0) {
+          normalizedVersions.push({
+            id: 'legacy',
+            explanationLevel: topic?.explanationLevel || EXPLANATION_LEVEL.STANDARD,
+            createdAt: topic?.createdAt || Date.now(),
+            slides: legacySlides,
+          })
+        }
       }
 
       return {
-        id: topic.id,
-        name: topic.name,
-        icon: topic.icon,
-        query, // Store original query for regeneration
-        createdAt,
-        lastAccessedAt,
-        versions,
-        currentVersionIndex,
-        // Keep slides at topic level for backward compatibility during transition
-        slides: null,
-        headerSlide: createHeaderSlide({
-          id: topic.id,
-          name: topic.name,
-          icon: topic.icon,
-        }),
+        id: topic?.id || '',
+        name: topic?.name || '',
+        icon: topic?.icon || '',
+        query: topic?.query || topic?.name || '',
+        versions: normalizedVersions,
       }
-    })
-
-    const topicsByAccess = [...normalizedTopics].sort(
-      (a, b) => (b.lastAccessedAt || 0) - (a.lastAccessedAt || 0)
-    )
-    const cachedTopicIds = new Set(
-      topicsByAccess.slice(0, MAX_CACHED_TOPICS).map((topic) => topic.id)
-    )
-
-    const restoredTopics = normalizedTopics.map((topic) => {
-      console.log('[DEBUG RESTORE] Topic:', {
-        id: topic.id,
-        name: topic.name,
-        versions: topic.versions?.map(v => ({ id: v.id, level: v.explanationLevel })),
-        currentVersionIndex: topic.currentVersionIndex
-      })
-      if (!cachedTopicIds.has(topic.id)) return topic
-
-      // Load slides using the canonical helper that tries versioned storage first
-      const cachedSlides = loadSlidesForTopic(topic)
-
-      if (cachedSlides) {
-        // Update the current version with loaded slides
-        const updatedVersions = topic.versions.map((v, idx) =>
-          idx === topic.currentVersionIndex ? { ...v, slides: cachedSlides } : v
-        )
-        return { ...topic, slides: cachedSlides, versions: updatedVersions }
-      }
-
-      return topic
-    })
-
-    if (restoredTopics.length > 0) {
-      logger.info('STORAGE', 'Restored topics from localStorage', {
-        count: restoredTopics.length,
-        topicNames: restoredTopics.map((t) => t.name),
-      })
-    }
-
-    return {
-      topics: restoredTopics,
-      hadPersistedData: restoredTopics.length > 0,
-    }
+    }).filter((topic) => topic.id && topic.versions.length > 0)
   } catch (error) {
-    // JSON parse error or other issue - reset to clean state
-    logger.error('STORAGE', 'Failed to load persisted topics', {
+    logger.warn('MIGRATION', 'Failed to collect local topics for cloud import', {
       error: error.message,
     })
-    localStorage.removeItem(TOPICS_STORAGE_KEY)
-    return { topics: [], hadPersistedData: false }
+    return []
   }
 }
 
-/**
- * CORE027: Save topics to localStorage
- * Stores topic metadata only (slides are persisted separately).
- * @param {Array} topics - Array of topic objects to persist
- */
-function saveTopicsToStorage(topics) {
+function collectStoriesForMigration() {
   try {
-    if (!topics || topics.length === 0) {
-      localStorage.removeItem(TOPICS_STORAGE_KEY)
-      removeStaleTopicSlides(new Set())
-      logger.debug('STORAGE', 'Cleared topics from localStorage (no topics)')
-      return
-    }
-
-    const topicsForStorage = topics.map((topic) => ({
-      id: topic.id,
-      name: topic.name,
-      icon: topic.icon,
-      query: topic.query, // Preserve original query for regeneration
-      createdAt: topic.createdAt,
-      lastAccessedAt: topic.lastAccessedAt,
-      // Store versions metadata (slides are persisted separately per version)
-      // Filter out any versions without a valid id to prevent load issues
-      versions: (topic.versions || [])
-        .filter((v) => v && typeof v.id === 'string' && v.id.length > 0)
-        .map((v) => ({
-          id: v.id,
-          explanationLevel: v.explanationLevel,
-          createdAt: v.createdAt,
-          // slides are loaded separately from per-topic storage
-        })),
-      currentVersionIndex: topic.currentVersionIndex ?? 0,
-      // headerSlide and slides are reconstructed or loaded separately
-    }))
-
-    const storageData = {
-      version: TOPICS_STORAGE_VERSION,
-      topics: topicsForStorage,
-      savedAt: Date.now(),
-    }
-
-    const serialized = JSON.stringify(storageData)
-
-    // Check storage quota (rough estimate, localStorage is typically 5-10MB)
-    const sizeKB = serialized.length / 1024
-    if (sizeKB > 4096) {
-      // 4MB warning threshold
-      logger.warn('STORAGE', 'Topics storage approaching quota limit', {
-        sizeKB: sizeKB.toFixed(2),
-      })
-    }
-
-    localStorage.setItem(TOPICS_STORAGE_KEY, serialized)
-    removeStaleTopicSlides(new Set(topics.map((topic) => topic.id)))
-    logger.debug('STORAGE', 'Saved topics to localStorage', {
-      count: topics.length,
-      sizeKB: sizeKB.toFixed(2),
-    })
+    const metadata = loadStoriesFromStorage()
+    return metadata
+      .map((entry) => loadStoryContent(entry?.id))
+      .filter((story) => story && typeof story === 'object' && story.id)
   } catch (error) {
-    // Handle quota exceeded or other storage errors
-    if (error.name === 'QuotaExceededError') {
-      logger.error('STORAGE', 'localStorage quota exceeded')
-
-      // H2: Recovery strategy - try saving a minimal metadata payload
-      try {
-        const minimalData = {
-          version: TOPICS_STORAGE_VERSION,
-          topics: topics.map((topic) => ({
-            id: topic.id,
-            name: topic.name,
-            icon: topic.icon,
-            query: topic.query,
-            createdAt: topic.createdAt,
-            lastAccessedAt: topic.lastAccessedAt,
-            versions: (topic.versions || []).map((v) => ({
-              id: v.id,
-              explanationLevel: v.explanationLevel,
-              createdAt: v.createdAt,
-            })),
-            currentVersionIndex: topic.currentVersionIndex ?? 0,
-          })),
-          savedAt: Date.now(),
-        }
-        localStorage.setItem(TOPICS_STORAGE_KEY, JSON.stringify(minimalData))
-        logger.warn('STORAGE', 'Saved minimal topic metadata due to quota limit', {
-          count: topics.length,
-        })
-      } catch (retryError) {
-        // Still failed even with minimal data - give up
-        logger.error('STORAGE', 'Unable to persist topics even with reduced data', {
-          error: retryError.message,
-        })
-      }
-    } else {
-      logger.error('STORAGE', 'Failed to save topics', {
-        error: error.message,
-      })
-    }
+    logger.warn('MIGRATION', 'Failed to collect local stories for cloud import', {
+      error: error.message,
+    })
+    return []
   }
 }
 
-/**
- * Creates a header slide object for a topic (F040, F043)
- * Header slides display the topic icon and name as a divider
- * @param {Object} topic - Topic object with id, name, icon
- * @returns {Object} Header slide object
- */
-function createHeaderSlide(topic) {
+function collectCloudImportPayload() {
+  const topics = collectTopicsForMigration()
+  const graph = loadGraphFromStorage('showme_topics')
+  const stories = collectStoriesForMigration()
+
+  const hasGraphData = Boolean(graph && Array.isArray(graph.nodes) && graph.nodes.length > 0)
+  if (!hasGraphData && topics.length === 0 && stories.length === 0) {
+    return null
+  }
+
   return {
-    id: `header_${topic.id}`,
-    type: 'header',
-    topicId: topic.id,
-    topicName: topic.name,
-    topicIcon: topic.icon,
-    // Header slides don't have imageUrl, audioUrl, subtitle, or duration
-    // They are rendered using the TopicHeader component
+    topics,
+    graph: hasGraphData ? graph : null,
+    stories,
   }
-}
-
-/**
- * Create a section divider slide that marks a follow-up section.
- * Displayed as a "chapter card" showing the follow-up question.
- * @param {string} topicId - Parent topic ID
- * @param {string} question - The follow-up question text
- * @returns {Object} Section divider slide object
- */
-function createSectionDivider(topicId, question) {
-  return {
-    id: `section_${topicId}_${Date.now()}`,
-    type: 'section',
-    topicId,
-    question,
-    // Section dividers don't have imageUrl, audioUrl, or duration
-    // They are rendered using the SectionDivider component
-  }
-}
-
-/**
- * Get slides from the current version of a topic.
- * Falls back to topic.slides for backward compatibility.
- * @param {Object|null} topic - Topic object with versions array
- * @returns {Array} Slides for the current version
- */
-function getCurrentVersionSlides(topic) {
-  if (!topic) return []
-
-  // Check if topic has versions array
-  if (topic.versions && topic.versions.length > 0) {
-    const versionIndex = topic.currentVersionIndex ?? 0
-    const currentVersion = topic.versions[versionIndex]
-    if (currentVersion && currentVersion.slides && currentVersion.slides.length > 0) {
-      return currentVersion.slides
-    }
-  }
-
-  // Fallback to topic-level slides for backward compatibility
-  return topic.slides || []
-}
-
-/**
- * Get the current version's explanation level.
- * Falls back to topic.explanationLevel or standard for backward compatibility.
- * @param {Object|null} topic - Topic object with versions array
- * @returns {string} Current explanation level
- */
-function getCurrentVersionLevel(topic) {
-  if (!topic) return EXPLANATION_LEVEL.STANDARD
-
-  // Check if topic has versions array
-  if (topic.versions && topic.versions.length > 0) {
-    const versionIndex = topic.currentVersionIndex ?? 0
-    const currentVersion = topic.versions[versionIndex]
-    if (currentVersion && currentVersion.explanationLevel) {
-      return currentVersion.explanationLevel
-    }
-  }
-
-  // Fallback to topic-level explanationLevel
-  return topic.explanationLevel || EXPLANATION_LEVEL.STANDARD
-}
-
-/**
- * Build the slide list for a topic, including its header divider.
- * Uses the current version's slides if versions are available.
- * @param {Object|null} topic - Topic object with headerSlide and versions
- * @returns {Array} Slides for the topic in display order
- */
-function buildTopicSlides(topic) {
-  if (!topic) return []
-  const slides = []
-  const headerSlide = topic.headerSlide || createHeaderSlide(topic)
-  if (headerSlide) {
-    slides.push(headerSlide)
-  }
-
-  // Get slides from current version (or fallback to topic.slides)
-  const versionSlides = getCurrentVersionSlides(topic)
-  if (versionSlides.length > 0) {
-    slides.push(...versionSlides)
-  }
-
-  // NOTE: Suggestions are now shown in SocraticFeedback instead of as a slide
-  // This allows Socratic mode to trigger after the last content slide
-  return slides
-}
-
-const TRIVIAL_TRANSCRIPT_TOKENS = new Set([
-  'yes', 'yeah', 'yep', 'no', 'nope', 'ok', 'okay', 'uh', 'um', 'hmm', 'hm',
-  'mmm', 'mm', 'uhh', 'umm', 'er', 'ah', 'oops', 'sorry', 'please', 'thanks',
-  'thank', 'hi', 'hello', 'stop', 'cancel',
-])
-
-const SHORT_QUESTION_WORDS = new Set([
-  'why', 'how', 'what', 'when', 'where', 'who', 'which',
-])
-
-function isTrivialTranscription(text) {
-  if (!text || typeof text !== 'string') return true
-  const cleaned = text.trim().toLowerCase()
-  if (!cleaned) return true
-  const normalized = cleaned.replace(/[^a-z0-9\s]/g, ' ')
-  const tokens = normalized.split(/\s+/).filter(Boolean)
-  if (!tokens.length) return true
-  if (tokens.every((token) => TRIVIAL_TRANSCRIPT_TOKENS.has(token))) return true
-  // Only filter single-character transcriptions (likely noise)
-  // Allow 2-3 char words as they can be valid acronyms (LLM, API, GPU) or short words
-  if (tokens.length === 1 && tokens[0].length <= 1) {
-    return true
-  }
-  return false
 }
 
 function App() {
@@ -1012,21 +187,13 @@ function App() {
   const [uiState, setUiState] = useState(UI_STATE.HOME)
   // CORE027: isColdStart is false if we restored topics from localStorage
   const [isColdStart, setIsColdStart] = useState(() => !initialData.hadPersistedData)
-  // Random greeting picked once per session for variety
-  const [displayGreeting] = useState(() => DISPLAY_GREETINGS[Math.floor(Math.random() * DISPLAY_GREETINGS.length)])
   // Random home headline picked once per session
   const [homeHeadline] = useState(() => HOME_HEADLINES[Math.floor(Math.random() * HOME_HEADLINES.length)])
   // Selected explanation level (session default, also stored per-topic)
   const [selectedLevel, setSelectedLevel] = useState(EXPLANATION_LEVEL.STANDARD)
   // Show text input fallback on home screen
   const [showTextFallback, setShowTextFallback] = useState(false)
-  // Suggested questions - using static defaults
-  const [suggestedQuestions, setSuggestedQuestions] = useState(DEFAULT_QUESTIONS)
-  const [currentIndex, setCurrentIndex] = useState(0)
-  // CORE032: Vertical navigation state for 2D slides
-  const [currentChildIndex, setCurrentChildIndex] = useState(null)
-  const [isFollowUpDrawerOpen, setIsFollowUpDrawerOpen] = useState(false)
-  const [isPlaying, setIsPlaying] = useState(false)
+  // Note: currentIndex, currentChildIndex, isChapterPickerOpen, isPlaying are managed by useSlideshowControl
   const [liveTranscription, setLiveTranscription] = useState('')
   const [lastTranscription, setLastTranscription] = useState('')
   const [textInput, setTextInput] = useState('')
@@ -1036,10 +203,6 @@ function App() {
   // Error handling state (F052)
   const [errorMessage, setErrorMessage] = useState('')
   const [lastFailedQuery, setLastFailedQuery] = useState('')
-
-  // Regeneration state - tracks if we're regenerating a topic at a different level
-  const [isRegenerating, setIsRegenerating] = useState(false)
-  const regeneratingTopicIdRef = useRef(null)
 
   // Generation timeout state (F053)
   const [isStillWorking, setIsStillWorking] = useState(false)
@@ -1051,6 +214,28 @@ function App() {
   const abortControllerRef = useRef(null)
   const stillWorkingTimerRef = useRef(null)
   const currentQueryRef = useRef(null) // Track current query for fun fact refresh
+  const cloudImportAttemptedRef = useRef(false)
+
+  // Knowledge Graph: New data model for topics as constellation nodes
+  const {
+    graph: knowledgeGraph,
+    nodes: graphNodes,
+    edges: graphEdges,
+    clusters: graphClusters,
+    gaps: graphGaps,
+    explorerRank,
+    isLoading: graphIsLoading,
+    addTopic: addTopicToGraph,
+    updateModeMastery: updateGraphMastery,
+    addFollowUp: addGraphFollowUp,
+    getNode: getGraphNode,
+    getNodeByName: getGraphNodeByName,
+    topicCount: graphTopicCount,
+    refreshGaps: refreshGraphGaps,
+    deleteTopicByName,
+    reconcileWithTopics,
+    resolveSuggestedGap,
+  } = useKnowledgeGraph()
 
   // F015: Generation progress state from WebSocket
   const [generationProgress, setGenerationProgress] = useState({
@@ -1064,21 +249,88 @@ function App() {
   const {
     progress: userProgress,
     badges: badgeDefinitions,
+    isLoading: isUserProgressLoading,
     newBadges,
     clearNewBadges,
+    clientId: userClientId,
     recordQuestionAsked,
-    recordSocraticAnswered,
-    recordDeepLevelUsed
+    recordDeepLevelUsed,
+    recordTopicLearned,
+    recordStoryCompleted,
+    recordMysteryCompleted,
+    recordWonderCompleted
   } = useUserProgress()
 
-  // POLISH-001: Celebration state
-  const [showConfetti, setShowConfetti] = useState(false)
-  const [currentToastBadge, setCurrentToastBadge] = useState(null)
+  // UI002: World stats for home screen display
+  const {
+    tier: worldTier,
+    xpProgress,
+    pieces: worldPieces,
+    totalXP: totalWorldXP,
+    refresh: refreshWorldStats,
+  } = useWorldStats(userClientId)
 
-  // SOCRATIC-003: State for Socratic mode data
-  const [socraticSlides, setSocraticSlides] = useState([])
-  const [socraticTopicName, setSocraticTopicName] = useState('')
-  const [socraticLanguage, setSocraticLanguage] = useState('en')
+  // Slide audio persistence callback (defined later, referenced via ref)
+  const persistSlideAudioCallbackRef = useRef(null)
+
+  // Slide audio/TTS hook
+  const slideAudio = useSlideAudio({
+    onPersistSlideAudio: (slideId, audioUrl, duration) => {
+      persistSlideAudioCallbackRef.current?.(slideId, audioUrl, duration)
+    },
+  })
+
+  // Voice agent hook - pass rate limit refs from slideAudio for coordination
+  const voiceAgent = useVoiceAgent({
+    ttsRateLimitUntilRef: slideAudio.ttsRateLimitUntilRef,
+    lastTtsRequestTimeRef: slideAudio.lastTtsRequestTimeRef,
+  })
+
+  // POLISH-001: Celebration state (managed by useCelebrations hook)
+  const celebrations = useCelebrations()
+  const {
+    showConfetti,
+    currentToastBadge,
+    showBadgeCelebration,
+    handleToastDismiss,
+    handleConfettiComplete,
+    showTierCelebration,
+    tierUpgradeInfo,
+    showTierUpgrade,
+    dismissTierCelebration,
+    showQuickXpToast,
+    quickXpEarned,
+    showQuickXp,
+    dismissQuickXpToast,
+  } = celebrations
+
+  // WB018: World Builder gamification state (managed by useTabNavigation hook)
+  const {
+    activeTab,
+    setActiveTab,
+    worldBadge,
+    setWorldBadge,
+    learnMode,
+    setLearnMode,
+  } = useTabNavigation()
+
+  // Learning Modes state - track which mode is active ('mystery', 'whatif', 'story', or null)
+  const [selectedLearningMode, setSelectedLearningMode] = useState(null)
+  // Tracks where a learning mode was launched from so Exit/Complete can route back.
+  // - after_slideshow: user picked a mode from the Mode Selector after finishing a slideshow
+  // - from_progress: user launched a mode from the Progress tab (Quick Practice / Topic sheet)
+  const [learnModeOrigin, setLearnModeOrigin] = useState(null) // 'after_slideshow' | 'from_progress' | null
+
+  // Regeneration state (celebration state now managed by useCelebrations hook)
+  const [isRegenerating, setIsRegenerating] = useState(false)
+  const regeneratingTopicIdRef = useRef(null)
+
+  // WB020: Review session - tracks pieces that need spaced repetition review
+  const {
+    piecesNeedingReview,
+    startReviewSession,
+  } = useReviewSession(worldPieces)
+
 
   const generationProgressPercent = useMemo(() => {
     if (!generationProgress.stage) return 0
@@ -1091,41 +343,21 @@ function App() {
    * F072: Logs each generation stage with timing
    */
   const handleWebSocketProgress = useCallback((message) => {
-    // Ignore non-progress messages (connected, registered, etc.)
-    if (message.type === 'connected' || message.type === 'registered') {
-      return
-    }
+    if (message.type === 'connected' || message.type === 'registered') return
 
-    // Map progress types to user-friendly messages
-    const progressMessages = {
-      [PROGRESS_TYPES.START]: 'Starting generation...',
-      [PROGRESS_TYPES.SCRIPT_READY]: 'Script ready, creating visuals...',
-      [PROGRESS_TYPES.IMAGES_GENERATING]: 'Generating diagrams...',
-      [PROGRESS_TYPES.AUDIO_GENERATING]: 'Creating narration...',
-      [PROGRESS_TYPES.COMPLETE]: 'Complete!',
-      [PROGRESS_TYPES.ERROR]: 'Error occurred',
-    }
-
-    // F072: Log generation pipeline stages
-    const stageMessage = message.data?.stage || progressMessages[message.type] || message.type
+    const stageMessage = message.data?.stage || PROGRESS_MESSAGES[message.type] || message.type
     if (message.type === PROGRESS_TYPES.ERROR) {
-      logger.error('GENERATION', `Pipeline error: ${stageMessage}`, {
-        stage: message.type,
-        data: message.data,
-      })
+      logger.error('GENERATION', `Pipeline error: ${stageMessage}`, { stage: message.type, data: message.data })
     } else {
-      logger.info('GENERATION', `Stage: ${stageMessage}`, {
-        stage: message.type,
-        slidesReady: message.data?.slidesCount || 0,
-      })
+      logger.info('GENERATION', `Stage: ${stageMessage}`, { stage: message.type, slidesReady: message.data?.slidesCount || 0 })
     }
 
     const totalSlides = message.data?.slidesCount || 0
     setGenerationProgress(prev => ({
       stage: message.type,
-      message: message.data?.stage || progressMessages[message.type] || '',
+      message: message.data?.stage || PROGRESS_MESSAGES[message.type] || '',
       slidesReady: message.type === PROGRESS_TYPES.COMPLETE ? totalSlides : prev.slidesReady,
-      totalSlides: totalSlides || prev.totalSlides,  // Keep previous if not provided
+      totalSlides: totalSlides || prev.totalSlides,
     }))
   }, [])
 
@@ -1141,117 +373,266 @@ function App() {
   }, [])
 
   // F015: Initialize WebSocket connection for progress updates
-  const {
-    isConnected: wsConnected,
-    clientId: wsClientId,
-  } = useWebSocket({
+  const { clientId: wsClientId } = useWebSocket({
     onProgress: handleWebSocketProgress,
     onError: handleWebSocketError,
     autoConnect: true,
   })
 
-  /**
-   * Topics state structure (F041):
-   * Array of topic objects, each containing:
-   * - id: Unique topic identifier
-   * - name: Display name for the topic
-   * - icon: Emoji icon for the topic
-   * - headerSlide: The header/divider slide for this topic (F040, F043)
-   * - slides: Array of content slides for this topic when cached
-   * - createdAt: Timestamp for topic ordering
-   * - lastAccessedAt: Timestamp for slide cache eviction ordering
-   *
-   * Topics are ordered by creation time (oldest first).
-   * Slides are cached in memory for a limited number of recently accessed topics.
-   * CORE027: Initial state loaded from localStorage if available.
-   */
+  // F041: Topics state - loaded from localStorage if available (CORE027)
   const [topics, setTopics] = useState(() => initialData.topics)
-  const [activeTopicId, setActiveTopicId] = useState(() => {
-    // Start with no active topic - user begins on HOME screen
-    // Topic becomes active when user views its slides or creates new content
-    return null
-  })
+  const [activeTopicId, setActiveTopicId] = useState(null)
+  const [highlightTopicName, setHighlightTopicName] = useState(null)
 
-  /**
-   * Get the currently active topic (selected for viewing/follow-ups)
-   * Returns null when no topic is selected (e.g., on HOME screen)
-   */
+  // Active topic (null = HOME screen)
   const activeTopic = useMemo(() => {
     if (topics.length === 0 || !activeTopicId) return null
     return topics.find((topic) => topic.id === activeTopicId) || null
   }, [topics, activeTopicId])
   const activeTopicRef = useRef(activeTopic)
+
+  /**
+   * Progress tab topics: local `topics` are the canonical list (watched/learned),
+   * and `/api/world` pieces are optional metadata enrichment (zone/review/etc).
+   *
+   * This prevents Progress from appearing empty when no world pieces exist yet.
+   */
+  const progressPieces = useMemo(() => {
+    const localTopics = Array.isArray(topics) ? topics : []
+    const worldPieceList = Array.isArray(worldPieces) ? worldPieces : []
+
+    const piecesByTopicId = new Map()
+    const piecesByName = new Map()
+
+    for (const piece of worldPieceList) {
+      const rawTopicId = piece?.topicId ?? piece?.id
+      if (rawTopicId) {
+        piecesByTopicId.set(String(rawTopicId), piece)
+      }
+
+      const rawName = typeof piece?.topicName === 'string'
+        ? piece.topicName
+        : typeof piece?.name === 'string'
+          ? piece.name
+          : ''
+      const normalizedName = rawName.trim().toLowerCase()
+      if (normalizedName) {
+        piecesByName.set(normalizedName, piece)
+      }
+    }
+
+    return localTopics
+      .filter((topic) => topic && typeof topic === 'object' && typeof topic.id === 'string' && typeof topic.name === 'string')
+      .map((topic) => {
+        const topicId = String(topic.id)
+        const topicName = String(topic.name)
+        const normalizedName = topicName.trim().toLowerCase()
+
+        const matchedPiece = piecesByTopicId.get(topicId) || (normalizedName ? piecesByName.get(normalizedName) : null)
+
+        const createdAtMs = typeof topic.createdAt === 'number' ? topic.createdAt : null
+        const lastAccessedAtMs = typeof topic.lastAccessedAt === 'number' ? topic.lastAccessedAt : null
+        const unlockedAtIso = new Date(createdAtMs ?? lastAccessedAtMs ?? Date.now()).toISOString()
+
+        const versionIndex = topic.currentVersionIndex ?? 0
+        const currentVersion = Array.isArray(topic.versions) ? topic.versions[versionIndex] : null
+        const topicSlides = Array.isArray(topic.slides)
+          ? topic.slides
+          : Array.isArray(currentVersion?.slides)
+            ? currentVersion.slides
+            : []
+
+        const explanationLevel = topic.explanationLevel || currentVersion?.explanationLevel || 'standard'
+
+        return {
+          // Normalized "piece-like" shape expected by ProgressTab components
+          topicId,
+          topicName,
+          icon: matchedPiece?.icon || topic.icon || null,
+          zone: matchedPiece?.zone || getZoneForCategory(topic.category),
+          unlockedAt: matchedPiece?.unlockedAt || unlockedAtIso,
+          lastReviewedAt: matchedPiece?.lastReviewedAt || null,
+          relatedTopics: Array.isArray(matchedPiece?.relatedTopics) ? matchedPiece.relatedTopics : [],
+          slides: topicSlides,
+          level: explanationLevel,
+        }
+      })
+  }, [topics, worldPieces])
+
+  // Use explorerRank title from Knowledge Graph, fallback to calculated tree level
+  const progressTreeLevel = useMemo(
+    () => explorerRank?.title || calculateTreeLevel(progressPieces.length),
+    [explorerRank?.title, progressPieces.length]
+  )
+
+  const earnedTrophies = useMemo(() => {
+    const definitions = badgeDefinitions && typeof badgeDefinitions === 'object'
+      ? badgeDefinitions
+      : {}
+    const definitionList = Object.values(definitions)
+    if (definitionList.length === 0) return []
+
+    const unlockedIds = new Set(Array.isArray(userProgress?.badges) ? userProgress.badges : [])
+    const unlockDates = userProgress?.badgeUnlockDates || {}
+
+    return definitionList
+      .map((badge) => {
+        if (!badge?.id) return null
+        const isUnlocked = unlockedIds.has(badge.id)
+        const earnedAt = unlockDates?.[badge.id] || null
+
+        const criteriaEntries = Object.entries(badge.criteria || {})
+        let progressCurrent = 0
+        let progressTarget = 0
+        if (criteriaEntries.length > 0) {
+          const [criteriaKey, criteriaValue] = criteriaEntries[0]
+          if (typeof criteriaValue === 'number') {
+            const currentValue = Number(userProgress?.[criteriaKey] || 0)
+            progressTarget = criteriaValue
+            progressCurrent = Math.min(currentValue, criteriaValue)
+          } else if (typeof criteriaValue === 'boolean') {
+            const currentValue = userProgress?.[criteriaKey] ? 1 : 0
+            progressTarget = 1
+            progressCurrent = currentValue
+          }
+        }
+
+        return {
+          id: badge.id,
+          name: badge.name || badge.id,
+          description: badge.description || '',
+          icon: badge.icon || 'trophy',
+          earnedAt,
+          locked: !isUnlocked,
+          criteriaText: badge.criteriaText || '',
+          progressCurrent,
+          progressTarget,
+        }
+      })
+      .filter(Boolean)
+  }, [badgeDefinitions, userProgress])
+
+  // CORE032: Slides split into top-level (visible) and child slides for 2D navigation
+  const allTopicSlides = useMemo(() => buildTopicSlides(activeTopic), [activeTopic])
+  const visibleSlides = useMemo(() => allTopicSlides.filter(s => !s.parentId), [allTopicSlides])
+  const visibleSlidesRef = useRef(visibleSlides)
+
+  // Sync activeTopic and visibleSlides to refs
   useEffect(() => {
     activeTopicRef.current = activeTopic
-  }, [activeTopic])
-
-  /**
-   * Slides to display in the main content (current topic only).
-   * CORE032: Split into top-level visible slides and child slides for 2D navigation
-   */
-  const allTopicSlides = useMemo(() => buildTopicSlides(activeTopic), [activeTopic])
-  
-  const visibleSlides = useMemo(() => {
-    // Only show top-level slides (no parentId) in the main horizontal flow
-    return allTopicSlides.filter(s => !s.parentId)
-  }, [allTopicSlides])
-
-  // Ref to track visibleSlides without triggering effect cleanup
-  const visibleSlidesRef = useRef(visibleSlides)
-  useEffect(() => {
     visibleSlidesRef.current = visibleSlides
-  }, [visibleSlides])
+  }, [activeTopic, visibleSlides])
 
-  const activeChildSlides = useMemo(() => {
-    const currentParent = visibleSlides[currentIndex]
-    if (!currentParent) return []
-    return allTopicSlides.filter(s => s.parentId === currentParent.id)
-  }, [allTopicSlides, visibleSlides, currentIndex])
-
-  const displayedSlide = useMemo(() => {
-    if (currentChildIndex !== null && activeChildSlides[currentChildIndex]) {
-      return activeChildSlides[currentChildIndex]
+  // CONSTELLATION-FIX: Reconcile knowledge graph with topics from localStorage
+  // Remove stale nodes that no longer exist in the topics array
+  const reconcileDoneRef = useRef(false)
+  useEffect(() => {
+    // Only run once after graph loads and topics are available
+    if (reconcileDoneRef.current || graphIsLoading || topics.length === 0) {
+      return
     }
-    return visibleSlides[currentIndex]
-  }, [visibleSlides, currentIndex, activeChildSlides, currentChildIndex])
-  const parentSlide = visibleSlides[currentIndex] || null
 
-  /**
-   * Limit in-memory slides to a recent-access cache to avoid unbounded growth.
-   * @param {Array} topicList - Topics to prune
-   * @param {string|null} keepTopicId - Topic ID to preserve in cache
-   * @returns {Array} Topics with slides evicted beyond cache size
-   */
+    // Extract topic names and reconcile graph
+    const topicNames = topics.map((t) => t.name)
+    reconcileWithTopics(topicNames)
+    reconcileDoneRef.current = true
+
+    logger.debug('APP', 'Reconciled knowledge graph with topics', {
+      topicCount: topics.length,
+    })
+  }, [graphIsLoading, topics, reconcileWithTopics])
+
+  useEffect(() => {
+    if (cloudImportAttemptedRef.current) {
+      return
+    }
+    cloudImportAttemptedRef.current = true
+
+    if (import.meta.env.MODE === 'test') {
+      return
+    }
+
+    const clientId = userClientId || getClientId()
+    if (!clientId) {
+      return
+    }
+
+    const payload = collectCloudImportPayload()
+    if (!payload) {
+      return
+    }
+
+    const checksum = stableStringify(payload)
+
+    try {
+      const rawMarker = localStorage.getItem(CLOUD_IMPORT_MARKER_KEY)
+      if (rawMarker) {
+        const marker = JSON.parse(rawMarker)
+        if (
+          marker?.clientId === clientId &&
+          marker?.migrationVersion === CLOUD_IMPORT_MIGRATION_VERSION &&
+          marker?.checksum === checksum
+        ) {
+          logger.debug('MIGRATION', 'Cloud import already completed for current local payload', {
+            clientId,
+          })
+          return
+        }
+      }
+    } catch (error) {
+      logger.warn('MIGRATION', 'Failed to parse cloud import marker', { error: error.message })
+    }
+
+    fetch(toApiUrl('/api/migration/import-local'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientId,
+        topics: payload.topics,
+        graph: payload.graph,
+        stories: payload.stories,
+        migrationVersion: CLOUD_IMPORT_MIGRATION_VERSION,
+        checksum,
+      }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Import failed with status ${response.status}`)
+        }
+        return response.json()
+      })
+      .then((result) => {
+        if (!result?.success) {
+          return
+        }
+
+        localStorage.setItem(CLOUD_IMPORT_MARKER_KEY, JSON.stringify({
+          clientId,
+          migrationVersion: CLOUD_IMPORT_MIGRATION_VERSION,
+          checksum,
+          importedAt: Date.now(),
+        }))
+
+        logger.info('MIGRATION', 'Local browser data imported to cloud persistence', {
+          clientId,
+          imported: result.imported,
+          alreadyImported: result.alreadyImported,
+          summary: result.summary || null,
+        })
+      })
+      .catch((error) => {
+        logger.warn('MIGRATION', 'Cloud import failed', {
+          clientId,
+          error: error.message,
+        })
+      })
+  }, [userClientId])
+
+  // Note: activeChildSlides, displayedSlide come from useSlideshowControl hook (after slideAudio hook)
+
+  // Wrapper for pruneSlideCache helper with local MAX_CACHED_TOPICS
   const pruneSlideCache = useCallback((topicList, keepTopicId) => {
-    const cachedTopics = topicList.filter(
-      (topic) => Array.isArray(topic.slides) && topic.slides.length > 0
-    )
-
-    if (cachedTopics.length <= MAX_CACHED_TOPICS) {
-      return topicList
-    }
-
-    const sortedByAccess = [...cachedTopics].sort(
-      (a, b) => (a.lastAccessedAt || 0) - (b.lastAccessedAt || 0)
-    )
-
-    const toEvict = new Set()
-    const evictCount = cachedTopics.length - MAX_CACHED_TOPICS
-    for (const topic of sortedByAccess) {
-      if (toEvict.size >= evictCount) break
-      if (topic.id === keepTopicId) continue
-      toEvict.add(topic.id)
-    }
-
-    if (toEvict.size === 0) {
-      return topicList
-    }
-
-    return topicList.map((topic) =>
-      toEvict.has(topic.id)
-        ? { ...topic, slides: null }
-        : topic
-    )
+    return pruneSlidesCacheHelper(topicList, keepTopicId, MAX_CACHED_TOPICS)
   }, [])
 
   /**
@@ -1272,7 +653,7 @@ function App() {
 
     const requestPromise = (async () => {
       try {
-        const response = await fetch(`${SLIDES_API_BASE}/load`, {
+        const response = await fetch(`${API_ENDPOINTS.SLIDES_BASE}/load`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ clientId, topicId, versionId }),
@@ -1429,36 +810,20 @@ function App() {
   const allowAutoListenRef = useRef(true)
   const isRaiseHandPendingRef = useRef(false)
   const selectedLevelRef = useRef(EXPLANATION_LEVEL.STANDARD)
-  const isPlayingRef = useRef(false)
+  // Note: isPlayingRef now comes from useSlideshowControl
   const handleQuestionRef = useRef(null)
 
+  // Sync state to refs for use in callbacks
+  // Note: isPlayingRef is synced inside useSlideshowControl hook
   useEffect(() => {
     isListeningRef.current = isListening
-  }, [isListening])
-
-  useEffect(() => {
     isMicEnabledRef.current = isMicEnabled
-  }, [isMicEnabled])
-
-  useEffect(() => {
     allowAutoListenRef.current = allowAutoListen
-  }, [allowAutoListen])
-
-  useEffect(() => {
     isRaiseHandPendingRef.current = isRaiseHandPending
-  }, [isRaiseHandPending])
-
-  useEffect(() => {
     selectedLevelRef.current = selectedLevel
-  }, [selectedLevel])
+  }, [isListening, isMicEnabled, allowAutoListen, isRaiseHandPending, selectedLevel])
 
-  useEffect(() => {
-    isPlayingRef.current = isPlaying
-  }, [isPlaying])
-
-  useEffect(() => {
-    setIsFollowUpDrawerOpen(false)
-  }, [currentIndex, activeChildSlides.length])
+  // Note: Effect to close follow-up drawer on slide change is now in useSlideshowControl
 
   // Audio refs - these persist across renders without causing re-renders
   const audioContextRef = useRef(null)
@@ -1476,56 +841,41 @@ function App() {
   const startListeningRef = useRef(null)
   const stopListeningRef = useRef(null)
 
-  // Track whether slideshow just finished (for auto-trigger of queued questions - F048)
-  const hasFinishedSlideshowRef = useRef(false)
-  // State version to trigger re-renders for Socratic mode
-  const [slideshowFinished, setSlideshowFinished] = useState(false)
-  const triggerSlideshowFinished = useCallback(() => {
-    if (hasFinishedSlideshowRef.current) return
-    hasFinishedSlideshowRef.current = true
-    setSlideshowFinished(true)
-  }, [])
+  // Note: hasFinishedSlideshowRef, slideshowFinished, triggerSlideshowFinished now come from useSlideshowControl
 
-  // Voice agent queue state
-  const [voiceAgentQueue, setVoiceAgentQueue] = useState([])
-  const [isVoiceAgentSpeaking, setIsVoiceAgentSpeaking] = useState(false)
-  const voiceAgentBusyRef = useRef(false)
-  const voiceAgentAudioRef = useRef(null)
-  const voiceAgentQueueRef = useRef([])
+  // Voice agent queue - use hook for state/refs, add app-specific refs
+  const {
+    voiceAgentQueue,
+    isVoiceAgentSpeaking,
+    setVoiceAgentQueue,
+    setIsVoiceAgentSpeaking,
+    enqueueVoiceAgentMessage,
+    voiceAgentBusyRef,
+    voiceAgentAudioRef,
+    voiceAgentQueueRef,
+    prefetchedTtsRef,
+    fetchTtsForItem,
+    prefetchNextItemTts,
+  } = voiceAgent
   const resumeListeningAfterVoiceAgentRef = useRef(false)
   const spokenFunFactRef = useRef(null)
-  // JIT TTS: Pre-fetched audio URLs keyed by queue item id
-  const prefetchedTtsRef = useRef(new Map())
-
-  useEffect(() => {
-    voiceAgentQueueRef.current = voiceAgentQueue
-  }, [voiceAgentQueue])
 
 
   // Audio playback ref for slide narration (F037)
   const slideAudioRef = useRef(null)
   const lastSlideIdRef = useRef(null)
-  const ttsPrefetchBatchRef = useRef(0)
   const resumeListeningAfterSlideRef = useRef(false)
-  const slideAudioCacheRef = useRef(new Map())
-  const slideAudioRequestRef = useRef(new Map())
-  const slideAudioFailureRef = useRef(new Set())
-  // Callback ref to persist audioUrl back to slide (set later to avoid circular deps)
-  const persistSlideAudioRef = useRef(null)
-  // Track rate limit backoff - timestamp when we can retry after rate limit
-  const ttsRateLimitUntilRef = useRef(0)
-  // Track last TTS request time - enforce minimum interval between requests
-  const lastTtsRequestTimeRef = useRef(0)
 
-  // Track if we should pause after the current slide (raise-hand flow)
-  const pauseAfterCurrentSlideRef = useRef(false)
+  // Note: pauseAfterCurrentSlideRef, manualFinishTimeoutRef, wasManualNavRef now come from useSlideshowControl
   // Track the transition timeout for cleanup when slide changes or unmounts
   const slideTransitionTimeoutRef = useRef(null)
-  const manualFinishTimeoutRef = useRef(null)
-  // CORE036: Track if the last navigation was manual (for streaming subtitles)
-  const wasManualNavRef = useRef(false)
 
   const raiseHandRequestRef = useRef(false)
+  // Track if audio was paused due to hand raise (to enable resume when lowered)
+  const audioWasPausedForHandRaiseRef = useRef(false)
+  // Save audio position when hand raise interrupts, so we can resume from the same spot
+  // Format: { slideId: string, currentTime: number } or null
+  const savedAudioPositionRef = useRef(null)
 
   // Track in-flight slide fetches from the server to avoid duplicate requests
   const slideServerFetchRef = useRef(new Map())
@@ -1540,9 +890,6 @@ function App() {
 
   // CORE023: Audio ref for slide question response playback
   const slideResponseAudioRef = useRef(null)
-
-  // Default slide duration in milliseconds (used when slide.duration is not available)
-  const DEFAULT_SLIDE_DURATION = 5000
 
   // Ref to track previous UI state for logging transitions
   const prevUiStateRef = useRef(uiState)
@@ -1571,23 +918,17 @@ function App() {
   // POLISH-001: Handle new badge unlocks with celebration
   useEffect(() => {
     if (newBadges && newBadges.length > 0) {
-      // Show the first badge toast
-      setCurrentToastBadge(newBadges[0])
-      setShowConfetti(true)
+      // Show the first badge toast using celebrations hook
+      showBadgeCelebration(newBadges[0])
       playAchievementSound()
     }
-  }, [newBadges])
+  }, [newBadges, showBadgeCelebration])
 
-  // POLISH-001: Handle toast dismissal
-  const handleToastDismiss = useCallback(() => {
-    setCurrentToastBadge(null)
+  // POLISH-001: Wrap toast dismissal to also clear badges from user progress
+  const handleBadgeToastDismiss = useCallback(() => {
+    handleToastDismiss()
     clearNewBadges()
-  }, [clearNewBadges])
-
-  // POLISH-001: Handle confetti completion
-  const handleConfettiComplete = useCallback(() => {
-    setShowConfetti(false)
-  }, [])
+  }, [handleToastDismiss, clearNewBadges])
 
   /**
    * Returns the currently playing audio element, if any.
@@ -1660,182 +1001,55 @@ function App() {
     })
   }, [])
 
-  // Set persist callback ref so requestSlideAudio can call it
+  // Set persist callback ref so the hook can call it
   useEffect(() => {
-    persistSlideAudioRef.current = persistSlideAudio
+    persistSlideAudioCallbackRef.current = persistSlideAudio
   }, [persistSlideAudio])
 
-  const getCachedSlideAudio = useCallback((slideId) => {
-    if (!slideId) return null
-    return slideAudioCacheRef.current.get(slideId) || null
-  }, [])
+  // Use slide audio functions from hook
+  const { requestSlideAudio, prefetchSlideAudio, prefetchSlideNarrationBatch, getCachedSlideAudio, getSlideDuration, slideAudioCacheRef, slideAudioFailureRef, ttsRateLimitUntilRef, lastTtsRequestTimeRef } = slideAudio
 
-  const requestSlideAudio = useCallback(async (slide) => {
-    if (!slide || slide.type === 'header') return null
-    if (!slide.subtitle || typeof slide.subtitle !== 'string') return null
-    if (slideAudioFailureRef.current.has(slide.id)) return null
+  // REFACTOR: Slideshow control hook for navigation, playback, and auto-advance
+  const slideshowControl = useSlideshowControl({
+    visibleSlides,
+    allTopicSlides,
+    uiState,
+    isVoiceAgentSpeaking,
+    isSlideNarrationPlaying,
+    isSlideNarrationReady,
+    getSlideDuration,
+    activeTopic,
+  })
 
-    // Check cache first - if already fetched, return immediately
-    const cached = getCachedSlideAudio(slide.id)
-    if (cached) return cached
-
-    // Check if slide already has persisted audioUrl (from localStorage)
-    // This means we've fetched TTS before and saved it with the slide
-    if (slide.audioUrl && typeof slide.audioUrl === 'string' && slide.audioUrl.startsWith('data:')) {
-      const persistedPayload = { audioUrl: slide.audioUrl, duration: slide.duration || DEFAULT_SLIDE_DURATION }
-      slideAudioCacheRef.current.set(slide.id, persistedPayload)
-      logger.debug('AUDIO', 'Using persisted audioUrl from slide', { slideId: slide.id })
-      return persistedPayload
-    }
-
-    // Check if request is already in flight - return that promise to await it
-    const inFlight = slideAudioRequestRef.current.get(slide.id)
-    if (inFlight) return inFlight
-
-    // Check rate limit backoff - only for NEW requests
-    const now = Date.now()
-    if (now < ttsRateLimitUntilRef.current) {
-      logger.debug('AUDIO', 'Skipping TTS request due to rate limit backoff', {
-        slideId: slide.id,
-        retryAfter: Math.ceil((ttsRateLimitUntilRef.current - now) / 1000),
-      })
-      return null
-    }
-
-    // Enforce minimum interval between NEW requests (prevents burst)
-    const timeSinceLastRequest = now - lastTtsRequestTimeRef.current
-    if (timeSinceLastRequest < TTS_PREFETCH_CONFIG.MIN_REQUEST_INTERVAL_MS) {
-      logger.debug('AUDIO', 'Skipping TTS request - too soon after last request', {
-        slideId: slide.id,
-        waitMs: TTS_PREFETCH_CONFIG.MIN_REQUEST_INTERVAL_MS - timeSinceLastRequest,
-      })
-      return null
-    }
-
-    // Update last request time BEFORE making request to prevent concurrent requests
-    lastTtsRequestTimeRef.current = now
-
-    const requestPromise = (async () => {
-      try {
-        const response = await fetch('/api/voice/speak', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: slide.subtitle }),
-        })
-
-        // Handle rate limiting - don't permanently fail, just backoff
-        if (response.status === 429) {
-          ttsRateLimitUntilRef.current = Date.now() + TTS_PREFETCH_CONFIG.RATE_LIMIT_BACKOFF_MS
-          logger.warn('AUDIO', 'TTS rate limited, backing off', {
-            slideId: slide.id,
-            backoffMs: TTS_PREFETCH_CONFIG.RATE_LIMIT_BACKOFF_MS,
-          })
-          // Don't add to failure set - can retry after backoff
-          return null
-        }
-
-        if (!response.ok) {
-          slideAudioFailureRef.current.add(slide.id)
-          logger.warn('AUDIO', 'Slide narration TTS request failed', {
-            status: response.status,
-            slideId: slide.id,
-          })
-          return null
-        }
-
-        const data = await response.json()
-        if (!data?.audioUrl) {
-          // Check if the response indicates rate limiting from upstream API
-          if (data?.error?.includes('Rate limit') || data?.error?.includes('rate')) {
-            ttsRateLimitUntilRef.current = Date.now() + TTS_PREFETCH_CONFIG.RATE_LIMIT_BACKOFF_MS
-            logger.warn('AUDIO', 'TTS upstream rate limited, backing off', { slideId: slide.id })
-            return null
-          }
-          slideAudioFailureRef.current.add(slide.id)
-          return null
-        }
-
-        const duration = Number.isFinite(data.duration) && data.duration > 0
-          ? data.duration
-          : (slide.duration || DEFAULT_SLIDE_DURATION)
-        const audioPayload = { audioUrl: data.audioUrl, duration }
-        slideAudioCacheRef.current.set(slide.id, audioPayload)
-
-        // Persist audioUrl back to slide so historical slides play instantly
-        if (persistSlideAudioRef.current) {
-          persistSlideAudioRef.current(slide.id, data.audioUrl, duration)
-        }
-
-        return audioPayload
-      } catch (error) {
-        slideAudioFailureRef.current.add(slide.id)
-        logger.warn('AUDIO', 'Slide narration TTS request failed', {
-          error: error.message,
-          slideId: slide.id,
-        })
-        return null
-      } finally {
-        slideAudioRequestRef.current.delete(slide.id)
-      }
-    })()
-
-    slideAudioRequestRef.current.set(slide.id, requestPromise)
-    return requestPromise
-  }, [DEFAULT_SLIDE_DURATION, getCachedSlideAudio])
-
-  const prefetchSlideAudio = useCallback((slide) => {
-    if (!slide || slide.type === 'header') return
-    if (slideAudioFailureRef.current.has(slide.id)) return
-    if (slideAudioCacheRef.current.has(slide.id)) return
-    void requestSlideAudio(slide)
-  }, [requestSlideAudio])
-
-  const prefetchSlideNarrationBatch = useCallback((slides = []) => {
-    if (!Array.isArray(slides) || slides.length === 0) return
-
-    const batchId = Date.now()
-    ttsPrefetchBatchRef.current = batchId
-
-    const queue = slides.filter((slide) =>
-      slide &&
-      slide.type !== 'header' &&
-      slide.type !== 'suggestions' &&
-      typeof slide.subtitle === 'string' &&
-      slide.subtitle.trim().length > 0
-    )
-
-    let index = 0
-    let inFlight = 0
-
-    const pump = () => {
-      if (ttsPrefetchBatchRef.current !== batchId) return
-
-      while (inFlight < TTS_PREFETCH_CONFIG.MAX_CONCURRENCY && index < queue.length) {
-        const slide = queue[index++]
-        if (!slide || slideAudioFailureRef.current.has(slide.id)) continue
-        if (getCachedSlideAudio(slide.id)) continue
-        if (slideAudioRequestRef.current.has(slide.id)) continue
-
-        inFlight += 1
-        requestSlideAudio(slide)
-          .finally(() => {
-            inFlight -= 1
-            if (ttsPrefetchBatchRef.current !== batchId) return
-            if (index < queue.length || inFlight > 0) {
-              setTimeout(pump, TTS_PREFETCH_CONFIG.DELAY_MS)
-            }
-          })
-      }
-    }
-
-    pump()
-  }, [getCachedSlideAudio, requestSlideAudio])
-
-  const getSlideDuration = useCallback((slide) => {
-    if (!slide) return DEFAULT_SLIDE_DURATION
-    const cached = getCachedSlideAudio(slide.id)
-    return cached?.duration || slide.duration || DEFAULT_SLIDE_DURATION
-  }, [DEFAULT_SLIDE_DURATION, getCachedSlideAudio])
+  // Destructure slideshow control values
+  const {
+    currentIndex,
+    currentChildIndex,
+    isPlaying,
+    slideshowFinished,
+    isChapterPickerOpen,
+    activeChildSlides,
+    displayedSlide,
+    segments,
+    currentSegmentIndex,
+    currentSlideInSegment,
+    setCurrentIndex,
+    setCurrentChildIndex,
+    setIsPlaying,
+    setSlideshowFinished,
+    setIsChapterPickerOpen,
+    goToNextSlide,
+    goToPrevSlide,
+    goToChildNext,
+    goToChildPrev,
+    goToSegment,
+    togglePlayPause,
+    triggerSlideshowFinished,
+    wasManualNavRef,
+    pauseAfterCurrentSlideRef,
+    hasFinishedSlideshowRef,
+    isPlayingRef,
+  } = slideshowControl
 
   const interruptActiveAudio = useCallback(() => {
     if (voiceAgentAudioRef.current) {
@@ -1850,6 +1064,10 @@ function App() {
       slideResponseAudioRef.current.pause()
       slideResponseAudioRef.current = null
     }
+
+    // Clear the hand-raise pause flag and saved position since we're fully interrupting
+    audioWasPausedForHandRaiseRef.current = false
+    savedAudioPositionRef.current = null
 
     voiceAgentBusyRef.current = false
     resumeListeningAfterVoiceAgentRef.current = false
@@ -1867,144 +1085,71 @@ function App() {
   }, [])
 
   /**
-   * Queue a voice-agent line to be spoken via Gemini TTS.
-   * If options.audioUrl is provided, uses pre-generated audio instead of fetching.
+   * Pause slide audio for hand raise without destroying the audio object.
+   * This preserves the playback position so we can resume later.
    */
-  const enqueueVoiceAgentMessage = useCallback((text, options = {}) => {
-    if (!text || typeof text !== 'string') return
-    const trimmed = text.trim()
-    if (!trimmed) return
-
-    const entry = {
-      id: `va_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      text: trimmed,
-      priority: options.priority || 'normal',
-      waitForAudio: options.waitForAudio !== false,
-      onComplete: typeof options.onComplete === 'function' ? options.onComplete : null,
-      completeOnError: options.completeOnError === true,
-      audioUrl: options.audioUrl || null, // Pre-generated audio URL (skips /api/voice/speak)
+  const pauseSlideAudioForHandRaise = useCallback(() => {
+    // Stop voice agent audio completely (we won't resume this)
+    if (voiceAgentAudioRef.current) {
+      voiceAgentAudioRef.current.pause()
+      voiceAgentAudioRef.current = null
+    }
+    // Stop slide response audio completely (we won't resume this)
+    if (slideResponseAudioRef.current) {
+      slideResponseAudioRef.current.pause()
+      slideResponseAudioRef.current = null
     }
 
-    setVoiceAgentQueue((prev) => {
-      if (entry.priority === 'high') {
-        return [entry, ...prev]
+    // Pause slide narration but keep the audio object so we can resume
+    // Also save the position so we can restore it if the audio object gets destroyed
+    if (slideAudioRef.current && !slideAudioRef.current.paused && !slideAudioRef.current.ended) {
+      savedAudioPositionRef.current = {
+        slideId: displayedSlide?.id,
+        currentTime: slideAudioRef.current.currentTime,
       }
-      return [...prev, entry]
-    })
-  }, [])
+      slideAudioRef.current.pause()
+      audioWasPausedForHandRaiseRef.current = true
+      logger.info('AUDIO', 'Paused slide audio for hand raise', {
+        slideId: displayedSlide?.id,
+        currentTime: slideAudioRef.current.currentTime,
+      })
+    }
+
+    voiceAgentBusyRef.current = false
+    resumeListeningAfterVoiceAgentRef.current = false
+    setIsVoiceAgentSpeaking(false)
+    setIsSlideNarrationPlaying(false)
+    setHighlightPosition(null)
+
+    if (slideTransitionTimeoutRef.current) {
+      clearTimeout(slideTransitionTimeoutRef.current)
+      slideTransitionTimeoutRef.current = null
+    }
+  }, [displayedSlide?.id])
 
   /**
-   * Helper to fetch TTS audio for a queue item.
-   * Returns the audioUrl on success, or null on failure.
+   * Resume slide audio after hand is lowered.
+   * Only resumes if the audio was paused by hand raise.
+   * Sets isPlaying to true and lets the effect handle the actual resume.
    */
-  const fetchTtsForItem = useCallback(async (item) => {
-    // If item already has audio, return it
-    if (item.audioUrl) {
-      return item.audioUrl
+  const resumeSlideAudioAfterHandLower = useCallback(() => {
+    if (!audioWasPausedForHandRaiseRef.current) {
+      return false
     }
 
-    // Check if we already pre-fetched for this item
-    const prefetched = prefetchedTtsRef.current.get(item.id)
-    if (prefetched) {
-      return prefetched
-    }
+    audioWasPausedForHandRaiseRef.current = false
 
-    // Check rate limit backoff
-    const now = Date.now()
-    if (now < ttsRateLimitUntilRef.current) {
-      logger.debug('AUDIO', 'Skipping voice agent TTS due to rate limit backoff', {
-        itemId: item.id,
+    if (slideAudioRef.current && slideAudioRef.current.paused && !slideAudioRef.current.ended) {
+      logger.info('AUDIO', 'Resuming slide audio after hand lowered', {
+        currentTime: slideAudioRef.current.currentTime,
       })
-      return null
+      // Set isPlaying to true - the slide audio effect will handle the actual resume
+      setIsPlaying(true)
+      return true
     }
 
-    // Enforce minimum interval between requests
-    const timeSinceLastRequest = now - lastTtsRequestTimeRef.current
-    if (timeSinceLastRequest < TTS_PREFETCH_CONFIG.MIN_REQUEST_INTERVAL_MS) {
-      logger.debug('AUDIO', 'Skipping voice agent TTS - too soon after last request', {
-        itemId: item.id,
-      })
-      return null
-    }
-
-    // Update last request time BEFORE making request
-    lastTtsRequestTimeRef.current = now
-
-    try {
-      const response = await fetch('/api/voice/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: item.text }),
-      })
-
-      // Handle rate limiting
-      if (response.status === 429) {
-        ttsRateLimitUntilRef.current = Date.now() + TTS_PREFETCH_CONFIG.RATE_LIMIT_BACKOFF_MS
-        logger.warn('AUDIO', 'Voice agent TTS rate limited, backing off', {
-          itemId: item.id,
-        })
-        return null
-      }
-
-      if (!response.ok) {
-        logger.warn('AUDIO', 'Voice agent TTS request failed', {
-          status: response.status,
-          itemId: item.id,
-        })
-        return null
-      }
-
-      const data = await response.json()
-      if (!data?.audioUrl) {
-        // Check for upstream rate limiting
-        if (data?.error?.includes('Rate limit') || data?.error?.includes('rate')) {
-          ttsRateLimitUntilRef.current = Date.now() + TTS_PREFETCH_CONFIG.RATE_LIMIT_BACKOFF_MS
-          return null
-        }
-        return null
-      }
-
-      return data.audioUrl
-    } catch (error) {
-      logger.warn('AUDIO', 'Voice agent TTS fetch failed', {
-        error: error.message,
-        itemId: item.id,
-      })
-      return null
-    }
+    return false
   }, [])
-
-  /**
-   * JIT TTS: Pre-fetch audio for the next item in queue.
-   * Called when starting to play the current item.
-   */
-  const prefetchNextItemTts = useCallback(async (currentItemId) => {
-    const queue = voiceAgentQueueRef.current
-    const currentIndex = queue.findIndex((item) => item.id === currentItemId)
-    const nextItem = queue[currentIndex + 1]
-
-    if (!nextItem) {
-      return // No next item to prefetch
-    }
-
-    // Skip if next item already has audio or is already being prefetched
-    if (nextItem.audioUrl || prefetchedTtsRef.current.has(nextItem.id)) {
-      return
-    }
-
-    logger.info('AUDIO', 'JIT TTS: Pre-fetching audio for next item', {
-      nextItemId: nextItem.id,
-    })
-
-    const audioUrl = await fetchTtsForItem(nextItem)
-    if (audioUrl) {
-      // Store in prefetch cache - will be used when this item's turn comes
-      prefetchedTtsRef.current.set(nextItem.id, audioUrl)
-      logger.info('AUDIO', 'JIT TTS: Pre-fetch complete', {
-        nextItemId: nextItem.id,
-      })
-    }
-  }, [fetchTtsForItem])
 
   /**
    * Process queued voice-agent messages sequentially with JIT TTS.
@@ -2064,43 +1209,26 @@ function App() {
         await waitForActiveAudioToEnd()
       }
 
-      // Re-check that item is still in queue after waiting
       if (!voiceAgentQueueRef.current.some((item) => item.id === currentItem.id)) {
         voiceAgentBusyRef.current = false
         return
       }
 
       try {
-        // Get audio URL: check prefetch cache first, then item's audioUrl, then fetch
-        let audioUrl = prefetchedTtsRef.current.get(currentItem.id)
-          || currentItem.audioUrl
-
+        let audioUrl = prefetchedTtsRef.current.get(currentItem.id) || currentItem.audioUrl
+        if (!audioUrl) audioUrl = await fetchTtsForItem(currentItem)
         if (!audioUrl) {
-          // Need to fetch TTS for current item (first item or prefetch failed)
-          audioUrl = await fetchTtsForItem(currentItem)
-        }
-
-        if (!audioUrl) {
-          // TTS failed - skip this item
           finishItem(false)
           return
         }
-
-        // Clean up prefetch cache entry now that we're using it
         prefetchedTtsRef.current.delete(currentItem.id)
 
         const audio = new Audio(audioUrl)
         voiceAgentAudioRef.current = audio
         setIsVoiceAgentSpeaking(true)
-
-        // JIT TTS: Start pre-fetching the NEXT item's audio while this one plays
         prefetchNextItemTts(currentItem.id)
 
-        const handleDone = () => {
-          finishItem()
-        }
-
-        audio.addEventListener('ended', handleDone, { once: true })
+        audio.addEventListener('ended', () => finishItem(), { once: true })
         audio.addEventListener('error', () => finishItem(false), { once: true })
 
         audio.play().catch((error) => {
@@ -2147,65 +1275,11 @@ function App() {
   }, [topics])
 
 
-  // Navigation helper functions with bounds checking (F044)
-  // CORE032: 2D Navigation Logic
-  const goToNextSlide = useCallback(() => {
-    wasManualNavRef.current = true // CORE036: Mark as manual navigation
-    setCurrentIndex((prev) => {
-      const nextIndex = Math.min(visibleSlides.length - 1, prev + 1)
-      if (nextIndex !== prev) {
-        setCurrentChildIndex(null) // Reset vertical position when moving horizontally
-      }
-      return nextIndex
-    })
-  }, [visibleSlides.length])
+  // Note: Navigation callbacks (goToNextSlide, goToPrevSlide, goToChildNext, goToChildPrev, togglePlayPause)
+  // are now provided by useSlideshowControl hook
 
-  const goToPrevSlide = useCallback(() => {
-    wasManualNavRef.current = true // CORE036: Mark as manual navigation
-    setCurrentIndex((prev) => {
-      const nextIndex = Math.max(0, prev - 1)
-      if (nextIndex !== prev) {
-        setCurrentChildIndex(null)
-      }
-      return nextIndex
-    })
-  }, [])
-
-  const goToChildNext = useCallback(() => {
-    if (activeChildSlides.length === 0) return
-    wasManualNavRef.current = true // CORE036: Mark as manual navigation
-    setCurrentChildIndex((prev) => {
-      if (prev === null) return 0
-      return Math.min(activeChildSlides.length - 1, prev + 1)
-    })
-  }, [activeChildSlides.length])
-
-  const goToChildPrev = useCallback(() => {
-    wasManualNavRef.current = true // CORE036: Mark as manual navigation
-    setCurrentChildIndex((prev) => {
-      if (prev === null || prev === 0) return null
-      return prev - 1
-    })
-  }, [])
-
-  const togglePlayPause = useCallback(() => {
-    setIsPlaying((prev) => !prev)
-  }, [])
-
-  /**
-   * Show a toast notification (F047)
-   * @param {string} message - Message to display
-   */
-  const showToast = useCallback((message) => {
-    setToast({ visible: true, message })
-  }, [])
-
-  /**
-   * Hide the toast notification
-   */
-  const hideToast = useCallback(() => {
-    setToast({ visible: false, message: '' })
-  }, [])
+  const showToast = useCallback((message) => setToast({ visible: true, message }), [])
+  const hideToast = useCallback(() => setToast({ visible: false, message: '' }), [])
 
   /**
    * Toggle a question's queue status (F047)
@@ -2223,15 +1297,6 @@ function App() {
       return [...prev, question]
     })
   }, [showToast])
-
-  /**
-   * Check if a question is currently in the queue
-   * @param {string} question - Question to check
-   * @returns {boolean} Whether the question is queued
-   */
-  const isQuestionQueued = useCallback((question) => {
-    return questionQueue.includes(question)
-  }, [questionQueue])
 
   const clearFunFactRefresh = useCallback(() => {
     currentQueryRef.current = null
@@ -2414,202 +1479,8 @@ function App() {
     // race condition where suggestions narrate after slides are ready
   }, [engagement, enqueueVoiceAgentMessage, refreshFunFact])
 
-  // Auto-advance slideshow for non-audio slides (F044)
-  // - Header slides: advance after 2 seconds (no audio)
-  // - Suggestions slides: advance after duration (no audio)
-  // - Regular slides with audio: handled by audio onended, NOT this timer
-  // - Regular slides with failed audio: fallback timer advancement
-  useEffect(() => {
-    // Only run auto-advance when in slideshow state, playing, and slides exist
-    if (uiState !== UI_STATE.SLIDESHOW || !isPlaying || isVoiceAgentSpeaking || visibleSlides.length === 0) {
-      return
-    }
-
-    const currentSlide = displayedSlide
-
-    // Wait for narration to be ready (header slides are always "ready")
-    if (currentSlide?.type !== 'header' && currentSlide?.type !== 'suggestions' && !isSlideNarrationReady) {
-      return
-    }
-
-    // For regular slides with audio playing, let audio onended handle advancement
-    // This timer only handles: headers, suggestions, and audio failure fallback
-    if (currentSlide?.type !== 'header' && currentSlide?.type !== 'suggestions' && isSlideNarrationPlaying) {
-      return
-    }
-
-    // Get duration for current slide (in milliseconds)
-    // Header slides advance faster since they're just dividers (2 seconds)
-    // Add transition pause for non-header slides
-    const baseDuration = currentSlide?.type === 'header'
-      ? 2000
-      : getSlideDuration(currentSlide)
-    const duration = currentSlide?.type === 'header'
-      ? baseDuration
-      : baseDuration + SLIDE_TRANSITION_PAUSE_MS
-
-    const timeoutId = setTimeout(() => {
-      if (pauseAfterCurrentSlideRef.current) {
-        pauseAfterCurrentSlideRef.current = false
-        setIsPlaying(false)
-        return
-      }
-
-      // CORE036: Reset manual nav flag for auto-advance (enables streaming subtitles)
-      wasManualNavRef.current = false
-
-      // CORE032: 2D Auto-advance Logic
-      // Try to go to next child first
-      if (activeChildSlides.length > 0) {
-        if (currentChildIndex === null) {
-          setCurrentChildIndex(0)
-          return
-        } else if (currentChildIndex < activeChildSlides.length - 1) {
-          setCurrentChildIndex(prev => prev + 1)
-          return
-        }
-      }
-
-      // If no more children, go to next parent
-      setCurrentIndex((prev) => {
-        const nextIndex = prev + 1
-        // If we reach the end, stop playing and mark slideshow as finished (F048)
-        if (nextIndex >= visibleSlides.length) {
-          setIsPlaying(false)
-          // Trigger state update outside setter for Socratic mode
-          setTimeout(() => triggerSlideshowFinished(), 0)
-          return prev
-        }
-        setCurrentChildIndex(null) // Reset child index when moving to next parent
-        return nextIndex
-      })
-    }, duration)
-
-    // Cleanup timeout on unmount or when dependencies change
-    return () => clearTimeout(timeoutId)
-  }, [
-    uiState,
-    isPlaying,
-    isVoiceAgentSpeaking,
-    isSlideNarrationReady,
-    isSlideNarrationPlaying,
-    currentIndex,
-    currentChildIndex,
-    activeChildSlides.length,
-    visibleSlides,
-    displayedSlide,
-    getSlideDuration,
-    triggerSlideshowFinished,
-  ])
-
-  // Keyboard navigation for slideshow
-  // Arrow keys navigate between slides, Space bar toggles play/pause
-  useEffect(() => {
-    // Only enable keyboard navigation during slideshow
-    if (uiState !== UI_STATE.SLIDESHOW) {
-      return
-    }
-
-    const handleKeyDown = (event) => {
-      // Ignore keyboard events when user is typing in an input
-      if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-        return
-      }
-
-      switch (event.key) {
-        case 'ArrowRight':
-          event.preventDefault()
-          goToNextSlide()
-          break
-        case 'ArrowLeft':
-          event.preventDefault()
-          goToPrevSlide()
-          break
-        case 'ArrowDown':
-          event.preventDefault()
-          goToChildNext()
-          break
-        case 'ArrowUp':
-          event.preventDefault()
-          goToChildPrev()
-          break
-        case ' ':
-          // Space bar toggles play/pause
-          event.preventDefault()
-          togglePlayPause()
-          break
-        default:
-          break
-      }
-    }
-
-    // Add event listener
-    window.addEventListener('keydown', handleKeyDown)
-
-    // Cleanup on unmount or state change
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [uiState, goToNextSlide, goToPrevSlide, togglePlayPause])
-
-  // Start auto-play when entering slideshow state
-  useEffect(() => {
-    if (uiState === UI_STATE.SLIDESHOW && visibleSlides.length > 0) {
-      setIsPlaying(true)
-    }
-  }, [uiState, visibleSlides.length])
-
-  // Mark slideshow finished when user manually pauses on the final slide.
-  useEffect(() => {
-    if (manualFinishTimeoutRef.current) {
-      clearTimeout(manualFinishTimeoutRef.current)
-      manualFinishTimeoutRef.current = null
-    }
-
-    if (uiState !== UI_STATE.SLIDESHOW || slideshowFinished) {
-      return
-    }
-
-    if (isPlaying || isSlideNarrationPlaying || visibleSlides.length === 0) {
-      return
-    }
-
-    const isAtLastParent = currentIndex >= visibleSlides.length - 1
-    if (!isAtLastParent) {
-      return
-    }
-
-    const hasChildren = activeChildSlides.length > 0
-    const isAtLastChild = hasChildren
-      ? currentChildIndex !== null && currentChildIndex >= activeChildSlides.length - 1
-      : currentChildIndex === null
-
-    if (!isAtLastChild) {
-      return
-    }
-
-    manualFinishTimeoutRef.current = setTimeout(() => {
-      manualFinishTimeoutRef.current = null
-      triggerSlideshowFinished()
-    }, MANUAL_FINISH_GRACE_MS)
-
-    return () => {
-      if (manualFinishTimeoutRef.current) {
-        clearTimeout(manualFinishTimeoutRef.current)
-        manualFinishTimeoutRef.current = null
-      }
-    }
-  }, [
-    uiState,
-    slideshowFinished,
-    isPlaying,
-    isSlideNarrationPlaying,
-    currentIndex,
-    currentChildIndex,
-    activeChildSlides.length,
-    visibleSlides.length,
-    triggerSlideshowFinished,
-  ])
+  // Note: Auto-advance, keyboard navigation, start auto-play, and manual finish detection
+  // effects are now handled by useSlideshowControl hook
 
   // Prefetch TTS for upcoming slides (limited to avoid rate limits)
   useEffect(() => {
@@ -2675,7 +1546,12 @@ function App() {
       lastSlideIdRef.current = slideId
       setIsSlideNarrationPlaying(false)
       setIsSlideNarrationReady(false)
-      setIsSlideNarrationLoading(false)
+      // Set loading true initially for content slides that need TTS
+      // This prevents the fallback timeout in StreamingSubtitle from showing all text at once
+      const needsTts = currentSlide?.type !== 'header' &&
+                       currentSlide?.type !== 'suggestions' &&
+                       !getCachedSlideAudio(currentSlide?.id)
+      setIsSlideNarrationLoading(needsTts)
     }
 
     // CORE023, CORE024: Stop slide response audio and clear highlight when navigating
@@ -2689,11 +1565,15 @@ function App() {
         slideResponseAudioRef.current = null
       }
       setHighlightPosition(null)
+      // Clear hand-raise pause flag and saved position since we can't resume to a different slide
+      audioWasPausedForHandRaiseRef.current = false
+      savedAudioPositionRef.current = null
     }
 
     if (currentSlide?.type === 'header') {
       setIsSlideNarrationPlaying(false)
       setIsSlideNarrationReady(true)
+      setIsSlideNarrationLoading(false)
       prefetchSlideAudio(getNextSlideForPrefetch())
       return
     }
@@ -2702,6 +1582,7 @@ function App() {
     if (currentSlide?.type === 'suggestions') {
       setIsSlideNarrationPlaying(false)
       setIsSlideNarrationReady(true)
+      setIsSlideNarrationLoading(false)
       return
     }
 
@@ -2710,6 +1591,7 @@ function App() {
         slideAudioRef.current.pause()
       }
       setIsSlideNarrationPlaying(false)
+      setIsSlideNarrationLoading(false)
       return
     }
 
@@ -2766,7 +1648,8 @@ function App() {
         let attempts = 0
         while (!audioPayload?.audioUrl && attempts < maxAttempts) {
           attempts += 1
-          audioPayload = await requestSlideAudio(currentSlide)
+          // Use priority flag for current slide to bypass rate limiting
+          audioPayload = await requestSlideAudio(currentSlide, { priority: true })
           if (cancelled) return
 
           if (audioPayload?.audioUrl || slideAudioFailureRef.current.has(currentSlide.id)) {
@@ -2814,8 +1697,17 @@ function App() {
         slideIndex: currentIndex,
       })
 
-      // Start from the beginning
-      audio.currentTime = 0
+      // Restore saved position if available (from hand raise interrupt), otherwise start from beginning
+      if (savedAudioPositionRef.current?.slideId === currentSlide.id) {
+        audio.currentTime = savedAudioPositionRef.current.currentTime
+        logger.info('AUDIO', 'Restored audio position from hand raise', {
+          slideId: currentSlide.id,
+          restoredTime: savedAudioPositionRef.current.currentTime,
+        })
+        savedAudioPositionRef.current = null
+      } else {
+        audio.currentTime = 0
+      }
 
       // SYNC FIX: Set playing state only when audio ACTUALLY starts playing
       // This ensures StreamingSubtitle animation is synchronized with audio
@@ -2879,7 +1771,6 @@ function App() {
               // If we reach the end, stop playing and mark slideshow as finished
               if (nextIndex >= visibleSlides.length) {
                 setIsPlaying(false)
-                // Trigger state update outside setter for Socratic mode
                 setTimeout(() => triggerSlideshowFinished(), 0)
                 return prev
               }
@@ -2969,7 +1860,33 @@ function App() {
     return () => clearTimeout(timer)
   }, [slideshowFinished, questionQueue])
 
-  // SOCRATIC-003: Trigger Socratic mode when slideshow finishes (no queued questions)
+  // WB015: Award XP for quick mode (no world piece) - defined before useEffect that uses it
+  const awardQuickXP = useCallback(async () => {
+    if (!wsClientId) return
+
+    try {
+      const response = await fetch('/api/world/quick-xp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: wsClientId }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        showQuickXp(data.xpEarned)
+        logger.info('QUICK_XP', 'Quick mode XP awarded', { xpEarned: data.xpEarned, totalXP: data.totalXP })
+
+        // Refresh world stats to reflect new XP
+        if (typeof refreshWorldStats === 'function') {
+          refreshWorldStats()
+        }
+      }
+    } catch (error) {
+      logger.error('QUICK_XP', 'Failed to award quick mode XP', { error: error.message })
+    }
+  }, [wsClientId])
+
+  // WB018: Trigger quiz prompt (Full mode) when slideshow finishes
   useEffect(() => {
     // Only trigger when slideshow just finished and NO queued questions
     if (!slideshowFinished || questionQueue.length > 0) {
@@ -2987,9 +1904,9 @@ function App() {
       return
     }
 
-    // Delay before transitioning to Socratic mode
+    // Delay before transitioning to next mode
     const timer = setTimeout(() => {
-      // Prepare Socratic mode data (use ref for latest slides)
+      // Get topic data (use ref for latest)
       const topic = activeTopicRef.current
       if (!topic || topic.id !== activeTopicId) return
 
@@ -2998,47 +1915,391 @@ function App() {
 
       const contentSlides = currentSlides.filter(s => s.type !== 'header')
       if (contentSlides.length > 0) {
-        setSocraticSlides(contentSlides)
-        setSocraticTopicName(topic.name || 'this topic')
-        // Detect language from first slide subtitle
-        const firstSubtitle = contentSlides[0]?.subtitle || ''
-        const hasChineseChars = /[\u4e00-\u9fff]/.test(firstSubtitle)
-        setSocraticLanguage(hasChineseChars ? 'zh' : 'en')
-
-        // Reset flags and transition to Socratic mode
+        // Reset slideshow flags
         hasFinishedSlideshowRef.current = false
         setSlideshowFinished(false)
-        setUiState(UI_STATE.SOCRATIC)
+
+        // WB018: Branch based on learn mode
+        if (learnMode === 'full') {
+          // Full mode: Show mode selector (Mystery Lab, Wonder Lab, Story Studio)
+          setLearnModeOrigin('after_slideshow')
+          setUiState(UI_STATE.MODE_SELECTOR)
+        } else {
+          // Quick mode: End after slideshow and award quick XP (WB015)
+          awardQuickXP()
+          setUiState(UI_STATE.HOME)
+        }
       }
     }, 2000) // 2 second delay to let user absorb final slide
 
     return () => clearTimeout(timer)
-  }, [slideshowFinished, questionQueue.length, activeTopicId]) // Removed visibleSlides - using ref instead
+  }, [slideshowFinished, questionQueue.length, activeTopicId, learnMode, awardQuickXP]) // WB015: Added awardQuickXP dependency
 
-  // SOCRATIC-003: Handle Socratic mode completion
-  const handleSocraticComplete = useCallback(() => {
-    setUiState(UI_STATE.HOME)
-    setSocraticSlides([])
-  }, [])
+  // Learning Modes: Handle mode selection (Mystery Lab, Wonder Lab, Story Studio)
+  const handleModeSelect = useCallback((mode) => {
+    logger.info('LEARN_MODE', 'Mode selected', { mode, topicName: activeTopic?.name })
 
-  // SOCRATIC-003: Handle Socratic skip
-  const handleSocraticSkip = useCallback(() => {
-    setUiState(UI_STATE.HOME)
-    setSocraticSlides([])
-  }, [])
+    // Set the selected mode and navigate to LEARN_MODE state
+    // Preserve origin if Mode Selector was opened from Progress (e.g. "Quick Quiz").
+    setLearnModeOrigin((prev) => prev || 'after_slideshow')
+    setSelectedLearningMode(mode)
+    setUiState(UI_STATE.LEARN_MODE)
+  }, [activeTopic, setUiState])
 
-  // SOCRATIC-003: Handle follow-up from Socratic feedback
-  const handleSocraticFollowUp = useCallback((question) => {
-    setUiState(UI_STATE.LISTENING)
-    setSocraticSlides([])
-    // Record Socratic answer for gamification
-    recordSocraticAnswered()
-    // Trigger the follow-up question
-    const runHandleQuestion = handleQuestionRef.current
-    if (runHandleQuestion) {
-      runHandleQuestion(question)
+  const persistCompletedModeSession = useCallback((payload) => {
+    const clientId = userClientId || getClientId()
+    if (!clientId || !payload?.mode || !payload?.topicId) {
+      return
     }
-  }, [recordSocraticAnswered])
+
+    fetch(toApiUrl('/api/modes/save'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientId,
+        mode: payload.mode,
+        topicId: payload.topicId,
+        topicName: payload.topicName,
+        versionId: payload.versionId,
+        completedAt: payload.completedAt || Date.now(),
+        session: payload.session || {},
+      }),
+    }).catch((error) => {
+      logger.warn('MODES', 'Failed to persist completed mode session', {
+        error: error.message,
+        mode: payload.mode,
+        topicId: payload.topicId,
+      })
+    })
+  }, [userClientId])
+
+  // Learning Modes: Handle learning mode completion with XP + graph mastery updates
+  const handleLearningModeComplete = useCallback(async (result) => {
+    const origin = learnModeOrigin
+
+    logger.info('LEARN_MODE', 'Learning mode completed', {
+      mode: selectedLearningMode,
+      origin,
+      completed: result?.completed,
+      xpEarned: result?.xpEarned
+    })
+
+    const topicName = activeTopic?.name || ''
+    const topicId = activeTopic?.id || topicName
+    const activeVersionId = activeTopic?.versions?.[activeTopic?.currentVersionIndex ?? 0]?.id || ''
+
+    const modeCompleted = result?.completed ?? (result?.xpEarned > 0)
+
+    // Show XP earned toast
+    if (result?.xpEarned > 0) {
+      showQuickXp(result.xpEarned)
+    }
+
+    if (modeCompleted) {
+      if (selectedLearningMode === 'mystery') {
+        recordMysteryCompleted()
+      } else if (selectedLearningMode === 'whatif') {
+        recordWonderCompleted()
+      } else if (selectedLearningMode === 'story') {
+        recordStoryCompleted()
+      }
+    }
+
+    const persistenceModeMap = { mystery: 'mystery', whatif: 'wonder', story: 'story' }
+    const persistenceMode = persistenceModeMap[selectedLearningMode]
+    if (modeCompleted && persistenceMode && topicId) {
+      const defaultSession = {
+        completedAt: Date.now(),
+        completed: true,
+        xpEarned: result?.xpEarned || 0,
+        correctCount: result?.correctCount ?? null,
+        totalCount: result?.totalCount ?? null,
+        score: typeof result?.score === 'number' ? result.score : null,
+      }
+
+      persistCompletedModeSession({
+        mode: persistenceMode,
+        topicId,
+        topicName,
+        versionId: activeVersionId,
+        completedAt: result?.session?.completedAt || Date.now(),
+        session: result?.session && typeof result.session === 'object'
+          ? result.session
+          : defaultSession,
+      })
+    }
+
+    // Highlight the completed topic on the Journey tab
+    if (modeCompleted && topicName) {
+      setHighlightTopicName(topicName)
+      setTimeout(() => setHighlightTopicName(null), 4000)
+    }
+
+    // Update per-mode mastery in Knowledge Graph (Bloom's Taxonomy)
+    if (modeCompleted && topicId) {
+      const masteryScore = typeof result?.score === 'number'
+        ? result.score
+        : (result?.correctCount && result?.totalCount)
+          ? result.correctCount / result.totalCount
+          : 0.7
+
+      // Map UI mode names to mastery score keys
+      const modeMap = { mystery: 'mystery', whatif: 'wonder', story: 'story' }
+      const masteryMode = modeMap[selectedLearningMode]
+
+      const graphNode = getGraphNodeByName(topicName)
+      if (graphNode && masteryMode) {
+        updateGraphMastery(graphNode.id, masteryMode, masteryScore)
+        logger.info('GRAPH', 'Updated mode mastery in knowledge graph', {
+          topicName,
+          mode: masteryMode,
+          masteryScore,
+          nodeId: graphNode.id
+        })
+      }
+    }
+
+    // Reset learn-mode state
+    setSelectedLearningMode(null)
+    setLearnModeOrigin(null)
+
+    if (origin === 'after_slideshow') {
+      setActiveTab('progress')
+      setUiState(UI_STATE.HOME)
+      return
+    }
+
+    if (origin === 'from_progress') {
+      setActiveTab('progress')
+      setUiState(UI_STATE.HOME)
+      return
+    }
+
+    setUiState(UI_STATE.HOME)
+  }, [
+    selectedLearningMode,
+    learnModeOrigin,
+    activeTopic,
+    showQuickXp,
+    setActiveTab,
+    setUiState,
+    getGraphNodeByName,
+    updateGraphMastery,
+    recordMysteryCompleted,
+    recordWonderCompleted,
+    recordStoryCompleted,
+    persistCompletedModeSession,
+  ])
+
+  // Learning Modes: Handle learning mode exit
+  const handleLearningModeExit = useCallback(() => {
+    const origin = learnModeOrigin
+    logger.info('LEARN_MODE', 'Learning mode exited', { mode: selectedLearningMode, origin })
+
+    // Reset learning mode state
+    setSelectedLearningMode(null)
+    setLearnModeOrigin(null)
+
+    if (origin === 'after_slideshow') {
+      setActiveTab('learn')
+      setUiState(UI_STATE.MODE_SELECTOR)
+      return
+    }
+
+    if (origin === 'from_progress') {
+      setActiveTab('progress')
+      setUiState(UI_STATE.HOME)
+      return
+    }
+
+    setUiState(UI_STATE.HOME)
+  }, [selectedLearningMode, learnModeOrigin, setActiveTab, setUiState])
+
+  // Mode Selector: Skip for now (should not route back to itself).
+  const handleModeSelectorSkip = useCallback(() => {
+    const origin = learnModeOrigin
+    logger.info('LEARN_MODE', 'Mode selector skipped', { origin, topicName: activeTopic?.name })
+
+    setSelectedLearningMode(null)
+    setLearnModeOrigin(null)
+
+    if (origin === 'from_progress') {
+      setActiveTab('progress')
+      setUiState(UI_STATE.HOME)
+      return
+    }
+
+    setActiveTab('learn')
+    setUiState(UI_STATE.HOME)
+  }, [learnModeOrigin, activeTopic, setActiveTab, setUiState])
+
+  /**
+   * Launch a learning mode for a specific topic from the Journey tab.
+   */
+  const handleLaunchLearningMode = useCallback(async (topicName, mode, topicData) => {
+    logger.info('LEARN_MODE', 'Launch learning mode for topic', { topicName, mode })
+
+    // Validate inputs
+    if (!topicName || !mode) {
+      logger.warn('LEARN_MODE', 'Invalid inputs for launch', { topicName, mode })
+      showToast('Unable to start learning mode', 'error')
+      return
+    }
+
+    // Find the topic in our topics list
+    const normalizedName = String(topicName).trim().toLowerCase()
+    const matchingTopic = topics.find((topic) =>
+      String(topic?.name || '').trim().toLowerCase() === normalizedName
+    )
+
+    if (matchingTopic) {
+      // Ensure slides are ready BEFORE entering the learning mode.
+      // Mystery/Wonder will call their APIs immediately on mount.
+      const hasSlidesInMemory = Array.isArray(matchingTopic.slides) && matchingTopic.slides.length > 0
+      if (!hasSlidesInMemory) {
+        const versionIndex = matchingTopic.currentVersionIndex ?? 0
+        const currentVersionId = matchingTopic.versions?.[versionIndex]?.id
+        const cachedSlides = loadSlidesForTopic(matchingTopic)
+        const hydratedSlides = cachedSlides || await fetchSlidesFromServer(matchingTopic.id, currentVersionId, versionIndex)
+
+        if (!hydratedSlides || hydratedSlides.length === 0) {
+          showToast('Topic slides not available', 'error')
+          return
+        }
+
+        const now = Date.now()
+        setTopics((prev) => {
+          const updated = prev.map((topic) => {
+            if (topic.id !== matchingTopic.id) return topic
+            const updatedVersions = Array.isArray(topic.versions)
+              ? topic.versions.map((v, idx) => (
+                  idx === versionIndex ? { ...v, slides: hydratedSlides } : v
+                ))
+              : topic.versions
+            return {
+              ...topic,
+              slides: hydratedSlides,
+              versions: updatedVersions,
+              lastAccessedAt: now,
+            }
+          })
+          return pruneSlideCache(updated, matchingTopic.id)
+        })
+      }
+
+      // Topic exists - set it active and launch mode
+      setActiveTopicId(matchingTopic.id)
+    } else if (topicData?.slides?.length > 0) {
+      // Topic not in list but has slides - can still work with slides
+      logger.info('LEARN_MODE', 'Topic not found, using provided slides', { topicName })
+    } else {
+      // No topic and no slides - can't proceed
+      showToast('Topic slides not available', 'error')
+      return
+    }
+
+    // Set the mode and transition to LEARN_MODE
+    setLearnModeOrigin('from_progress')
+    setSelectedLearningMode(mode)
+    setActiveTab('learn')
+    setUiState(UI_STATE.LEARN_MODE)
+  }, [topics, showToast, setActiveTopicId, setActiveTab, setUiState, fetchSlidesFromServer, pruneSlideCache])
+
+  /**
+   * Convenience handler for quick practice from Progress Tab
+   * Picks a random mode for the given topic
+   */
+  const handleQuickPractice = useCallback((topicName, topicData) => {
+    const modes = ['mystery', 'whatif', 'story']
+    const randomMode = modes[Math.floor(Math.random() * modes.length)]
+    handleLaunchLearningMode(topicName, randomMode, topicData)
+  }, [handleLaunchLearningMode])
+
+  const requestTopicQuiz = useCallback((piece) => {
+    if (!piece) return
+
+    const topicName = piece.topicName || piece.name
+    const topicId = piece.topicId || piece.id
+    const matchingTopic = topics.find((topic) =>
+      topic.id === topicId || (topicName && String(topic.name).trim().toLowerCase() === String(topicName).trim().toLowerCase())
+    )
+
+    if (!matchingTopic) {
+      showToast('Open this topic first to start a quiz')
+      setActiveTab('learn')
+      setUiState(UI_STATE.HOME)
+      return
+    }
+
+    setActiveTab('learn')
+    setActiveTopicId(matchingTopic.id)
+    setLearnModeOrigin('from_progress')
+    // Quiz UI is not a dedicated state; this routes to the Mode Selector for practice modes.
+    setUiState(UI_STATE.MODE_SELECTOR)
+  }, [topics, showToast, setActiveTab, setActiveTopicId, setUiState])
+
+  // WB018: Tab navigation handler with badge clearing
+  const handleTabChange = useCallback((tab) => {
+    if (tab === 'progress') {
+      // Clear world badge when user views progress
+      setWorldBadge(0)
+    }
+    setActiveTab(tab)
+  }, [])
+
+  // Handle quick quiz start from topic menus/tree
+  const handleQuizTabStartQuiz = useCallback(({ mode, topic }) => {
+    if (topic) {
+      requestTopicQuiz(topic)
+      return
+    }
+
+    if (mode) {
+      showToast('Pick a topic to start a quiz')
+    }
+  }, [requestTopicQuiz, showToast])
+
+  const handleReviewTopic = useCallback((piece) => {
+    requestTopicQuiz(piece)
+  }, [requestTopicQuiz])
+
+  const handleQuizTopic = useCallback((piece) => {
+    requestTopicQuiz(piece)
+  }, [requestTopicQuiz])
+
+  const handleLearnTopicFromPiece = useCallback((piece) => {
+    if (!piece) return
+    const topicName = piece.topicName || piece.name
+    const topicId = piece.topicId || piece.id
+    const matchingTopic = topics.find((topic) =>
+      topic.id === topicId || (topicName && topic.name === topicName)
+    )
+
+    setActiveTab('learn')
+    setUiState(UI_STATE.HOME)
+
+    if (matchingTopic) {
+      setActiveTopicId(matchingTopic.id)
+      return
+    }
+
+    if (topicName) {
+      setTextInput(topicName)
+    }
+  }, [topics, setActiveTab, setUiState, setActiveTopicId, setTextInput])
+
+  // UI008: Tier celebration handlers
+  const handleTierCelebrationClose = useCallback(() => {
+    dismissTierCelebration()
+    setUiState(UI_STATE.HOME)
+  }, [dismissTierCelebration, setUiState])
+
+  const handleTierViewWorld = useCallback(() => {
+    dismissTierCelebration()
+    setActiveTab('progress')
+    setWorldBadge(0) // Clear badge since they're viewing progress
+    setUiState(UI_STATE.HOME)
+  }, [dismissTierCelebration, setActiveTab, setWorldBadge, setUiState])
 
   /**
    * Analyzes audio frequency data to calculate overall audio level.
@@ -3535,24 +2796,31 @@ function App() {
   }, [isListening, stopListening])
 
   /**
-   * Raise-hand flow: interrupt narration and listen immediately.
+   * Raise-hand flow: pause narration and listen, or lower hand and resume.
    */
   const handleRaiseHandClick = useCallback(() => {
     if (isMicEnabled) {
+      // Lowering hand - stop listening and resume audio if it was paused
       setIsMicEnabled(false)
       cancelRaiseHand()
+      // Resume audio playback if we paused it when raising hand
+      if (uiState === UI_STATE.SLIDESHOW) {
+        resumeSlideAudioAfterHandLower()
+      }
       return
     }
 
+    // Raising hand - pause audio and start listening
     setIsMicEnabled(true)
     setAllowAutoListen(true)
     raiseHandRequestRef.current = false
     setIsRaiseHandPending(false)
     emptyTranscriptRetryRef.current = 0
     setVoiceAgentQueue([])
-    interruptActiveAudio()
 
     if (uiState === UI_STATE.SLIDESHOW) {
+      // Use the new pause function that preserves audio position
+      pauseSlideAudioForHandRaise()
       pauseAfterCurrentSlideRef.current = false
       setIsPlaying(false)
 
@@ -3568,6 +2836,9 @@ function App() {
           topicId: resumePoint.topicId,
         })
       }
+    } else {
+      // Not in slideshow - use full interrupt
+      interruptActiveAudio()
     }
 
     playMicOnSound()
@@ -3580,749 +2851,102 @@ function App() {
     currentIndex,
     startListening,
     interruptActiveAudio,
+    pauseSlideAudioForHandRaise,
+    resumeSlideAudioAfterHandLower,
   ])
 
   /**
-   * Classify a query to determine if it's a follow-up, new topic, slide question, or chitchat
-   * CORE023: Added slide_question classification support
-   * F068: Logs API request and response
-   * @param {string} query - The user's question
-   * @param {AbortSignal} signal - AbortController signal for cancellation (F053)
-   * @returns {Promise<{classification: string, shouldEvictOldest: boolean, evictTopicId: string|null, responseText?: string}>}
+   * Callback when a new topic is created in useQuestionHandler.
+   * Adds the topic to the Knowledge Graph for constellation visualization.
    */
-  const classifyQuery = async (query, signal) => {
-    const activeTopicId = activeTopic?.id || null
-
-    // F068: Start timing for classify API
-    logger.time('API', 'classify-request')
-    logger.info('API', 'POST /api/classify', {
-      endpoint: '/api/classify',
-      method: 'POST',
-      activeTopicId,
-    })
-
-    // CORE023: Get current slide context for slide_question detection
-    // Only include context if we're in slideshow state with a valid content slide
-    const currentSlide = uiState === UI_STATE.SLIDESHOW &&
-      activeTopic &&
-      visibleSlides[currentIndex] &&
-      visibleSlides[currentIndex].type !== 'header'
-      ? {
-          subtitle: visibleSlides[currentIndex].subtitle || '',
-          topicName: activeTopic.name,
-        }
-      : null
+  const handleTopicCreated = useCallback(async (topicData) => {
+    if (!topicData?.name) return
 
     try {
-      const response = await fetch('/api/classify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: query.trim(),
-          activeTopicId,
-          activeTopic: activeTopic
-            ? {
-                name: activeTopic.name,
-                icon: activeTopic.icon,
-              }
-            : null,
-          conversationHistory: [], // Could be enhanced with actual history
-          topicCount: topics.length,
-          oldestTopicId: topics.length > 0 ? topics[0].id : null,
-          // CORE023: Include current slide context for slide_question detection
-          currentSlide,
-        }),
-        signal,
+      const createdNode = await addTopicToGraph({
+        id: topicData.id,
+        name: topicData.name,
+        concepts: topicData.concepts || [],
+        slides: topicData.slides || [],
       })
 
-      // F068: Log response status and timing
-      logger.timeEnd('API', 'classify-request')
-
-      if (!response.ok) {
-        logger.error('API', 'Classify request failed', {
-          endpoint: '/api/classify',
-          status: response.status,
+      if (topicData.suggestedTopicMeta?.name) {
+        const { name, connectsTo } = topicData.suggestedTopicMeta
+        resolveSuggestedGap({
+          nodeId: createdNode?.id,
+          topicName: createdNode?.name,
+          suggestedName: name,
+          connectsTo,
         })
-        throw new Error(`Classify API failed: ${response.status}`)
       }
 
-      const result = await response.json()
-      logger.info('API', 'Classify response received', {
-        classification: result.classification,
-        status: response.status,
-      })
-
-      return result
+      logger.info('GRAPH', 'Added topic to knowledge graph', { topicName: topicData.name })
     } catch (error) {
-      // Re-throw abort errors to be handled upstream
-      if (error.name === 'AbortError') {
-        logger.debug('API', 'Classify request aborted by user')
-        throw error
-      }
-      // F068: Log classification error
-      logger.error('API', 'Classification request failed', {
-        endpoint: '/api/classify',
-        error: error.message,
-      })
-      // Default to new topic on error
-      return {
-        classification: 'new_topic',
-        shouldEvictOldest: false,
-        evictTopicId: null,
-      }
+      logger.warn('GRAPH', 'Failed to add topic to knowledge graph', { error: error.message })
     }
-  }
-
-  /**
-   * Request a short chitchat response from the backend.
-   * @param {string} query - The user's message
-   * @param {AbortSignal} signal - AbortController signal for cancellation
-   * @returns {Promise<{responseText: string}|null>}
-   */
-  const requestChitchatResponse = async (query, signal) => {
-    logger.time('API', 'chitchat-request')
-    logger.info('API', 'POST /api/chitchat', {
-      endpoint: '/api/chitchat',
-      method: 'POST',
-    })
-
-    try {
-      const response = await fetch('/api/chitchat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: query.trim(),
-          activeTopicName: activeTopic?.name || '',
-        }),
-        signal,
-      })
-
-      logger.timeEnd('API', 'chitchat-request')
-
-      if (!response.ok) {
-        logger.warn('API', 'Chitchat request failed', {
-          status: response.status,
-        })
-        return null
-      }
-
-      const result = await response.json()
-      logger.info('API', 'Chitchat response received', {
-        status: response.status,
-      })
-
-      return result
-    } catch (error) {
-      if (error.name === 'AbortError') {
-        logger.debug('API', 'Chitchat request aborted by user')
-        throw error
-      }
-      logger.warn('API', 'Chitchat request failed', {
-        error: error.message,
-      })
-      return null
-    }
-  }
-
-  /**
-   * Handle a user question (from voice or text input)
-   * Classifies the query, handles follow-up vs new topic, manages slide cache
-   * F015: Sends clientId to API for WebSocket progress updates
-   * F039: Follow-up appends slides
-   * F040: New topic creates header card
-   * F041: Slide cache limits in-memory topics
-   * F052: Network error shows retry option
-   * F053: Generation timeout handled with AbortController
-   */
-  const handleQuestion = async (query, options = {}) => {
-    const trimmedQuery = query.trim()
-    if (!trimmedQuery) return
-    const { source = 'text' } = options
-
-    if (source !== 'voice' && uiState === UI_STATE.SLIDESHOW) {
-      pauseAfterCurrentSlideRef.current = false
-      interruptActiveAudio()
-      setIsPlaying(false)
-    }
-
-    // Lower the hand after a question so listening only resumes on explicit raise.
-    raiseHandRequestRef.current = false
-    if (isRaiseHandPending) {
-      setIsRaiseHandPending(false)
-    }
-    if (isMicEnabled) {
-      setIsMicEnabled(false)
-    }
-    if (allowAutoListen) {
-      setAllowAutoListen(false)
-    }
-    if (isListening) {
-      stopListening()
-    }
-
-    if (uiState === UI_STATE.GENERATING || (isSlideRevealPending && uiState !== UI_STATE.SLIDESHOW)) {
-      setQuestionQueue((prev) => [trimmedQuery, ...prev])
-      showToast('Question queued')
-      enqueueVoiceAgentMessage('Got it. I will answer that right after this.')
-      return
-    }
-
-    if (uiState === UI_STATE.ERROR) {
-      setUiState(UI_STATE.LISTENING)
-    }
-
-    setLastTranscription(trimmedQuery)
-    if (source !== 'voice') {
-      setLiveTranscription('')
-    }
-    setTextInput('')
-    setErrorMessage('')
-
-    // Create AbortController for timeout handling (F053)
-    abortControllerRef.current = new AbortController()
-    const { signal } = abortControllerRef.current
-
-    // F072: Start timing for full generation pipeline
-    logger.time('GENERATION', 'full-pipeline')
-
-    try {
-      // Classify the query to determine if it's a follow-up, new topic, slide question, or chitchat
-      const classifyResult = await classifyQuery(trimmedQuery, signal)
-
-      if (classifyResult.classification === 'chitchat') {
-        try {
-          const chitchatResult = await requestChitchatResponse(trimmedQuery, signal)
-          const responseText = chitchatResult?.responseText ||
-            classifyResult.responseText ||
-            "I'm ready to help. What would you like to learn?"
-          setVoiceAgentQueue([])
-          enqueueVoiceAgentMessage(responseText, { priority: 'high' })
-          logger.timeEnd('GENERATION', 'full-pipeline')
-          return
-        } catch (error) {
-          if (error.name === 'AbortError') {
-            setUiState(UI_STATE.LISTENING)
-            return
-          }
-          const fallbackText = classifyResult.responseText ||
-            "I'm ready to help. What would you like to learn?"
-          setVoiceAgentQueue([])
-          enqueueVoiceAgentMessage(fallbackText, { priority: 'high' })
-          logger.timeEnd('GENERATION', 'full-pipeline')
-          return
-        }
-      }
-
-      // CORE032: Handle complexity for follow-ups
-      if (classifyResult.classification === 'follow_up' && classifyResult.complexity) {
-        const complexity = classifyResult.complexity
-        logger.info('GENERATION', 'Handling follow-up with complexity', { complexity })
-
-        if (complexity === 'trivial') {
-          // Trivial: Voice only response (reuse slide_question logic or similar)
-          logger.info('GENERATION', 'Trivial complexity - using verbal response')
-          // Treat as slide_question for verbal-only flow
-          classifyResult.classification = 'slide_question' 
-          // (Fall through to slide_question handler below)
-        } else if (complexity === 'complex') {
-          // Complex: Voice choice/prompt
-          logger.info('GENERATION', 'Complex complexity - asking for clarification')
-          const complexPrompt = "That's a really big topic with many details. I can focus on the history, the mechanism, or real-world examples. Which would you like?"
-          enqueueVoiceAgentMessage(complexPrompt, { priority: 'high' })
-          setVoiceAgentQueue([])
-          setUiState(UI_STATE.SLIDESHOW) // Return to slideshow if we were there, or listening
-          logger.timeEnd('GENERATION', 'full-pipeline')
-          return
-        }
-        // Simple/Moderate: Continue to generate/follow-up with complexity param
-      }
-
-      // CORE023, CORE024: Handle slide_question classification
-      // This is a question about the current slide content - generate verbal response only
-      if (classifyResult.classification === 'slide_question') {
-        logger.info('API', 'Handling slide question (verbal response only)', {
-          classification: 'slide_question',
-        })
-
-        // Clear the "Still working..." timer early since this is fast
-        if (stillWorkingTimerRef.current) {
-          clearTimeout(stillWorkingTimerRef.current)
-          stillWorkingTimerRef.current = null
-        }
-        setIsStillWorking(false)
-
-        // Get current slide context for the response
-        const currentSlide = visibleSlides[currentIndex]
-        const slideContext = {
-          subtitle: currentSlide?.subtitle || '',
-          topicName: activeTopic?.name || '',
-        }
-
-        // Call the respond API for verbal-only response
-        // Use /api/generate/respond (it handles general verbal responses well)
-        logger.time('API', 'respond-request')
-        logger.info('API', 'POST /api/generate/respond', {
-          endpoint: '/api/generate/respond',
-          method: 'POST',
-        })
-
-        try {
-          const response = await fetch('/api/generate/respond', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              query: trimmedQuery,
-              currentSlide: slideContext,
-            }),
-            signal,
-          })
-
-          logger.timeEnd('API', 'respond-request')
-
-          if (!response.ok) {
-            logger.error('API', 'Respond request failed', {
-              status: response.status,
-            })
-            throw new Error(`Respond API failed: ${response.status}`)
-          }
-
-          const respondData = await response.json()
-          logger.info('API', 'Respond API returned', {
-            hasAudio: !!respondData.audioUrl,
-            hasHighlight: !!respondData.highlight,
-          })
-
-          // CORE024: Show highlight overlay if coordinates were returned
-          if (respondData.highlight) {
-            setHighlightPosition(respondData.highlight)
-            logger.debug('UI', 'Showing highlight overlay', respondData.highlight)
-          }
-
-          // CORE023: Play the verbal response audio
-          if (respondData.audioUrl) {
-            // Stop any existing slide response audio
-            if (slideResponseAudioRef.current) {
-              slideResponseAudioRef.current.pause()
-            }
-
-            const audio = new Audio(respondData.audioUrl)
-            slideResponseAudioRef.current = audio
-
-            // When audio ends, clear the highlight
-            audio.onended = () => {
-              logger.debug('UI', 'Slide response audio ended, clearing highlight')
-              setHighlightPosition(null)
-              slideResponseAudioRef.current = null
-            }
-
-            audio.onerror = () => {
-              logger.warn('AUDIO', 'Slide response audio playback error')
-              setHighlightPosition(null)
-              slideResponseAudioRef.current = null
-            }
-
-            // Start playback
-            audio.play().catch((err) => {
-              logger.warn('AUDIO', 'Slide response autoplay blocked', { error: err.message })
-              // Still clear highlight after expected duration if autoplay blocked
-              setTimeout(() => {
-                setHighlightPosition(null)
-              }, respondData.duration || 3000)
-            })
-          } else {
-            // No audio - clear highlight after a delay
-            if (respondData.highlight) {
-              setTimeout(() => {
-                setHighlightPosition(null)
-              }, respondData.duration || 3000)
-            }
-          }
-
-          // Stay in slideshow state - no new slides generated
-          logger.timeEnd('GENERATION', 'full-pipeline')
-          setUiState(UI_STATE.SLIDESHOW)
-          return // Early return - we're done handling slide_question
-
-        } catch (error) {
-          // Handle errors for slide question response
-          if (error.name === 'AbortError') {
-            logger.debug('API', 'Respond request aborted by user')
-            setUiState(UI_STATE.LISTENING)
-            return
-          }
-          logger.error('API', 'Slide question response failed', {
-            error: error.message,
-          })
-          // Fall back to showing error state
-          setLastFailedQuery(query)
-          setErrorMessage('Could not answer your question. Please try again.')
-          setUiState(UI_STATE.ERROR)
-          return
-        }
-      }
-
-      // Reset engagement from previous queries and transition to generating state
-      setEngagement(null)
-      setVoiceAgentQueue([])
-      spokenFunFactRef.current = null
-      clearFunFactRefresh()
-      currentQueryRef.current = trimmedQuery // Store query for TTS-driven fun fact refresh
-      setIsColdStart(false)
-      setUiState(UI_STATE.GENERATING)
-
-      // GAMIFY-003: Record activity for gamification
-      recordQuestionAsked()
-      setIsStillWorking(false)
-      setIsPreparingFollowUp(false)
-      setIsSlideRevealPending(false)
-      enqueueVoiceAgentMessage(VOICE_AGENT_SCRIPT.GENERATION_START, { priority: 'high' })
-      // F015: Reset generation progress for new query
-      setGenerationProgress({ stage: null, message: '', slidesReady: 0, totalSlides: 0 })
-      // Reset the slideshow finished flags when starting new generation
-      hasFinishedSlideshowRef.current = false
-      setSlideshowFinished(false)
-
-      // Start "Still working..." timer (F053)
-      stillWorkingTimerRef.current = setTimeout(() => {
-        setIsStillWorking(true)
-      }, GENERATION_TIMEOUT.STILL_WORKING_MS)
-
-      // F068: Log engagement API request
-      logger.time('API', 'engagement-request')
-      logger.info('API', 'POST /api/generate/engagement', {
-        endpoint: '/api/generate/engagement',
-        method: 'POST',
-      })
-
-      // Start engagement call immediately for fast feedback
-      const engagementPromise = fetch('/api/generate/engagement', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: trimmedQuery, explanationLevel: selectedLevelRef.current }),
-        signal,
-      })
-        .then((res) => {
-          // F068: Log engagement response status
-          logger.timeEnd('API', 'engagement-request')
-          logger.info('API', 'Engagement response received', {
-            status: res.status,
-          })
-          if (!res.ok) throw new Error(`Engagement API failed: ${res.status}`)
-          return res.json()
-        })
-        .then((data) => {
-          // Update engagement state immediately when it arrives
-          if (abortControllerRef.current?.signal !== signal) return null
-          setEngagement(data)
-          // Return data so we can use suggestedQuestions for the suggestions slide
-          return data
-        })
-        .catch((err) => {
-          // Engagement failure is non-critical, log but continue
-          // Ignore abort errors
-          if (err.name !== 'AbortError') {
-            // F068: Log engagement API error
-            logger.warn('API', 'Engagement request failed (non-critical)', {
-              error: err.message,
-            })
-          }
-        })
-
-      // TTS-driven refresh: fun fact refreshes after audio finishes (via onComplete callback)
-      // No interval needed - refresh is triggered by refreshFunFact callback
-
-      const isFollowUp = classifyResult.classification === 'follow_up'
-      // Get parent slide for 2D navigation (follow-up slides nest under current slide)
-      const followUpParentSlide = isFollowUp ? visibleSlides[currentIndex] : null
-      const followUpParentId = followUpParentSlide && !['header', 'suggestions'].includes(followUpParentSlide.type)
-        ? followUpParentSlide.id
-        : null
-
-      if (isFollowUp) {
-        setIsPreparingFollowUp(true)
-      }
-
-      let generateData
-      let newTopicData = null
-
-      if (isFollowUp && activeTopic) {
-        // F039: Follow-up query appends slides to current topic
-        // F015: Include clientId for WebSocket progress updates
-        // F068: Log follow-up API request
-        logger.time('API', 'follow-up-request')
-        logger.info('API', 'POST /api/generate/follow-up', {
-          endpoint: '/api/generate/follow-up',
-          method: 'POST',
-          topicId: activeTopic.id,
-        })
-
-        const response = await fetch('/api/generate/follow-up', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: trimmedQuery,
-            topicId: activeTopic.id,
-            conversationHistory: [],
-            clientId: wsClientId,
-            explanationLevel: activeTopic.explanationLevel || selectedLevelRef.current,
-            complexity: classifyResult.complexity, // CORE032
-            parentId: followUpParentId, // CORE032: Current slide is parent when applicable
-          }),
-          signal,
-        })
-
-        // F068: Log follow-up response status
-        logger.timeEnd('API', 'follow-up-request')
-        logger.info('API', 'Follow-up response received', {
-          status: response.status,
-        })
-
-        if (!response.ok) {
-          logger.error('API', 'Follow-up request failed', {
-            status: response.status,
-          })
-          throw new Error(`Follow-up API failed: ${response.status}`)
-        }
-
-        generateData = await response.json()
-      } else {
-        // F040: New topic - generate with header card
-        // F015: Include clientId for WebSocket progress updates
-        // F068: Log generate API request
-        logger.time('API', 'generate-request')
-        logger.info('API', 'POST /api/generate', {
-          endpoint: '/api/generate',
-          method: 'POST',
-        })
-
-        const response = await fetch('/api/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: trimmedQuery,
-            topicId: null,
-            conversationHistory: [],
-            clientId: wsClientId,
-            explanationLevel: selectedLevelRef.current,
-          }),
-          signal,
-        })
-
-        // F068: Log generate response status
-        logger.timeEnd('API', 'generate-request')
-        logger.info('API', 'Generate response received', {
-          status: response.status,
-        })
-
-        if (!response.ok) {
-          logger.error('API', 'Generate request failed', {
-            status: response.status,
-          })
-          throw new Error(`Generate API failed: ${response.status}`)
-        }
-
-        generateData = await response.json()
-        newTopicData = generateData.topic
-      }
-
-      // Clear the "Still working..." timer on success (F053)
-      if (stillWorkingTimerRef.current) {
-        clearTimeout(stillWorkingTimerRef.current)
-        stillWorkingTimerRef.current = null
-      }
-      setIsStillWorking(false)
-      setIsPreparingFollowUp(false)
-      setIsSlideRevealPending(false)
-
-      // Wait for engagement to complete before transitioning (if still pending)
-      // Get the engagement data for suggested questions
-      const engagementData = await engagementPromise
-
-      setIsPreparingFollowUp(false)
-
-      // Extract suggested questions for the suggestions slide
-      const suggestedQuestions = engagementData?.suggestedQuestions || []
-
-      // Update state based on whether it's a follow-up or new topic
-      if (isFollowUp && activeTopic && generateData.slides?.length > 0) {
-        // F039: Append new slides to current topic, navigate to first new slide
-        const previousSlideCount = activeTopic.slides?.length || 0
-        const previousChildCount = followUpParentId
-          ? (activeTopic.slides || []).filter((slide) => slide?.parentId === followUpParentId).length
-          : 0
-        // Calculate the target index from actual slide counts, not stale visibleSlides
-        // visibleSlides = header + top-level slides (no parentId)
-        const previousTopLevelCount = (activeTopic.slides || []).filter(s => !s.parentId).length
-        const firstNewTopLevelIndex = 1 + previousTopLevelCount // +1 for header slide
-        const safeParentIndex = Math.min(
-          currentIndex,
-          Math.max(1 + previousTopLevelCount - 1, 0) // Ensure we don't exceed current slides
-        )
-        const now = Date.now()
-        // Create section divider for top-level follow-ups (not nested children)
-        const sectionDivider = !followUpParentId
-          ? createSectionDivider(activeTopic.id, trimmedQuery)
-          : null
-        const nextSlides = [
-          ...(activeTopic.slides || []),
-          ...(sectionDivider ? [sectionDivider] : []),
-          ...generateData.slides,
-        ]
-
-        // F073: Log follow-up slide append
-        logger.info('STATE', 'Appending slides to existing topic', {
-          topicId: activeTopic.id,
-          topicName: activeTopic.name,
-          newSlidesCount: generateData.slides.length,
-          previousSlidesCount: previousSlideCount,
-        })
-
-        // Get current version ID for persistence
-        const currentVersion = activeTopic.versions?.[activeTopic.currentVersionIndex ?? 0]
-        persistTopicSlides(activeTopic.id, nextSlides, currentVersion?.id)
-
-        setTopics((prev) => {
-          const updated = prev.map((topic) => {
-            if (topic.id !== activeTopic.id) return topic
-            const versionIndex = topic.currentVersionIndex ?? 0
-            const updatedVersions = Array.isArray(topic.versions)
-              ? topic.versions.map((v, idx) =>
-                  idx === versionIndex ? { ...v, slides: nextSlides } : v
-                )
-              : topic.versions
-            return {
-              ...topic,
-              slides: nextSlides,
-              versions: updatedVersions,
-              suggestedQuestions,
-              lastAccessedAt: now,
-            }
-          })
-          return pruneSlideCache(updated, activeTopic.id)
-        })
-
-        // Navigate to the first new slide after appending (header + previous slides)
-        if (followUpParentId) {
-          setCurrentIndex(safeParentIndex)
-          setCurrentChildIndex(previousChildCount)
-        } else {
-          setCurrentChildIndex(null)
-          setCurrentIndex(firstNewTopLevelIndex)
-        }
-        // F072: End timing for full generation pipeline
-        logger.timeEnd('GENERATION', 'full-pipeline')
-        // Prefetch TTS for first new slide before transitioning
-        await queueSlidesReadyTransition(generateData.slides, 0)
-
-      } else if (newTopicData && generateData.slides?.length > 0) {
-        // F040: Create new topic with header card
-        const now = Date.now()
-        const initialLevel = selectedLevelRef.current
-
-        const newTopic = {
-          id: newTopicData.id,
-          name: newTopicData.name,
-          icon: newTopicData.icon,
-          query: trimmedQuery, // Store original query for regeneration feature
-          headerSlide: createHeaderSlide(newTopicData),
-          slides: generateData.slides,
-          suggestedQuestions, // Add suggestions for end-of-slideshow card
-          explanationLevel: initialLevel, // Store the level used for this topic
-          createdAt: now,
-          lastAccessedAt: now,
-          // Initialize versions array with the first version
-          versions: [{
-            id: `v_${newTopicData.id}_${now}`,
-            explanationLevel: initialLevel,
-            slides: generateData.slides,
-            createdAt: now,
-          }],
-          currentVersionIndex: 0,
-        }
-
-        // F073: Log new topic creation
-        logger.info('STATE', 'Creating new topic', {
-          topicId: newTopic.id,
-          topicName: newTopic.name,
-          topicIcon: newTopic.icon,
-          slidesCount: generateData.slides.length,
-        })
-
-        // Persist slides with the initial version ID
-        const initialVersionId = newTopic.versions[0].id
-        persistTopicSlides(newTopic.id, newTopic.slides, initialVersionId)
-
-        // Add the new topic
-        setTopics((prev) => pruneSlideCache([newTopic, ...prev], newTopic.id))
-
-        // Set the new topic as active and show its header slide
-        setActiveTopicId(newTopic.id)
-        setCurrentIndex(0)
-        // F072: End timing for full generation pipeline
-        logger.timeEnd('GENERATION', 'full-pipeline')
-        // Prefetch TTS for first content slide before transitioning
-        await queueSlidesReadyTransition(generateData.slides, 0)
-
-      } else {
-        // No slides returned - stay in generating state with a message
-        logger.warn('GENERATION', 'No slides returned from API')
-        setUiState(UI_STATE.LISTENING)
-      }
-    } catch (error) {
-      // Clear timers on error (F053)
-      if (stillWorkingTimerRef.current) {
-        clearTimeout(stillWorkingTimerRef.current)
-        stillWorkingTimerRef.current = null
-      }
-      setIsStillWorking(false)
-
-      // Handle abort/cancellation (F053)
-      if (error.name === 'AbortError') {
-        // F068: Log user cancellation
-        logger.debug('API', 'Request cancelled by user')
-        setUiState(UI_STATE.LISTENING)
-        return
-      }
-
-      // Handle network errors (F052)
-      // F068: Log generation error with full context
-      logger.error('API', 'Generation request failed', {
-        error: error.message,
-        errorName: error.name,
-      })
-      setLastFailedQuery(query)
-      setErrorMessage('Something went wrong. Please check your connection and try again.')
-      setUiState(UI_STATE.ERROR)
-    }
-  }
-
-  useEffect(() => {
-    handleQuestionRef.current = handleQuestion
-  }, [handleQuestion])
-
-  const handleTextSubmit = (e) => {
-    e.preventDefault()
-    handleQuestion(textInput)
-  }
-
-  const handleExampleClick = (question) => {
-    handleQuestion(question)
-  }
-
-  /**
-   * Handle "New Topic" button click from sidebar (CORE017)
-   * Returns to home state to select level and start fresh topic
-   */
-  const handleNewTopic = useCallback(() => {
-    // Transition to home state to select level
-    setUiState(UI_STATE.HOME)
-    setActiveTopicId(null) // Clear selection - no topic active on HOME
-    setLiveTranscription('')
-    setTextInput('')
-    setEngagement(null)
-    setShowTextFallback(false)
-    // Don't reset cold start flag - that's for first-time users only
-  }, [])
+  }, [addTopicToGraph, resolveSuggestedGap])
+
+  // Use the question handler hook
+  const { handleQuestion, handleQuestionRef: questionHandlerRef } = useQuestionHandler({
+    // State setters
+    setUiState,
+    setEngagement,
+    setTopics,
+    setActiveTopicId,
+    setCurrentIndex,
+    setCurrentChildIndex,
+    setIsPlaying,
+    setGenerationProgress,
+    setIsStillWorking,
+    setIsPreparingFollowUp,
+    setIsSlideRevealPending,
+    setQuestionQueue,
+    setVoiceAgentQueue,
+    setLastTranscription,
+    setLiveTranscription,
+    setTextInput,
+    setErrorMessage,
+    setLastFailedQuery,
+    setIsColdStart,
+    setHighlightPosition,
+    setIsRaiseHandPending,
+    setIsMicEnabled,
+    setAllowAutoListen,
+    // Refs
+    abortControllerRef,
+    stillWorkingTimerRef,
+    currentQueryRef,
+    spokenFunFactRef,
+    pauseAfterCurrentSlideRef,
+    hasFinishedSlideshowRef,
+    raiseHandRequestRef,
+    selectedLevelRef,
+    slideResponseAudioRef,
+    // Values/dependencies
+    wsClientId,
+    activeTopic,
+    topics,
+    uiState,
+    visibleSlides,
+    currentIndex,
+    isListening,
+    isRaiseHandPending,
+    isMicEnabled,
+    allowAutoListen,
+    isSlideRevealPending,
+    // Callbacks
+    enqueueVoiceAgentMessage,
+    clearFunFactRefresh,
+    showToast,
+    queueSlidesReadyTransition,
+    pruneSlideCache,
+    stopListening,
+    interruptActiveAudio,
+    recordQuestionAsked,
+    recordTopicLearned,
+    setSlideshowFinished,
+    onTopicCreated: handleTopicCreated,
+  })
 
   /**
    * Handle suggestion click from suggestions slide
@@ -4342,6 +2966,7 @@ function App() {
    */
   const handleNavigateToTopic = useCallback(async (topicId) => {
     if (!topicId) return
+    setActiveTab('learn')
     const targetTopic = topics.find((topic) => topic.id === topicId)
     const needsSlides = !targetTopic?.slides || targetTopic.slides.length === 0
     // Use loadSlidesForTopic to try version-specific storage first, then legacy
@@ -4439,32 +3064,47 @@ function App() {
     if (uiState !== UI_STATE.SLIDESHOW && topics.length > 0) {
       setUiState(UI_STATE.SLIDESHOW)
     }
-  }, [uiState, topics, pruneSlideCache, fetchSlidesFromServer, requestSlideAudio])
+  }, [uiState, topics, pruneSlideCache, fetchSlidesFromServer, requestSlideAudio, setActiveTab])
 
   /**
-   * Handle topic rename from sidebar
-   * @param {string} topicId - ID of the topic to rename
-   * @param {string} newName - New name for the topic
+   * Progress: open a topic's slideshow by name (used by TopicActionSheet "Review Slideshow")
    */
-  const handleRenameTopic = useCallback((topicId, newName) => {
-    if (!topicId || !newName) return
+  const handleReviewSlideshowFromProgress = useCallback((topicName) => {
+    const normalized = String(topicName || '').trim().toLowerCase()
+    if (!normalized) return
 
-    setTopics((prev) =>
-      prev.map((topic) =>
-        topic.id === topicId
-          ? {
-              ...topic,
-              name: newName,
-              // Update header slide with new name
-              headerSlide: topic.headerSlide
-                ? { ...topic.headerSlide, subtitle: newName }
-                : null,
-            }
-          : topic
-      )
+    const matchingTopic = topics.find((topic) =>
+      String(topic?.name || '').trim().toLowerCase() === normalized
     )
-    logger.info('STATE', 'Topic renamed', { topicId, newName })
-  }, [])
+
+    if (!matchingTopic) {
+      showToast('Topic not found')
+      return
+    }
+
+    void handleNavigateToTopic(matchingTopic.id)
+  }, [topics, showToast, handleNavigateToTopic])
+
+  /**
+   * Progress: start "quick quiz" flow (currently routes to Mode Selector for practice modes)
+   */
+  const handleQuickQuizFromProgress = useCallback((topicName) => {
+    const normalized = String(topicName || '').trim().toLowerCase()
+    if (!normalized) return
+
+    const matchingTopic = topics.find((topic) =>
+      String(topic?.name || '').trim().toLowerCase() === normalized
+    )
+
+    if (!matchingTopic) {
+      showToast('Open this topic first to start a quiz')
+      setActiveTab('learn')
+      setUiState(UI_STATE.HOME)
+      return
+    }
+
+    requestTopicQuiz({ topicId: matchingTopic.id, topicName: matchingTopic.name })
+  }, [topics, requestTopicQuiz, showToast, setActiveTab, setUiState])
 
   /**
    * Handle topic deletion from sidebar
@@ -4473,15 +3113,22 @@ function App() {
   const handleDeleteTopic = useCallback((topicId) => {
     if (!topicId) return
 
+    const remainingTopics = topics.filter((topic) => topic.id !== topicId)
+
     // Remove topic from state
     setTopics((prev) => prev.filter((topic) => topic.id !== topicId))
 
     // Clear cached slides for this topic
     removeTopicSlides(topicId)
 
+    // Remove topic from knowledge graph constellation
+    const deletedTopic = topics.find((topic) => topic.id === topicId)
+    if (deletedTopic?.name) {
+      deleteTopicByName(deletedTopic.name)
+    }
+
     // If deleting the active topic, switch to another topic or listening state
     if (activeTopicId === topicId) {
-      const remainingTopics = topics.filter((topic) => topic.id !== topicId)
       if (remainingTopics.length > 0) {
         // Switch to the most recently accessed remaining topic
         const sortedByAccess = [...remainingTopics].sort(
@@ -4498,7 +3145,7 @@ function App() {
     }
 
     logger.info('STATE', 'Topic deleted', { topicId })
-  }, [activeTopicId, topics])
+  }, [activeTopicId, topics, deleteTopicByName])
 
   /**
    * Handle regeneration of a topic at a different explanation level.
@@ -4636,6 +3283,29 @@ function App() {
       // Persist the new slides with version ID for version-specific storage
       persistTopicSlides(topicId, generateData.slides, newVersion.id)
 
+      // Prefetch TTS for all new slides immediately to reduce audio latency
+      // Filter to content slides only (skip headers, suggestions)
+      const contentSlides = generateData.slides.filter(
+        (slide) =>
+          slide.type !== 'header' &&
+          slide.type !== 'suggestions' &&
+          typeof slide.subtitle === 'string' &&
+          slide.subtitle.trim().length > 0
+      )
+      if (contentSlides.length > 0) {
+        logger.info('REGENERATE', 'Prefetching TTS for regenerated slides', {
+          slideCount: contentSlides.length,
+        })
+        // Request first slide with priority (bypasses rate limiting) for immediate playback
+        // This ensures audio is ready when user starts viewing the regenerated content
+        const [firstSlide, ...remainingSlides] = contentSlides
+        requestSlideAudio(firstSlide, { priority: true })
+        // Prefetch remaining slides in background
+        if (remainingSlides.length > 0) {
+          prefetchSlideNarrationBatch(remainingSlides)
+        }
+      }
+
       // Reset to first slide (header) to show the new version
       setCurrentIndex(0)
 
@@ -4665,7 +3335,7 @@ function App() {
       setIsRegenerating(false)
       regeneratingTopicIdRef.current = null
     }
-  }, [activeTopic, isRegenerating, wsClientId])
+  }, [activeTopic, isRegenerating, wsClientId, prefetchSlideNarrationBatch, requestSlideAudio])
 
   /**
    * Handle switching to a different version of the current topic.
@@ -4740,1017 +3410,282 @@ function App() {
       })
     })
 
-    // Reset to first slide when switching versions
-    setCurrentIndex(0)
-  }, [activeTopic, fetchSlidesFromServer])
-
-  /**
-   * CORE022: Handle resuming from an interrupt point
-   * Returns to the slide position where the user interrupted the slideshow
-   */
-  const handleResumeFromInterrupt = useCallback(() => {
-    if (!interruptResumePoint) return
-
-    const { topicId, slideIndex } = interruptResumePoint
-    const resumeTopic = topics.find((topic) => topic.id === topicId)
-    const hasCachedSlides = resumeTopic?.slides && resumeTopic.slides.length > 0
-    // Use loadSlidesForTopic to try version-specific storage first, then legacy
-    const cachedSlides = !hasCachedSlides && resumeTopic
-      ? loadSlidesForTopic(resumeTopic)
-      : null
-    const resumeSlides = cachedSlides
-      ? [createHeaderSlide(resumeTopic), ...cachedSlides]
-      : buildTopicSlides(resumeTopic)
-
-    // Validate that the slide index is still valid (topics may have changed)
-    if (topicId && resumeSlides.length > 0 && slideIndex < resumeSlides.length) {
-      logger.info('AUDIO', 'Resuming from interrupt point', {
-        slideIndex,
-        topicId,
+    // Prefetch TTS for all slides in the switched version to reduce audio latency
+    const contentSlides = slides.filter(
+      (slide) =>
+        slide.type !== 'header' &&
+        slide.type !== 'suggestions' &&
+        typeof slide.subtitle === 'string' &&
+        slide.subtitle.trim().length > 0
+    )
+    if (contentSlides.length > 0) {
+      logger.info('VERSION', 'Prefetching TTS for version slides', {
+        slideCount: contentSlides.length,
+        versionIndex,
       })
-      if (cachedSlides) {
-        const now = Date.now()
-        setTopics((prev) => {
-          const updated = prev.map((topic) =>
-            topic.id === topicId
-              ? { ...topic, slides: cachedSlides, lastAccessedAt: now }
-              : topic
-          )
-          return pruneSlideCache(updated, topicId)
-        })
+      // Request first slide with priority for immediate playback
+      const [firstSlide, ...remainingSlides] = contentSlides
+      requestSlideAudio(firstSlide, { priority: true })
+      // Prefetch remaining slides in background
+      if (remainingSlides.length > 0) {
+        prefetchSlideNarrationBatch(remainingSlides)
       }
-      setActiveTopicId(topicId)
-      setCurrentIndex(slideIndex)
-      setIsPlaying(true)
-    } else {
-      // Slide no longer exists (e.g., topic was removed), just clear the resume point
-      logger.warn('AUDIO', 'Resume point no longer valid, clearing', {
-        attemptedIndex: slideIndex,
-        currentSlideCount: resumeSlides.length,
-      })
     }
 
-    // Clear the resume point after using it
-    setInterruptResumePoint(null)
-  }, [interruptResumePoint, topics, pruneSlideCache])
-
-  /**
-   * CORE022: Dismiss the resume point without navigating
-   * User chooses to continue with current content instead of resuming
-   */
-  const handleDismissResumePoint = useCallback(() => {
-    logger.debug('AUDIO', 'User dismissed resume point')
-    setInterruptResumePoint(null)
-  }, [])
+    // Reset to first slide when switching versions
+    setCurrentIndex(0)
+  }, [activeTopic, fetchSlidesFromServer, prefetchSlideNarrationBatch, requestSlideAudio])
 
   return (
     // F055, F056, F058: Responsive container with sidebar layout on desktop
     <div className="h-screen flex overflow-hidden">
-      {/* GAMIFY-003: Streak counter in top-right corner (T002) */}
-      <div className="fixed top-4 right-4 z-40">
-        <StreakCounter streakCount={userProgress?.streakCount || 0} />
-      </div>
-
       {/* POLISH-001: Achievement celebration components */}
       <Confetti isActive={showConfetti} onComplete={handleConfettiComplete} />
-      <AchievementToast badge={currentToastBadge} onDismiss={handleToastDismiss} />
+      <AchievementToast badge={currentToastBadge} onDismiss={handleBadgeToastDismiss} />
 
-      {/* CORE016, CORE017: Topic sidebar - hidden when no topics, visible on desktop, hamburger on mobile */}
-      <TopicSidebar
-        topics={topics}
-        activeTopic={activeTopic}
-        onNavigateToTopic={handleNavigateToTopic}
-        onNewTopic={handleNewTopic}
-        onRenameTopic={handleRenameTopic}
-        onDeleteTopic={handleDeleteTopic}
+      {/* WB015: Quick mode XP toast */}
+      <QuickXpToast
+        xpEarned={quickXpEarned}
+        visible={showQuickXpToast}
+        onDismiss={dismissQuickXpToast}
+        onSwitchMode={() => {
+          dismissQuickXpToast()
+          setLearnMode('full')
+        }}
       />
 
-      {/* Main content area - centered on wide screens when sidebar is present */}
-      <div className={`
-        flex-1 h-full flex flex-col items-center justify-center
-        px-4 py-4 pb-24 md:pb-4
-        overflow-y-auto
-        ${topics.length > 0 ? 'md:ml-0' : ''}
-      `}>
-        {/* F055: max-width 800px centered on desktop, F056: full-width on mobile */}
-        <main className="w-full max-w-4xl mx-auto">
+      {/* Left sidebar - Recent Topics */}
+      {topics.length > 0 && (
+        <TopicSidebar
+          topics={topics}
+          activeTopic={activeTopic}
+          onNavigateToTopic={handleNavigateToTopic}
+          onNewTopic={() => {
+            setActiveTopicId(null)
+            setUiState(UI_STATE.HOME)
+            setActiveTab('learn')
+          }}
+          onDeleteTopic={handleDeleteTopic}
+          onQuickQuizTopic={(topic) => requestTopicQuiz(topic)}
+          streakCount={userProgress?.streakCount || 0}
+          totalXP={userProgress?.points || 0}
+
+        />
+      )}
+
+      {/* Main content area */}
+      <div className="flex-1 h-full flex flex-col items-center justify-center px-4 py-4 pb-24 md:pb-4 overflow-y-auto">
+        {/* F055: center regular tabs, give Progress tab a wider canvas */}
+        <main className={`w-full mx-auto ${activeTab === 'progress' ? 'max-w-7xl' : 'max-w-4xl'}`}>
         {/* HOME screen - level selection + voice trigger */}
-        {uiState === UI_STATE.HOME && (
-          <div className="flex flex-col items-center gap-8 px-4 md:px-0 animate-fade-in">
-            {/* Headline */}
-            <div className="text-center">
-              <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
-                {homeHeadline}
-              </h1>
-              <p className="text-gray-500">
-                Tap a level and start talking
-              </p>
-            </div>
-
-            {/* Level cards */}
-            <div className="w-full max-w-md space-y-3">
-              {Object.entries(LEVEL_CONFIG).map(([level, config], index) => (
-                <div
-                  key={level}
-                  className="animate-fade-in"
-                  style={{ animationDelay: `${index * 80}ms` }}
-                >
-                  <LevelCard
-                    level={level}
-                    icon={config.icon}
-                    title={config.title}
-                    description={config.description}
-                    isSelected={selectedLevel === level}
-                    onClick={() => {
-                      playMicOnSound()
-                      setSelectedLevel(level)
-                      // GAMIFY-003: Track deep level usage for badge
-                      if (level === EXPLANATION_LEVEL.DEEP) {
-                        recordDeepLevelUsed()
-                      }
-                      setShowTextFallback(false)
-                      setIsMicEnabled(true)
-                      setAllowAutoListen(true)
-                      setUiState(UI_STATE.LISTENING)
-                      // startListening will be triggered by auto-listen effect
-                    }}
-                  />
-                </div>
-              ))}
-            </div>
-
-            {/* Text fallback */}
-            {!showTextFallback ? (
-              <button
-                onClick={() => setShowTextFallback(true)}
-                className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                can't talk? type here
-              </button>
-            ) : (
-              <div className="w-full max-w-md space-y-3 animate-fade-in">
-                {/* Compact level toggle for text mode */}
-                <div className="flex justify-center gap-2">
-                  {Object.entries(LEVEL_CONFIG).map(([level, config]) => (
-                    <button
-                      key={level}
-                      onClick={() => setSelectedLevel(level)}
-                      className={`
-                        px-3 py-1.5 text-sm rounded-full transition-all
-                        ${selectedLevel === level
-                          ? 'bg-primary text-white'
-                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                        }
-                      `}
-                    >
-                      {config.icon} {config.title}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Text input with send button */}
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault()
-                    if (textInput.trim()) {
-                      handleQuestion(textInput.trim())
-                      setTextInput('')
-                      setShowTextFallback(false)
-                    }
-                  }}
-                  className="flex gap-2"
-                >
-                  <input
-                    type="text"
-                    value={textInput}
-                    onChange={(e) => setTextInput(e.target.value)}
-                    placeholder="Type your question..."
-                    className="flex-1 px-4 py-3 min-h-[48px] border border-gray-200 rounded-xl focus:border-primary focus:outline-none"
-                    autoFocus
-                  />
-                  <button
-                    type="submit"
-                    disabled={!textInput.trim()}
-                    className={`
-                      px-4 py-3 rounded-xl transition-all
-                      ${textInput.trim()
-                        ? 'bg-primary text-white hover:bg-primary/90'
-                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      }
-                    `}
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                    </svg>
-                  </button>
-                </form>
-
-                {/* Back to voice */}
-                <button
-                  onClick={() => setShowTextFallback(false)}
-                  className="w-full text-sm text-primary hover:text-primary/80 transition-colors"
-                >
-                  🎤 Use voice instead
-                </button>
-              </div>
-            )}
-          </div>
+        {uiState === UI_STATE.HOME && activeTab === 'learn' && (
+          <HomeScreen
+            homeHeadline={homeHeadline}
+            selectedLevel={selectedLevel}
+            setSelectedLevel={setSelectedLevel}
+            showTextFallback={showTextFallback}
+            setShowTextFallback={setShowTextFallback}
+            textInput={textInput}
+            setTextInput={setTextInput}
+            setIsMicEnabled={setIsMicEnabled}
+            setAllowAutoListen={setAllowAutoListen}
+            setUiState={setUiState}
+            handleQuestion={handleQuestion}
+            recordDeepLevelUsed={recordDeepLevelUsed}
+            piecesNeedingReview={piecesNeedingReview}
+            onStartReview={startReviewSession}
+            hasSidebar={topics.length > 0}
+          />
         )}
 
-        {uiState === UI_STATE.LISTENING && (
-          <div className="flex flex-col items-center gap-6 px-4 md:px-0 animate-fade-in">
-            {/* Level indicator - shows what mode they're in */}
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <span>{LEVEL_CONFIG[selectedLevel]?.icon}</span>
-              <span>{LEVEL_CONFIG[selectedLevel]?.title} mode</span>
-            </div>
-
-            {/* Waveform visualization - responds to audio input when listening */}
-            <div className="flex items-center justify-center gap-1 h-24">
-              {[...Array(AUDIO_CONFIG.WAVEFORM_BARS)].map((_, i) => {
-                const baseHeight = 12
-                const maxAdditionalHeight = 60
-                const middleIndex = AUDIO_CONFIG.WAVEFORM_BARS / 2
-                const distanceFromMiddle = Math.abs(i - middleIndex)
-                const positionFactor = 1 - (distanceFromMiddle / middleIndex) * 0.5
-
-                let height
-                if (isListening && audioLevel > 0) {
-                  const randomFactor = 0.8 + Math.random() * 0.4
-                  height = baseHeight + (audioLevel / 100) * maxAdditionalHeight * positionFactor * randomFactor
-                } else {
-                  height = baseHeight + Math.sin(Date.now() / 500 + i * 0.5) * 5 + 10
-                }
-
-                return (
-                  <div
-                    key={i}
-                    className={`w-1.5 rounded-full transition-all duration-75 ${
-                      isListening ? 'bg-primary' : 'bg-primary/50'
-                    }`}
-                    style={{ height: `${Math.max(baseHeight, Math.min(80, height))}px` }}
-                  />
-                )
-              })}
-            </div>
-
-            {/* Live transcription or listening status */}
-            <p className={`text-xl text-center max-w-md transition-all duration-300 min-h-[2rem] ${
-              liveTranscription ? 'text-primary font-medium' : 'text-gray-400'
-            }`}>
-              {liveTranscription || (isListening ? 'Listening...' : 'Starting mic...')}
-            </p>
-
-            {/* Permission denied message */}
-            {permissionState === PERMISSION_STATE.DENIED && (
-              <div className="text-center">
-                <p className="text-sm text-red-500 mb-2">
-                  Microphone access denied. Please enable it in your browser settings.
-                </p>
-                <button
-                  onClick={() => setUiState(UI_STATE.HOME)}
-                  className="text-sm text-primary hover:underline"
-                >
-                  Go back and type instead
-                </button>
-              </div>
-            )}
-
-            {/* Cancel button */}
-            <button
-              onClick={() => {
-                stopListening()
-                setUiState(UI_STATE.HOME)
-              }}
-              className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
+        {uiState === UI_STATE.LISTENING && activeTab === 'learn' && (
+          <ListeningScreen
+            selectedLevel={selectedLevel}
+            isListening={isListening}
+            audioLevel={audioLevel}
+            liveTranscription={liveTranscription}
+            permissionState={permissionState}
+            stopListening={stopListening}
+            setUiState={setUiState}
+          />
         )}
 
-        {uiState === UI_STATE.GENERATING && (
-          <div className="flex flex-col items-center gap-6 px-4 md:px-0">
-            {/* Loader */}
-            <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-
-            {/* Single clean status message */}
-            <p className="text-lg text-gray-600">
-              {isStillWorking
-                ? 'Still working...'
-                : generationProgress.message || 'Creating your explanation...'}
-            </p>
-
-            {/* Progress bar */}
-            <div className="w-full max-w-md">
-              <div
-                role="progressbar"
-                aria-valuenow={generationProgressPercent}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                className="h-2 w-full bg-gray-200 rounded-full overflow-hidden"
-              >
-                <div
-                  className="h-full bg-primary transition-all duration-500 ease-out"
-                  style={{ width: `${generationProgressPercent}%` }}
-                />
-              </div>
-              {generationProgress.totalSlides > 0 && (
-                <p className="mt-2 text-xs text-gray-500 text-center">
-                  {generationProgress.slidesReady > 0
-                    ? `${generationProgress.slidesReady} of ${generationProgress.totalSlides} slides ready`
-                    : `${generationProgress.totalSlides} slides in progress`}
-                </p>
-              )}
-            </div>
-
-            {/* Cancel button - always visible during generation */}
-            <button
-              onClick={cancelGeneration}
-              className="px-4 py-2 min-h-[44px] text-gray-500 hover:text-gray-700 border border-gray-300 rounded-lg transition-colors"
-            >
-              Cancel
-            </button>
-
-            {/* Fun fact card - displays while slides are generating (F045) */}
-            {engagement?.funFact && (
-              <FunFactCard funFact={engagement.funFact} />
-            )}
-          </div>
+        {uiState === UI_STATE.GENERATING && activeTab === 'learn' && (
+          <GeneratingScreen
+            isStillWorking={isStillWorking}
+            generationProgress={generationProgress}
+            generationProgressPercent={generationProgressPercent}
+            cancelGeneration={cancelGeneration}
+            engagement={engagement}
+          />
         )}
 
         {/* Error state with retry button (F052) */}
         {uiState === UI_STATE.ERROR && (
-          <div className="flex flex-col items-center gap-6 px-4 md:px-0">
-            {/* Error icon */}
-            <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="w-8 h-8 text-red-500"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                />
-              </svg>
-            </div>
-
-            <p className="text-lg text-gray-700 text-center">{errorMessage}</p>
-
-            {/* Retry button - F057: 44px touch target */}
-            <button
-              onClick={retryLastRequest}
-              className="px-6 py-3 min-h-[44px] bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors font-medium"
-            >
-              Try Again
-            </button>
-
-            {/* Option to go back to home state */}
-            <button
-              onClick={() => setUiState(UI_STATE.HOME)}
-              className="px-4 py-2 min-h-[44px] text-gray-500 hover:text-gray-700 transition-colors"
-            >
-              Ask a different question
-            </button>
-          </div>
-        )}
-
-        {/* SOCRATIC-003: Socratic questioning mode after slideshow */}
-        {uiState === UI_STATE.SOCRATIC && socraticSlides.length > 0 && (
-          <SocraticMode
-            slides={socraticSlides}
-            topicName={socraticTopicName}
-            language={socraticLanguage}
-            suggestedQuestions={activeTopic?.suggestedQuestions || []}
-            onComplete={handleSocraticComplete}
-            onFollowUp={handleSocraticFollowUp}
-            onSkip={handleSocraticSkip}
+          <ErrorScreen
+            errorMessage={errorMessage}
+            retryLastRequest={retryLastRequest}
+            setUiState={setUiState}
           />
         )}
 
-        {/* Loading screen for historical topic TTS */}
-        {isLoadingTopicAudio && activeTopic && (
-          <div className="flex flex-col items-center gap-4 px-4 md:px-0 animate-fade-in">
-            <div className="w-full max-w-2xl">
-              <div className="relative w-full aspect-video overflow-hidden rounded-xl shadow-lg">
-                <TopicHeader
-                  icon={activeTopic.icon}
-                  name={activeTopic.name}
-                />
-                {/* Progress bar overlay */}
-                <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/30 to-transparent">
-                  <div className="h-2 bg-white/30 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-primary rounded-full transition-all duration-300"
-                      style={{ width: `${loadingTopicProgress}%` }}
-                    />
-                  </div>
-                  <p className="text-white text-sm text-center mt-3 font-medium">
-                    Preparing narration... {loadingTopicProgress > 10 ? `${loadingTopicProgress}%` : ''}
-                  </p>
-                </div>
-              </div>
-            </div>
+
+        {/* Mode Selector: Choose learning mode (Mystery Lab, Wonder Lab, Story Studio) */}
+        {uiState === UI_STATE.MODE_SELECTOR && activeTab === 'learn' && (
+          <ModeSelectorScreen
+            slides={visibleSlides}
+            topicName={activeTopic?.name || ''}
+            explanationLevel={activeTopic?.explanationLevel || 'standard'}
+            onModeSelect={handleModeSelect}
+            onSkip={handleModeSelectorSkip}
+          />
+        )}
+
+        {/* Learning Mode Screen - Mystery Lab, Wonder Lab, Story Studio */}
+        {uiState === UI_STATE.LEARN_MODE && activeTab === 'learn' && selectedLearningMode === 'mystery' && (
+          <div className="fixed inset-0 z-50">
+            <MysteryLab
+              slides={visibleSlides}
+              topicName={activeTopic?.name || ''}
+              explanationLevel={activeTopic?.explanationLevel || 'standard'}
+              onComplete={handleLearningModeComplete}
+              onExit={handleLearningModeExit}
+            />
           </div>
         )}
 
-        {uiState === UI_STATE.SLIDESHOW && visibleSlides.length > 0 && !isLoadingTopicAudio && (
-          <div className="flex flex-col items-center gap-4 px-4 md:px-0">
-            {isPreparingFollowUp && (
-              <div className="px-3 py-1 text-xs text-primary bg-primary/10 rounded-full">
-                Preparing your follow-up...
-              </div>
-            )}
-            <div className="w-full flex flex-col items-center gap-4">
-              <div className="w-full relative overflow-visible">
-                {/* F050: Slide content with fade transition - key triggers animation on slide change */}
-                {/* F043, F044: handles both header and content slides */}
-                <div
-                  key={displayedSlide?.id || `slide-${currentIndex}-${currentChildIndex}`}
-                  className="slide-fade w-full relative"
-                >
-                  <div className="relative w-full aspect-video overflow-visible">
-                    {displayedSlide?.type === 'header' ? (
-                      // F043: Render topic header card with TopicHeader component
-                      <div className="absolute inset-0 bg-surface rounded-xl shadow-lg overflow-hidden">
-                        <TopicHeader
-                          icon={displayedSlide.topicIcon}
-                          name={displayedSlide.topicName}
-                        />
-                      </div>
-                    ) : displayedSlide?.type === 'section' ? (
-                      // Render section divider card for follow-up sections
-                      <div className="absolute inset-0 bg-surface rounded-xl shadow-lg overflow-hidden">
-                        <SectionDivider question={displayedSlide.question} />
-                      </div>
-                    ) : displayedSlide?.type === 'suggestions' ? (
-                      // Render suggestions slide with clickable question buttons
-                      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-primary/10 rounded-xl shadow-lg overflow-hidden flex flex-col items-center justify-center p-6 md:p-8">
-                        <h3 className="text-xl md:text-2xl font-semibold text-gray-800 mb-6 text-center">
-                          Want to learn more?
-                        </h3>
-                        <div className="flex flex-col gap-3 w-full max-w-md">
-                          {displayedSlide?.questions?.map((question, idx) => (
-                            <button
-                              key={idx}
-                              onClick={() => handleSuggestionClick(question)}
-                              className="w-full px-4 py-3 bg-white hover:bg-primary hover:text-white text-gray-700 rounded-lg shadow-sm border border-gray-200 hover:border-primary transition-all duration-200 text-left text-sm md:text-base"
-                            >
-                              {question}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      // Regular content slide with image and subtitle
-                      <>
-                        {/* CORE024: Container with relative positioning for highlight overlay */}
-                        <div className="absolute inset-0 bg-surface rounded-xl shadow-lg overflow-hidden">
-                          <img
-                            src={displayedSlide?.imageUrl || FALLBACK_SLIDE_IMAGE_URL}
-                            alt="Slide diagram"
-                            className="w-full h-full object-contain"
-                            onError={(event) => {
-                              if (event.currentTarget.dataset.fallbackApplied) return
-                              event.currentTarget.dataset.fallbackApplied = 'true'
-                              event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
-                            }}
-                          />
-                          {/* CORE024: Highlight overlay for slide questions */}
-                          <HighlightOverlay
-                            x={highlightPosition?.x}
-                            y={highlightPosition?.y}
-                            visible={highlightPosition !== null}
-                          />
-                        </div>
-                      </>
-                    )}
-
-                    {activeChildSlides.length > 0 && (
-                      <div className="hidden min-[1400px]:block absolute left-full top-0 bottom-0 translate-x-6 z-20">
-                        <div className="h-full w-52 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-xl shadow-sm p-3 flex flex-col gap-2.5">
-                          <div className="flex items-center justify-between px-1">
-                            <span className="text-[10px] uppercase tracking-wider text-gray-500">Follow-ups</span>
-                            <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold">
-                              {activeChildSlides.length}
-                            </span>
-                          </div>
-
-                          <div className="flex-1 min-h-0 flex flex-col gap-2.5 overflow-y-auto pr-1">
-                            <button
-                              onClick={() => { wasManualNavRef.current = true; setCurrentChildIndex(null); }}
-                              aria-label="Back to main slide"
-                              className={`group flex h-full w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors ${
-                                currentChildIndex === null
-                                  ? 'border-primary/40 bg-primary/5'
-                                  : 'border-gray-200 hover:bg-gray-50'
-                              }`}
-                            >
-                              <div className="w-16 h-11 rounded-md bg-gray-100 border border-gray-200 overflow-hidden flex-shrink-0">
-                                {parentSlide?.imageUrl ? (
-                                  <img
-                                    src={parentSlide.imageUrl}
-                                    alt="Main slide thumbnail"
-                                    className="w-full h-full object-cover"
-                                    onError={(event) => {
-                                      if (event.currentTarget.dataset.fallbackApplied) return
-                                      event.currentTarget.dataset.fallbackApplied = 'true'
-                                      event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
-                                    }}
-                                  />
-                                ) : (
-                                  <div className="w-full h-full bg-gradient-to-br from-gray-100 to-gray-200" />
-                                )}
-                              </div>
-                              <div className="min-w-0">
-                                <div className="text-xs font-medium text-gray-700">Main</div>
-                                <div className="text-[10px] text-gray-400 line-clamp-1">
-                                  {parentSlide?.subtitle || 'Overview'}
-                                </div>
-                              </div>
-                            </button>
-
-                            {activeChildSlides.map((slide, idx) => (
-                              <button
-                                key={slide.id || idx}
-                                onClick={() => { wasManualNavRef.current = true; setCurrentChildIndex(idx); }}
-                                aria-label={`Go to follow-up ${idx + 1}`}
-                                className={`group flex h-full w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors ${
-                                  currentChildIndex === idx
-                                    ? 'border-primary/40 bg-primary/5'
-                                    : 'border-gray-200 hover:bg-gray-50'
-                                }`}
-                              >
-                                <div className="w-16 h-11 rounded-md bg-gray-100 border border-gray-200 overflow-hidden flex-shrink-0">
-                                  <img
-                                    src={slide?.imageUrl || FALLBACK_SLIDE_IMAGE_URL}
-                                    alt={`Follow-up ${idx + 1} thumbnail`}
-                                    className="w-full h-full object-cover"
-                                    onError={(event) => {
-                                      if (event.currentTarget.dataset.fallbackApplied) return
-                                      event.currentTarget.dataset.fallbackApplied = 'true'
-                                      event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
-                                    }}
-                                  />
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="text-xs font-medium text-gray-700">Follow-up slide {idx + 1}</div>
-                                  <div className="text-[10px] text-gray-400 line-clamp-1">
-                                    {slide?.subtitle || 'More detail'}
-                                  </div>
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Subtitle - only shown for content slides */}
-                  {/* CORE036: Streaming subtitles with karaoke-style word reveal */}
-                  {displayedSlide?.type !== 'header' && displayedSlide?.type !== 'suggestions' && (
-                    <div className="mt-4">
-                      {/* F091: Show "Key Takeaways" badge for conclusion slides */}
-                      {displayedSlide?.isConclusion && (
-                        <div className="flex justify-center mb-2">
-                          <span className="text-xs font-medium px-2 py-0.5 bg-primary/10 text-primary rounded-full">
-                            Key Takeaways
-                          </span>
-                        </div>
-                      )}
-                      <p className="text-base text-center line-clamp-5">
-                        <StreamingSubtitle
-                          text={displayedSlide?.subtitle}
-                          duration={getSlideDuration(displayedSlide)}
-                          isPlaying={isSlideNarrationPlaying}
-                          showAll={wasManualNavRef.current}
-                          audioRef={slideAudioRef}
-                        />
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {activeChildSlides.length > 0 && (
-                <button
-                  onClick={() => setIsFollowUpDrawerOpen(true)}
-                  className="min-[1400px]:hidden inline-flex items-center gap-2 px-3 py-2 rounded-full border border-gray-200 text-xs text-gray-600 bg-white hover:bg-gray-50 transition-colors"
-                >
-                  <span className="font-medium">Follow-ups</span>
-                  <span className="inline-flex items-center justify-center min-w-[18px] h-4 px-1 rounded-full bg-primary/10 text-primary text-[10px] font-semibold">
-                    {activeChildSlides.length}
-                  </span>
-                </button>
-              )}
-
-              {/* F044, F057: Progress dots - show slides for current topic with 44px touch target */}
-              <div className="flex items-center gap-1 flex-wrap justify-center" role="tablist" aria-label="Slide navigation">
-                {visibleSlides.map((slide, i) => {
-                  // Use different styling for header, section, suggestions, and content dots
-                  const isHeader = slide.type === 'header'
-                  const isSection = slide.type === 'section'
-                  const isSuggestions = slide.type === 'suggestions'
-                  const hasChildren = allTopicSlides.some(s => s.parentId === slide.id) // Check for children
-                  return (
-                    <button
-                      key={slide.id}
-                      onClick={() => { wasManualNavRef.current = true; setCurrentIndex(i); setCurrentChildIndex(null); }}
-                      role="tab"
-                      aria-selected={i === currentIndex}
-                      aria-label={
-                        isHeader
-                          ? `Go to ${slide.topicName} topic header`
-                          : isSection
-                          ? 'Go to follow-up section'
-                          : isSuggestions
-                          ? 'Go to suggested questions'
-                          : `Go to slide ${i + 1} of ${visibleSlides.length}`
-                      }
-                      className="p-2 transition-colors cursor-pointer hover:scale-125 relative"
-                    >
-                      {/* Inner dot - visual indicator, outer padding provides 44px touch target */}
-                      {/* Header: rectangle, Section: rounded square, Suggestions: diamond, Content: circle */}
-                      <span
-                        className={`block ${
-                          isHeader
-                            ? `w-4 h-3 rounded ${i === currentIndex ? 'bg-primary' : 'bg-gray-400'}`
-                            : isSection
-                            ? `w-3 h-3 rounded-sm ${i === currentIndex ? 'bg-indigo-500' : 'bg-gray-300'}`
-                            : isSuggestions
-                            ? `w-3 h-3 rotate-45 ${i === currentIndex ? 'bg-primary' : 'bg-gray-300'}`
-                            : `w-3 h-3 rounded-full ${i === currentIndex ? 'bg-primary' : 'bg-gray-300'}`
-                        }`}
-                      />
-                      {/* Indicator for slides with children */}
-                      {hasChildren && i !== currentIndex && (
-                        <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1 h-1 bg-gray-400 rounded-full" />
-                      )}
-                      {/* Bouncing down arrow for current slide with children - shows vertical navigation is available */}
-                      {hasChildren && i === currentIndex && currentChildIndex === null && (
-                        <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 text-primary text-xs animate-bounce">
-                          ▼
-                        </span>
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-
-              {/* Controls - arrow buttons and play/pause */}
-              <div className="flex flex-col items-center gap-2">
-                {/* CORE032: Vertical controls (only visible if children exist) */}
-                {activeChildSlides.length > 0 && (
-                  <button
-                    onClick={goToChildPrev}
-                    disabled={currentChildIndex === null}
-                    className={`p-2 rounded-full transition-colors ${
-                      currentChildIndex === null ? 'text-gray-200' : 'text-primary hover:bg-gray-100'
-                    }`}
-                  >
-                    <span aria-hidden="true">&#9650;</span>
-                  </button>
-                )}
-
-                <div className="flex items-center gap-4">
-                  <button
-                    onClick={goToPrevSlide}
-                    disabled={currentIndex === 0}
-                    aria-label="Previous slide"
-                    className={`p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${
-                      currentIndex === 0
-                        ? 'text-gray-300 cursor-not-allowed'
-                        : 'text-gray-500 hover:text-primary hover:bg-gray-100'
-                    }`}
-                  >
-                    <span aria-hidden="true">&#9664;</span>
-                  </button>
-                  <button
-                    onClick={togglePlayPause}
-                    aria-label={isPlaying ? 'Pause slideshow' : 'Play slideshow'}
-                    className="p-3 min-w-[44px] min-h-[44px] bg-primary text-white rounded-full hover:bg-primary/90 transition-colors"
-                  >
-                    <span aria-hidden="true">{isPlaying ? '❚❚' : '▶'}</span>
-                  </button>
-                  <button
-                    onClick={goToNextSlide}
-                    disabled={currentIndex === visibleSlides.length - 1}
-                    aria-label="Next slide"
-                    className={`p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition-colors ${
-                      currentIndex === visibleSlides.length - 1
-                        ? 'text-gray-300 cursor-not-allowed'
-                        : 'text-gray-500 hover:text-primary hover:bg-gray-100'
-                    }`}
-                  >
-                    <span aria-hidden="true">&#9654;</span>
-                  </button>
-                </div>
-
-                {/* CORE032: Down arrow for children */}
-                {activeChildSlides.length > 0 && (
-                  <button
-                    onClick={goToChildNext}
-                    disabled={currentChildIndex === activeChildSlides.length - 1}
-                    className={`p-2 rounded-full transition-colors ${
-                      currentChildIndex === activeChildSlides.length - 1 ? 'text-gray-200' : 'text-primary hover:bg-gray-100'
-                    }`}
-                  >
-                    <span aria-hidden="true">&#9660;</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Queue indicator - shows number of questions waiting (F048) */}
-              {questionQueue.length > 0 && (
-                <p className="text-sm text-gray-400 mt-2">
-                  {questionQueue.length} question{questionQueue.length > 1 ? 's' : ''} queued
-                </p>
-              )}
-
-              {/* Level indicator with regenerate button and version switcher */}
-              {activeTopic && (
-                <div className="flex flex-col items-center gap-3 mt-4 mb-16">
-                  {/* Current level indicator with regenerate dropdown */}
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-400">Level:</span>
-                    <span className={`
-                      px-2 py-1 text-xs rounded-full bg-primary text-white
-                    `}>
-                      {LEVEL_CONFIG[getCurrentVersionLevel(activeTopic)]?.icon}{' '}
-                      {LEVEL_CONFIG[getCurrentVersionLevel(activeTopic)]?.title}
-                    </span>
-                    {/* Regenerate dropdown */}
-                    <RegenerateDropdown
-                      levelConfig={LEVEL_CONFIG}
-                      currentLevel={getCurrentVersionLevel(activeTopic)}
-                      onRegenerate={handleRegenerate}
-                      isRegenerating={isRegenerating}
-                      disabled={!activeTopic.query}
-                    />
-                  </div>
-
-                  {/* Version switcher - only shown when multiple versions exist */}
-                  {activeTopic.versions && activeTopic.versions.length > 1 && (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-gray-400 mr-1">Versions:</span>
-                      {activeTopic.versions.map((version, index) => {
-                        const isActive = (activeTopic.currentVersionIndex ?? 0) === index
-                        const levelConfig = LEVEL_CONFIG[version.explanationLevel] || LEVEL_CONFIG[EXPLANATION_LEVEL.STANDARD]
-                        return (
-                          <button
-                            key={version.id}
-                            onClick={() => handleVersionSwitch(index)}
-                            className={`
-                              px-2 py-1 text-xs rounded-md transition-all
-                              flex items-center gap-1
-                              ${isActive
-                                ? 'bg-primary/10 text-primary border border-primary/30'
-                                : 'bg-gray-100 text-gray-500 hover:bg-gray-200 border border-transparent'
-                              }
-                            `}
-                            title={`${levelConfig.title} - ${new Date(version.createdAt).toLocaleString()}`}
-                          >
-                            <span>{levelConfig.icon}</span>
-                            <span className="hidden sm:inline">{levelConfig.title}</span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-
-                  {/* Regenerating indicator */}
-                  {isRegenerating && (
-                    <div className="flex items-center gap-2 text-xs text-gray-500">
-                      <svg
-                        className="w-3 h-3 animate-spin"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
-                        <circle
-                          className="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                        />
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        />
-                      </svg>
-                      <span>Regenerating slides...</span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {activeChildSlides.length > 0 && isFollowUpDrawerOpen && (
-              <div className="xl:hidden fixed inset-0 z-50">
-                <button
-                  type="button"
-                  aria-label="Close follow-ups drawer"
-                  onClick={() => setIsFollowUpDrawerOpen(false)}
-                  className="absolute inset-0 bg-black/30"
-                />
-                <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-xl p-4 max-h-[70vh] overflow-y-auto">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="text-sm font-semibold text-gray-700">Follow-ups</div>
-                    <button
-                      type="button"
-                      onClick={() => setIsFollowUpDrawerOpen(false)}
-                      className="text-xs text-gray-500 hover:text-gray-700"
-                    >
-                      Close
-                    </button>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <button
-                      onClick={() => {
-                        setCurrentChildIndex(null)
-                        setIsFollowUpDrawerOpen(false)
-                      }}
-                      className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
-                        currentChildIndex === null
-                          ? 'border-primary/40 bg-primary/5'
-                          : 'border-gray-200 hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className="w-20 h-14 rounded-md bg-gray-100 border border-gray-200 overflow-hidden flex-shrink-0">
-                        {parentSlide?.imageUrl ? (
-                          <img
-                            src={parentSlide.imageUrl}
-                            alt="Main slide thumbnail"
-                            className="w-full h-full object-cover"
-                            onError={(event) => {
-                              if (event.currentTarget.dataset.fallbackApplied) return
-                              event.currentTarget.dataset.fallbackApplied = 'true'
-                              event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
-                            }}
-                          />
-                        ) : (
-                          <div className="w-full h-full bg-gradient-to-br from-gray-100 to-gray-200" />
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-gray-700">Main</div>
-                        <div className="text-xs text-gray-400 line-clamp-2">
-                          {parentSlide?.subtitle || 'Overview'}
-                        </div>
-                      </div>
-                    </button>
-
-                    {activeChildSlides.map((slide, idx) => (
-                      <button
-                        key={slide.id || idx}
-                        onClick={() => {
-                          setCurrentChildIndex(idx)
-                          setIsFollowUpDrawerOpen(false)
-                        }}
-                        className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
-                          currentChildIndex === idx
-                            ? 'border-primary/40 bg-primary/5'
-                            : 'border-gray-200 hover:bg-gray-50'
-                        }`}
-                      >
-                        <div className="w-20 h-14 rounded-md bg-gray-100 border border-gray-200 overflow-hidden flex-shrink-0">
-                          <img
-                            src={slide?.imageUrl || FALLBACK_SLIDE_IMAGE_URL}
-                            alt={`Follow-up ${idx + 1} thumbnail`}
-                            className="w-full h-full object-cover"
-                            onError={(event) => {
-                              if (event.currentTarget.dataset.fallbackApplied) return
-                              event.currentTarget.dataset.fallbackApplied = 'true'
-                              event.currentTarget.src = FALLBACK_SLIDE_IMAGE_URL
-                            }}
-                          />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium text-gray-700">Follow-up slide {idx + 1}</div>
-                          <div className="text-xs text-gray-400 line-clamp-2">
-                            {slide?.subtitle || 'More detail'}
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
+        {uiState === UI_STATE.LEARN_MODE && activeTab === 'learn' && selectedLearningMode === 'whatif' && (
+          <div className="fixed inset-0 z-50">
+            <WonderLab
+              slides={visibleSlides}
+              topicName={activeTopic?.name || ''}
+              explanationLevel={activeTopic?.explanationLevel || 'standard'}
+              onComplete={handleLearningModeComplete}
+              onExit={handleLearningModeExit}
+            />
           </div>
+        )}
+
+        {/* Story Studio - Create illustrated stories using learned concepts */}
+        {uiState === UI_STATE.LEARN_MODE && activeTab === 'learn' && selectedLearningMode === 'story' && (
+          <div className="fixed inset-0 z-50">
+            <StoryStudio
+              slides={visibleSlides}
+              topicName={activeTopic?.name || ''}
+              onComplete={handleLearningModeComplete}
+              onBack={handleLearningModeExit}
+            />
+          </div>
+        )}
+
+        {/* Progress Tab - consolidates World and Tree views */}
+        {activeTab === 'progress' && (
+          <div className="w-full animate-fade-in">
+            <ProgressTab
+              topics={progressPieces}
+              onReviewSlideshow={handleReviewSlideshowFromProgress}
+              onLaunchMode={handleLaunchLearningMode}
+              totalXP={userProgress?.points || 0}
+              streak={{
+                current: userProgress?.streakCount || 0,
+                longest: userProgress?.longestStreak || 0,
+                todayCompleted: false,
+                activeDates: userProgress?.activeDates || [],
+              }}
+              trophies={earnedTrophies}
+              trophiesLoading={isUserProgressLoading}
+              onDiscoverSuggestions={refreshGraphGaps}
+              onSelectSuggestedTopic={(topicName, options = {}) => {
+                const {
+                  explanationLevel,
+                  source = 'progress_suggestion',
+                  gap,
+                } = options || {}
+                setActiveTab('learn')
+                if (explanationLevel) {
+                  setSelectedLevel(explanationLevel)
+                }
+                handleQuestion(topicName, {
+                  source,
+                  explanationLevel,
+                  suggestedTopicMeta: gap?.suggestedTopic
+                    ? { name: gap.suggestedTopic, connectsTo: gap.connectsTo || [] }
+                    : null,
+                })
+              }}
+              selectedLevel={selectedLevel}
+              setSelectedLevel={setSelectedLevel}
+              graphNodes={graphNodes}
+              graphEdges={graphEdges}
+              graphClusters={graphClusters}
+              graphGaps={graphGaps}
+              graphIsLoading={graphIsLoading}
+              highlightTopicName={highlightTopicName}
+            />
+          </div>
+        )}
+
+        {/* Loading screen for historical topic TTS */}
+        {isLoadingTopicAudio && activeTopic && activeTab === 'learn' && (
+          <LoadingTopicScreen
+            topic={activeTopic}
+            progress={loadingTopicProgress}
+          />
+        )}
+
+        {uiState === UI_STATE.SLIDESHOW && activeTab === 'learn' && visibleSlides.length > 0 && !isLoadingTopicAudio && (
+          <SlideshowScreen
+            displayedSlide={displayedSlide}
+            visibleSlides={visibleSlides}
+            activeChildSlides={activeChildSlides}
+            currentIndex={currentIndex}
+            currentChildIndex={currentChildIndex}
+            isPreparingFollowUp={isPreparingFollowUp}
+            highlightPosition={highlightPosition}
+            handleSuggestionClick={handleSuggestionClick}
+            wasManualNavRef={wasManualNavRef}
+            getSlideDuration={getSlideDuration}
+            isSlideNarrationPlaying={isSlideNarrationPlaying}
+            isSlideNarrationLoading={isSlideNarrationLoading}
+            slideAudioRef={slideAudioRef}
+            isPlaying={isPlaying}
+            goToPrevSlide={goToPrevSlide}
+            goToNextSlide={goToNextSlide}
+            goToChildPrev={goToChildPrev}
+            goToChildNext={goToChildNext}
+            togglePlayPause={togglePlayPause}
+            questionQueue={questionQueue}
+            activeTopic={activeTopic}
+            handleRegenerate={handleRegenerate}
+            handleVersionSwitch={handleVersionSwitch}
+            isRegenerating={isRegenerating}
+            segments={segments}
+            currentSegmentIndex={currentSegmentIndex}
+            currentSlideInSegment={currentSlideInSegment}
+            goToSegment={goToSegment}
+            isChapterPickerOpen={isChapterPickerOpen}
+            setIsChapterPickerOpen={setIsChapterPickerOpen}
+          />
         )}
         </main>
 
         {/* Raise hand button - only shown during slideshow */}
-        {uiState === UI_STATE.SLIDESHOW && (
-          <div
-            className={`fixed z-50 pointer-events-none left-1/2 -translate-x-1/2 ${
-              topics.length > 0 ? 'md:left-[calc(50%+128px)] xl:left-1/2' : ''
-            }`}
-            style={{
-              // F058: Use safe area inset for notched devices, fallback to 24px
-              bottom: 'max(24px, env(safe-area-inset-bottom, 24px))',
-            }}
-          >
-            <div className="flex flex-col items-center gap-2 pointer-events-auto">
-              {/* Hide raise hand button when text input is shown */}
-              {!showTextFallback && (
-                <>
-                  {isMicEnabled && (
-                    <span className="text-xs text-gray-500 bg-white/90 px-3 py-1 rounded-full shadow-sm">
-                      {liveTranscription || (isListening
-                        ? 'Listening...'
-                        : isRaiseHandPending
-                          ? 'Waiting for the current sentence...'
-                          : 'Mic on')}
-                    </span>
-                  )}
-                  <button
-                    onClick={handleRaiseHandClick}
-                    aria-label={isMicEnabled ? 'Lower hand' : 'Raise hand'}
-                    className={`w-14 h-14 min-h-[44px] rounded-full shadow-lg text-2xl transition-all select-none flex items-center justify-center ${
-                      isMicEnabled
-                        ? 'bg-red-500 hover:bg-red-600'
-                        : 'bg-primary hover:scale-105'
-                    }`}
-                    style={{
-                      WebkitTouchCallout: 'none',
-                      userSelect: 'none',
-                    }}
-                  >
-                    {isMicEnabled ? '🤚' : '✋'}
-                  </button>
-                  <button
-                    onClick={() => setShowTextFallback(true)}
-                    className="text-xs text-gray-400 hover:text-gray-600 transition-colors mt-1"
-                  >
-                    can't talk? type here
-                  </button>
-                </>
-              )}
-
-              {/* Text input for typing questions */}
-              {showTextFallback && (
-                <div className="w-72 bg-white rounded-xl shadow-lg p-3 animate-fade-in">
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault()
-                      if (textInput.trim()) {
-                        handleQuestion(textInput.trim())
-                        setTextInput('')
-                        setShowTextFallback(false)
-                      }
-                    }}
-                    className="flex gap-2"
-                  >
-                    <input
-                      type="text"
-                      value={textInput}
-                      onChange={(e) => setTextInput(e.target.value)}
-                      onFocus={() => {
-                        // Stop narration and auto-advance when user starts typing
-                        interruptActiveAudio()
-                        setIsPlaying(false)
-                      }}
-                      placeholder="Type your question..."
-                      className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:border-primary focus:outline-none"
-                      autoFocus
-                    />
-                    <button
-                      type="submit"
-                      disabled={!textInput.trim()}
-                      className={`
-                        px-3 py-2 rounded-lg transition-all
-                        ${textInput.trim()
-                          ? 'bg-primary text-white hover:bg-primary/90'
-                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                        }
-                      `}
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                      </svg>
-                    </button>
-                  </form>
-                  <button
-                    onClick={() => setShowTextFallback(false)}
-                    className="w-full text-xs text-gray-400 hover:text-gray-600 mt-2 transition-colors"
-                  >
-                    ✕ close
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
+        {uiState === UI_STATE.SLIDESHOW && activeTab === 'learn' && (
+          <RaiseHandButton
+            hasSidebar={topics.length > 0}
+            showTextFallback={showTextFallback}
+            setShowTextFallback={setShowTextFallback}
+            isMicEnabled={isMicEnabled}
+            isListening={isListening}
+            isRaiseHandPending={isRaiseHandPending}
+            liveTranscription={liveTranscription}
+            handleRaiseHandClick={handleRaiseHandClick}
+            textInput={textInput}
+            setTextInput={setTextInput}
+            handleQuestion={handleQuestion}
+            interruptActiveAudio={interruptActiveAudio}
+            setIsPlaying={setIsPlaying}
+          />
         )}
 
         {/* Toast notification for queue feedback (F047) */}
@@ -5759,12 +3694,27 @@ function App() {
           visible={toast.visible}
           onDismiss={hideToast}
         />
+
+        {/* WB018: Bottom Tab Bar for Learn/Journey navigation */}
+        <BottomTabBar
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+          worldBadge={worldBadge}
+          hasSidebar={topics.length > 0}
+        />
       </div>
 
-      {/* Spacer to balance sidebar and keep content centered on wide screens */}
-      {topics.length > 0 && (
-        <div className="hidden xl:block w-64 flex-shrink-0" aria-hidden="true" />
+      {/* UI008: Tier upgrade celebration overlay */}
+      {showTierCelebration && tierUpgradeInfo && (
+        <TierUpCelebration
+          fromTier={tierUpgradeInfo.from}
+          toTier={tierUpgradeInfo.to}
+          onComplete={handleTierCelebrationClose}
+          onViewWorld={handleTierViewWorld}
+        />
       )}
+
+      {/* UI010: Sidebar spacer removed - using full width layout */}
     </div>
   )
 }

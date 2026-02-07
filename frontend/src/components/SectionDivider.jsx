@@ -34,7 +34,7 @@ function SectionDivider({ question }) {
       </div>
 
       {/* Label */}
-      <p className="text-sm font-medium text-indigo-600 uppercase tracking-wider mb-2">
+      <p className="text-sm font-medium text-primary-600 uppercase tracking-wider mb-2">
         Diving deeper into...
       </p>
 
@@ -44,7 +44,7 @@ function SectionDivider({ question }) {
       </h2>
 
       {/* Animated arrow */}
-      <div className="text-2xl text-indigo-500 animate-bounce" aria-hidden="true">
+      <div className="text-2xl text-primary-500 animate-bounce" aria-hidden="true">
         ↓
       </div>
 

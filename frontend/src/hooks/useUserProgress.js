@@ -5,21 +5,8 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3002'
-
-// Generate or retrieve a persistent client ID
-function getClientId() {
-  const storageKey = 'showme_client_id'
-  let clientId = localStorage.getItem(storageKey)
-
-  if (!clientId) {
-    clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    localStorage.setItem(storageKey, clientId)
-  }
-
-  return clientId
-}
+import { getClientId } from '../utils/clientId'
+import { toApiUrl } from '../utils/api'
 
 export default function useUserProgress() {
   const [progress, setProgress] = useState(null)
@@ -36,7 +23,7 @@ export default function useUserProgress() {
       try {
         setIsLoading(true)
         const response = await fetch(
-          `${API_BASE}/api/user/progress?clientId=${encodeURIComponent(clientId)}`
+          toApiUrl(`/api/user/progress?clientId=${encodeURIComponent(clientId)}`)
         )
 
         if (!response.ok) {
@@ -54,11 +41,16 @@ export default function useUserProgress() {
         setProgress({
           clientId,
           totalQuestions: 0,
-          totalSocraticAnswers: 0,
+          totalTopicsLearned: 0,
+          storyCompletions: 0,
+          mysteryCompletions: 0,
+          wonderCompletions: 0,
           streakCount: 0,
           longestStreak: 0,
           points: 0,
-          badges: []
+          badges: [],
+          badgeUnlockDates: {},
+          deepLevelUsed: false,
         })
       } finally {
         setIsLoading(false)
@@ -71,7 +63,7 @@ export default function useUserProgress() {
   // Record an activity and update progress
   const recordActivity = useCallback(async (action) => {
     try {
-      const response = await fetch(`${API_BASE}/api/user/activity`, {
+      const response = await fetch(toApiUrl('/api/user/activity'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clientId, action })
@@ -106,12 +98,24 @@ export default function useUserProgress() {
     return recordActivity('question_asked')
   }, [recordActivity])
 
-  const recordSocraticAnswered = useCallback(() => {
-    return recordActivity('socratic_answered')
-  }, [recordActivity])
-
   const recordDeepLevelUsed = useCallback(() => {
     return recordActivity('deep_level_used')
+  }, [recordActivity])
+
+  const recordTopicLearned = useCallback(() => {
+    return recordActivity('topic_learned')
+  }, [recordActivity])
+
+  const recordStoryCompleted = useCallback(() => {
+    return recordActivity('story_complete')
+  }, [recordActivity])
+
+  const recordMysteryCompleted = useCallback(() => {
+    return recordActivity('mystery_complete')
+  }, [recordActivity])
+
+  const recordWonderCompleted = useCallback(() => {
+    return recordActivity('wonder_complete')
   }, [recordActivity])
 
   return {
@@ -124,7 +128,10 @@ export default function useUserProgress() {
     clearNewBadges,
     recordActivity,
     recordQuestionAsked,
-    recordSocraticAnswered,
-    recordDeepLevelUsed
+    recordDeepLevelUsed,
+    recordTopicLearned,
+    recordStoryCompleted,
+    recordMysteryCompleted,
+    recordWonderCompleted
   }
 }

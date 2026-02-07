@@ -3,25 +3,78 @@
  *
  * Tapping a card selects the explanation level AND triggers voice input.
  * Each card acts as both a setting and a "Start" button.
+ *
+ * Color themes use coral monochromatic variations for visual hierarchy:
+ * - light: Subtle primary tints for beginner-friendly content
+ * - medium: Mid-range primary shades for regular explanations
+ * - rich: Deeper primary tones for advanced deep-dives
  */
+
+const COLOR_THEMES = {
+  light: {
+    bg: 'bg-white',
+    bgSelected: 'bg-primary-50/70',
+    border: 'border-gray-200',
+    borderSelected: 'border-primary-400',
+    accentBorder: 'border-l-primary-300',
+    iconBg: 'bg-cream-100',
+    iconBgSelected: 'bg-primary-100',
+    titleSelected: 'text-primary-600',
+    shadow: 'shadow-sm',
+    shadowSelected: 'shadow-md shadow-primary-100/50',
+    micBg: 'bg-primary-400',
+  },
+  medium: {
+    bg: 'bg-white',
+    bgSelected: 'bg-primary-50/70',
+    border: 'border-gray-200',
+    borderSelected: 'border-primary-500',
+    accentBorder: 'border-l-primary-400',
+    iconBg: 'bg-cream-100',
+    iconBgSelected: 'bg-primary-100',
+    titleSelected: 'text-primary-600',
+    shadow: 'shadow-sm',
+    shadowSelected: 'shadow-md shadow-primary-100/50',
+    micBg: 'bg-primary-500',
+  },
+  rich: {
+    bg: 'bg-white',
+    bgSelected: 'bg-primary-50/70',
+    border: 'border-gray-200',
+    borderSelected: 'border-primary-600',
+    accentBorder: 'border-l-primary-500',
+    iconBg: 'bg-cream-100',
+    iconBgSelected: 'bg-primary-200',
+    titleSelected: 'text-primary-700',
+    shadow: 'shadow-sm',
+    shadowSelected: 'shadow-md shadow-primary-200/50',
+    micBg: 'bg-primary-600',
+  },
+}
+
 function LevelCard({
   level,
   icon,
   title,
   description,
   isSelected = false,
-  onClick
+  onClick,
+  color = 'medium'
 }) {
+  const theme = COLOR_THEMES[color] || COLOR_THEMES.medium
+
   return (
     <button
       onClick={onClick}
       className={`
-        w-full p-4 rounded-xl border-2 transition-all duration-200
+        w-full p-4 rounded-xl transition-all duration-200
         flex items-center gap-4 text-left
-        hover:scale-[1.02] hover:shadow-lg active:scale-[0.98]
+        border-2 border-l-4
+        hover:scale-[1.02] active:scale-[0.98]
+        ${isSelected ? theme.bgSelected : theme.bg}
         ${isSelected
-          ? 'border-primary bg-primary/5 shadow-md'
-          : 'border-gray-200 hover:border-primary/50 bg-white'
+          ? `${theme.borderSelected} ${theme.accentBorder} ${theme.shadowSelected}`
+          : `${theme.border} ${theme.accentBorder} ${theme.shadow} hover:shadow-md`
         }
       `}
     >
@@ -29,7 +82,7 @@ function LevelCard({
       <div className={`
         text-3xl flex-shrink-0 w-12 h-12 flex items-center justify-center
         rounded-full transition-colors
-        ${isSelected ? 'bg-primary/10' : 'bg-gray-50'}
+        ${isSelected ? theme.iconBgSelected : theme.iconBg}
       `}>
         {icon}
       </div>
@@ -37,7 +90,7 @@ function LevelCard({
       {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <h3 className={`font-semibold text-lg ${isSelected ? 'text-primary' : 'text-gray-900'}`}>
+          <h3 className={`font-semibold text-lg ${isSelected ? theme.titleSelected : 'text-gray-900'}`}>
             {title}
           </h3>
           {level === 'standard' && !isSelected && (
@@ -56,8 +109,8 @@ function LevelCard({
         flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center
         transition-all duration-200
         ${isSelected
-          ? 'bg-primary text-white'
-          : 'bg-gray-100 text-gray-400 group-hover:bg-primary/10 group-hover:text-primary'
+          ? `${theme.micBg} text-white animate-pulse-mic`
+          : 'bg-gray-100 text-gray-400'
         }
       `}>
         <svg

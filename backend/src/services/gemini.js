@@ -13,6 +13,7 @@
 
 import { GoogleGenAI } from '@google/genai'
 import { GoogleAuth } from 'google-auth-library'
+import { extractJSON } from '../utils/json.js'
 
 // Configuration constants
 const TEXT_MODEL = 'gemini-3-flash-preview'
@@ -23,8 +24,15 @@ const IMAGE_MODEL_FALLBACKS = [
 
 const FAST_MODEL = 'gemini-2.5-flash-lite'
 
-// GenAI TTS: Use pro TTS model with responseModalities: ['AUDIO']
-const GENAI_TTS_MODEL = 'gemini-2.5-pro-preview-tts'
+// GenAI TTS model chain (primary -> fallback(s))
+// Defaults prefer Pro quality first, then Flash Preview as GenAI fallback.
+const GENAI_TTS_PRIMARY_MODEL = process.env.GENAI_TTS_PRIMARY_MODEL || 'gemini-2.5-pro-preview-tts'
+const GENAI_TTS_FALLBACK_MODELS = (process.env.GENAI_TTS_FALLBACK_MODELS || 'gemini-2.5-flash-preview-tts')
+  .split(',')
+  .map((model) => model.trim())
+  .filter(Boolean)
+
+const GENAI_TTS_MODELS = [...new Set([GENAI_TTS_PRIMARY_MODEL, ...GENAI_TTS_FALLBACK_MODELS])]
 
 // Cloud TTS fallback config (used when GenAI fails)
 // Uses Gemini TTS voice through Cloud Text-to-Speech API (150 QPM)
@@ -50,110 +58,6 @@ export function detectLanguage(text) {
 
   if (hasChineseChars) return 'zh'
   return 'en'
-}
-
-/**
- * Extract JSON from text that may be wrapped in markdown code blocks
- * Handles various formats returned by different Gemini models
- * @param {string} text - Raw text response from Gemini
- * @returns {string} Extracted JSON string ready for parsing
- */
-function extractJSON(text) {
-  if (!text) return '{}'
-
-  // Debug: log first 50 chars and their char codes
-  const preview = text.substring(0, 50)
-  const charCodes = [...preview].map(c => c.charCodeAt(0))
-  console.log('[extractJSON] First 50 chars:', JSON.stringify(preview))
-  console.log('[extractJSON] Char codes:', charCodes.slice(0, 20))
-
-  // Method 1: Match ```json ... ``` anywhere (no $ anchor - allows trailing content)
-  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/)
-  if (codeBlockMatch && codeBlockMatch[1]) {
-    const extracted = codeBlockMatch[1].trim()
-    console.log('[extractJSON] Matched code block, extracted length:', extracted.length)
-    return extracted
-  }
-
-  // Method 1b: Handle truncated response - starts with ```json but no closing ```
-  if (text.startsWith('```')) {
-    // Skip opening fence and optional 'json' label
-    let startIdx = 3
-    if (text.slice(startIdx, startIdx + 4).toLowerCase() === 'json') {
-      startIdx += 4
-    }
-    // Skip whitespace
-    while (startIdx < text.length && /\s/.test(text[startIdx])) {
-      startIdx++
-    }
-    const remaining = text.slice(startIdx).trim()
-    console.log('[extractJSON] Truncated code block, extracting from position:', startIdx)
-
-    // Try to find JSON content
-    const firstBraceInRemaining = remaining.indexOf('{')
-    if (firstBraceInRemaining !== -1) {
-      const lastBraceInRemaining = remaining.lastIndexOf('}')
-      if (lastBraceInRemaining > firstBraceInRemaining) {
-        console.log('[extractJSON] Truncated: brace extraction from remaining')
-        return remaining.slice(firstBraceInRemaining, lastBraceInRemaining + 1)
-      } else {
-        // No closing brace found - extract partial JSON for repairJSON to complete
-        console.log('[extractJSON] Truncated: no closing brace, extracting partial JSON')
-        return remaining.slice(firstBraceInRemaining)
-      }
-    }
-  }
-
-  // Method 2: Find balanced braces for JSON object
-  const firstBrace = text.indexOf('{')
-  if (firstBrace !== -1) {
-    let depth = 0
-    let inString = false
-    let escapeNext = false
-
-    for (let i = firstBrace; i < text.length; i++) {
-      const char = text[i]
-
-      if (escapeNext) {
-        escapeNext = false
-        continue
-      }
-
-      if (char === '\\' && inString) {
-        escapeNext = true
-        continue
-      }
-
-      if (char === '"' && !escapeNext) {
-        inString = !inString
-        continue
-      }
-
-      if (!inString) {
-        if (char === '{') depth++
-        else if (char === '}') {
-          depth--
-          if (depth === 0) {
-            console.log('[extractJSON] Balanced brace extraction from', firstBrace, 'to', i)
-            return text.slice(firstBrace, i + 1)
-          }
-        }
-      }
-    }
-
-    // No balanced closing brace - extract partial JSON for repairJSON to complete
-    const lastBrace = text.lastIndexOf('}')
-    if (lastBrace > firstBrace) {
-      console.log('[extractJSON] Fallback brace extraction from', firstBrace, 'to', lastBrace)
-      return text.slice(firstBrace, lastBrace + 1)
-    } else {
-      console.log('[extractJSON] No closing brace, extracting partial JSON from', firstBrace)
-      return text.slice(firstBrace)
-    }
-  }
-
-  console.log('[extractJSON] No extraction matched, returning raw text')
-  return text.trim()
 }
 
 /**
@@ -433,6 +337,7 @@ async function generateScriptWithModel(ai, prompt, model, fallbackTopic) {
 
     // Validate each slide has required fields
     const validSlides = parsed.slides.map((slide, index) => ({
+      title: slide.title || `Slide ${index + 1}`,
       // Strip markdown formatting from subtitles (they're spoken by TTS)
       subtitle: (slide.subtitle || `Slide ${index + 1}`).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1'),
       imagePrompt: slide.imagePrompt || `Educational diagram about ${fallbackTopic}`,
@@ -545,14 +450,18 @@ IMPORTANT: Always end with a CONCLUSION slide that:
 
 CRITICAL: Subtitles are spoken aloud by TTS. Do NOT use markdown formatting (no **bold**, *italics*, or other markup). Write plain text only.
 
+TITLE FIELD: Each slide MUST include a "title" field — a short (2-5 words) descriptive chapter heading for navigation. Examples: "Initial Breakdown", "Stomach Acids", "Nutrient Absorption", "Key Takeaways". Do NOT repeat the subtitle — the title is a concise label, not narration.
+
 Output Format (JSON):
 {
   "slides": [
     {
+      "title": "Short Chapter Title",
       "subtitle": "Conversational explanation text that sounds natural when spoken aloud",
       "imagePrompt": "Description of educational diagram showing [concept], with labeled parts including [details]. Style: clean, colorful educational illustration."
     },
     {
+      "title": "Key Takeaways",
       "subtitle": "Alright, let's wrap this up. First thing to remember... [key point 1]. Second... [key point 2]. And the big takeaway? [key point 3].",
       "imagePrompt": "Summary infographic with three key points highlighted in boxes or icons. Clean, minimal design with bullet points.",
       "isConclusion": true
@@ -594,6 +503,7 @@ Important: Image prompts should describe detailed educational diagrams with labe
  * @param {string} options.topic - The overall topic for context
  * @param {string} options.explanationLevel - Level of visual complexity: 'simple', 'standard', or 'deep'
  * @param {string} options.language - Language code for text labels: 'en' or 'zh'
+ * @param {boolean} options.comicPanel - Whether to force a 4-panel comic page layout
  * @returns {Promise<{imageUrl: string|null, error: string|null}>}
  */
 export async function generateEducationalImage(imagePrompt, options = {}) {
@@ -602,7 +512,7 @@ export async function generateEducationalImage(imagePrompt, options = {}) {
     return { imageUrl: null, error: 'API_NOT_AVAILABLE' }
   }
 
-  const { topic = '', explanationLevel = 'standard', language = 'en' } = options
+  const { topic = '', explanationLevel = 'standard', language = 'en', comicPanel = false } = options
 
   // Validate and normalize explanation level
   const validLevels = ['simple', 'standard', 'deep']
@@ -616,6 +526,14 @@ export async function generateEducationalImage(imagePrompt, options = {}) {
     ? '- IMPORTANT: All text labels, annotations, and captions on the diagram must be in Simplified Chinese (简体中文)'
     : ''
 
+  const comicPanelInstructions = comicPanel
+    ? `- Format as a 4-panel manga/comic page arranged in a 2x2 grid
+- Use clear, visible panel borders separating each panel
+- Show sequential storytelling progression from top-left to top-right to bottom-left to bottom-right
+- NO text, speech bubbles, labels, or captions inside the image
+- Use a wide/landscape composition so all four panels are readable`
+    : ''
+
   // Enhance the prompt for better educational diagrams
   const enhancedPrompt = `Create an educational diagram illustration: ${imagePrompt}
 
@@ -623,6 +541,7 @@ Style requirements:
 ${levelStyleInstructions}
 - No photorealistic elements - use illustrated/diagrammatic style
 - White or light colored background for clarity
+${comicPanelInstructions}
 ${languageInstruction}
 ${topic ? `- Topic context: ${topic}` : ''}`
 
@@ -872,52 +791,79 @@ export async function generateTTS(text, options = {}) {
     : 'Read the following in a clear, engaging, and natural way, as if teaching a curious student:'
 
   const fullPrompt = `${stylePrompt}\n\n${text}`
+  const genAiErrors = []
 
-  console.log('[TTS] GenAI request:', { model: GENAI_TTS_MODEL, voice, textLength: text.length })
+  for (let i = 0; i < GENAI_TTS_MODELS.length; i += 1) {
+    const model = GENAI_TTS_MODELS[i]
+    const hasMoreGenAiFallbacks = i < GENAI_TTS_MODELS.length - 1
 
-  try {
-    const response = await ai.models.generateContent({
-      model: GENAI_TTS_MODEL,
-      contents: fullPrompt,
-      config: {
-        responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: {
-              voiceName: voice,
+    console.log('[TTS] GenAI request:', { model, voice, textLength: text.length })
+
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: fullPrompt,
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: voice,
+              },
             },
           },
         },
-      },
-    })
+      })
 
-    // Extract audio data from response
-    const parts = response.candidates?.[0]?.content?.parts || []
+      // Extract audio data from response
+      const parts = response.candidates?.[0]?.content?.parts || []
 
-    for (const part of parts) {
-      if (part.inlineData) {
-        console.log('[TTS] GenAI success - mimeType:', part.inlineData.mimeType)
-        const result = buildAudioResult(part.inlineData)
-        console.log('[TTS] Audio URL length:', result.audioUrl?.length || 0, 'duration:', result.duration)
-        return result
+      for (const part of parts) {
+        if (part.inlineData) {
+          console.log('[TTS] GenAI success - mimeType:', part.inlineData.mimeType, 'model:', model)
+          const result = buildAudioResult(part.inlineData)
+          console.log('[TTS] Audio URL length:', result.audioUrl?.length || 0, 'duration:', result.duration)
+          return result
+        }
       }
+
+      genAiErrors.push('NO_AUDIO_GENERATED')
+      if (hasMoreGenAiFallbacks) {
+        console.warn('[TTS] No audio in GenAI response:', { model, nextModel: GENAI_TTS_MODELS[i + 1] })
+        continue
+      }
+
+      console.error('[TTS] No audio in GenAI response, trying Cloud TTS fallback')
+    } catch (error) {
+      const normalizedError = normalizeTtsError(error)
+      genAiErrors.push(normalizedError)
+
+      if (hasMoreGenAiFallbacks) {
+        console.warn('[TTS] GenAI failed:', error.message, '- trying next GenAI fallback model')
+        continue
+      }
+
+      console.warn('[TTS] GenAI failed:', error.message, '- trying Cloud TTS fallback')
     }
-
-    console.error('[TTS] No audio in GenAI response, trying Cloud TTS fallback')
-    return generateCloudTTS(text, language)
-  } catch (error) {
-    const normalizedError = normalizeTtsError(error)
-    console.warn('[TTS] GenAI failed:', error.message, '- trying Cloud TTS fallback')
-
-    // Fall back to Cloud TTS on any error (rate limit, network, etc.)
-    const fallbackResult = await generateCloudTTS(text, language)
-    if (fallbackResult.audioUrl) {
-      return fallbackResult
-    }
-
-    // Both failed - return original error
-    return { audioUrl: null, duration: 0, error: normalizedError }
   }
+
+  // Fall back to Cloud TTS after exhausting GenAI model chain.
+  const fallbackResult = await generateCloudTTS(text, language)
+  if (fallbackResult.audioUrl) {
+    return fallbackResult
+  }
+
+  // Prefer surfaced Cloud-specific auth/permission errors.
+  if (fallbackResult.error && fallbackResult.error !== 'RATE_LIMITED') {
+    return fallbackResult
+  }
+
+  const normalizedError =
+    genAiErrors.find((code) => code && code !== 'NO_AUDIO_GENERATED') ||
+    fallbackResult.error ||
+    'UNKNOWN_ERROR'
+
+  return { audioUrl: null, duration: 0, error: normalizedError }
 }
 
 /**
@@ -1685,65 +1631,302 @@ Example: ["How do black holes work?", "Why do we dream?", "How does WiFi work?"]
 }
 
 /**
- * Generate a Socratic question based on slideshow content
- * SOCRATIC-001: Probing questions to deepen understanding
+ * Generate a random educational topic for the "Surprise Me" feature
+ * Returns a curiosity-sparking question with category and emoji
  *
- * @param {Object} params - Parameters for question generation
- * @param {Array} params.slides - The generated slides with script and imageUrl
- * @param {string} params.topicName - The topic being explored
- * @param {string} params.language - Language code: 'en' or 'zh'
- * @returns {Promise<{question: string, questionType: string, expectedTopics: string[], error: string|null}>}
+ * @returns {Promise<{topic: string, category: string, emoji: string, error: string|null}>}
  */
-export async function generateSocraticQuestion(params) {
-  const ai = getAIClient()
-  if (!ai) {
-    return { question: null, questionType: null, expectedTopics: null, error: 'API_NOT_AVAILABLE' }
+export async function generateRandomTopic({ excludeTopics = [] } = {}) {
+  if (!isGeminiAvailable()) {
+    return { topic: null, category: null, emoji: null, error: 'API_KEY_MISSING' }
   }
 
-  const { slides = [], topicName = '', language = 'en' } = params
+  try {
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
 
-  // Build context from slides
-  const slideContext = slides
-    .map((slide, i) => `Slide ${i + 1}: ${slide.subtitle || slide.script || ''}`)
-    .join('\n')
+    const cleanedExclude = Array.isArray(excludeTopics)
+      ? excludeTopics
+        .filter((topic) => typeof topic === 'string')
+        .map((topic) => topic.trim())
+        .filter((topic) => topic.length > 0)
+        .slice(0, 20)
+      : []
+    const excludeSet = new Set(cleanedExclude.map((topic) => topic.toLowerCase()))
 
-  const languageInstruction = language === 'zh'
-    ? 'Generate the question and all text in Simplified Chinese (简体中文).'
-    : 'Generate the question and all text in English.'
+    // Expanded category pool with subtopics for constrained random selection
+    const TOPIC_CATEGORIES = [
+      { name: 'Biology', subtopics: ['cells', 'ecosystems', 'evolution', 'anatomy', 'genetics', 'microbes', 'symbiosis'] },
+      { name: 'Physics', subtopics: ['gravity', 'light', 'electricity', 'magnetism', 'sound', 'waves', 'energy', 'friction'] },
+      { name: 'Chemistry', subtopics: ['elements', 'reactions', 'molecules', 'states of matter', 'acids', 'crystals'] },
+      { name: 'Space', subtopics: ['planets', 'stars', 'galaxies', 'black holes', 'astronauts', 'moons', 'comets', 'nebulae'] },
+      { name: 'Earth Science', subtopics: ['volcanoes', 'earthquakes', 'weather', 'oceans', 'rocks', 'caves', 'glaciers', 'fossils'] },
+      { name: 'Animals', subtopics: ['mammals', 'birds', 'insects', 'ocean life', 'dinosaurs', 'reptiles', 'amphibians', 'migration'] },
+      { name: 'Plants', subtopics: ['trees', 'flowers', 'photosynthesis', 'seeds', 'rainforests', 'deserts', 'carnivorous plants'] },
+      { name: 'Human Body', subtopics: ['brain', 'heart', 'bones', 'senses', 'digestion', 'muscles', 'immune system', 'sleep'] },
+      { name: 'Technology', subtopics: ['computers', 'internet', 'robots', 'inventions', 'AI', 'smartphones', 'satellites'] },
+      { name: 'History', subtopics: ['ancient civilizations', 'inventions', 'explorers', 'famous buildings', 'archaeology'] },
+      { name: 'Math', subtopics: ['numbers', 'patterns', 'shapes', 'puzzles', 'infinity', 'probability', 'geometry'] },
+      { name: 'Engineering', subtopics: ['bridges', 'buildings', 'machines', 'vehicles', 'dams', 'tunnels', 'skyscrapers'] },
+      { name: 'Food Science', subtopics: ['cooking', 'nutrition', 'preservation', 'fermentation', 'baking', 'spices'] },
+      { name: 'Psychology', subtopics: ['memory', 'dreams', 'emotions', 'learning', 'perception', 'habits', 'creativity'] },
+      { name: 'Music', subtopics: ['instruments', 'sound waves', 'composers', 'rhythm', 'singing', 'genres'] },
+      { name: 'Art', subtopics: ['colors', 'famous artists', 'techniques', 'optical illusions', 'sculpture', 'photography'] },
+      { name: 'Sports Science', subtopics: ['muscles', 'training', 'equipment', 'records', 'aerodynamics', 'nutrition'] },
+      { name: 'Weather', subtopics: ['storms', 'clouds', 'seasons', 'climate', 'rainbows', 'tornadoes', 'hurricanes', 'snow'] },
+      { name: 'Ocean', subtopics: ['deep sea', 'coral reefs', 'waves', 'marine animals', 'tides', 'shipwrecks', 'bioluminescence'] },
+      { name: 'Aviation', subtopics: ['planes', 'helicopters', 'airports', 'flight physics', 'drones', 'hot air balloons'] },
+      { name: 'Medicine', subtopics: ['vaccines', 'surgery', 'diseases', 'healing', 'medicine history', 'x-rays'] },
+      { name: 'Geography', subtopics: ['mountains', 'rivers', 'deserts', 'islands', 'waterfalls', 'canyons', 'poles'] },
+      { name: 'Ecology', subtopics: ['food chains', 'habitats', 'endangered species', 'recycling', 'pollution', 'conservation'] },
+      { name: 'Materials', subtopics: ['metals', 'plastics', 'glass', 'wood', 'fabrics', 'rubber', 'concrete'] },
+    ]
 
-  const prompt = `You are a Socratic tutor helping students think deeply about what they've learned.
+    // Pick random category and subtopic for constrained generation
+    const category = TOPIC_CATEGORIES[Math.floor(Math.random() * TOPIC_CATEGORIES.length)]
+    const subtopic = category.subtopics[Math.floor(Math.random() * category.subtopics.length)]
 
-The student just watched a slideshow about "${topicName}":
-${slideContext}
+    const promptBase = `Generate ONE educational question about ${category.name}, specifically related to ${subtopic}.
 
-${languageInstruction}
+Requirements:
+- Topic should spark curiosity and be visually explainable
+- Phrase it as a question (e.g., "Why do cats purr?" or "How do volcanoes form?")
+- Keep it concise (under 10 words)
+- Avoid controversial, political, or sensitive topics
+- Focus on the ${subtopic} aspect of ${category.name}
+${cleanedExclude.length > 0 ? `- Avoid repeating or closely mirroring these recent topics: ${cleanedExclude.map((topic) => `"${topic}"`).join(', ')}` : ''}
 
-Generate ONE thought-provoking question that:
-1. Encourages the student to think critically about the content
-2. Cannot be answered by simply repeating what was shown
-3. Connects the topic to real-world applications or deeper understanding
-
-Question types:
-- comprehension: Tests understanding of core concepts
-- application: Asks how to apply the knowledge
-- analysis: Asks to break down or compare aspects
-- prediction: Asks what would happen in a scenario
-
-Output Format (JSON):
+Return ONLY valid JSON (no markdown):
 {
-  "question": "Your thought-provoking question here?",
-  "questionType": "comprehension|application|analysis|prediction",
-  "expectedTopics": ["concept1", "concept2", "concept3"]
+  "topic": "the question",
+  "category": "${category.name}",
+  "emoji": "one relevant emoji"
 }
 
-The expectedTopics should list 2-4 key concepts that a good answer should mention.`
+Example response:
+{"topic": "Why do fireflies glow?", "category": "Biology", "emoji": "🪲"}`
+
+    const MAX_ATTEMPTS = 3
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+      const seed = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      const prompt = `${promptBase}
+
+Random seed: ${seed}`
+      const response = await ai.models.generateContent({
+        model: FAST_MODEL,
+        contents: prompt,
+        config: {
+          temperature: 1.0,
+          topP: 0.95,
+          topK: 40,
+          maxOutputTokens: 256,
+          responseMimeType: 'application/json',
+        }
+      })
+
+      const text = response.text || ''
+      const jsonStr = extractJSON(text)
+      const result = JSON.parse(jsonStr)
+
+      if (!result.topic || typeof result.topic !== 'string') {
+        return { topic: null, category: null, emoji: null, error: 'INVALID_RESPONSE' }
+      }
+
+      const topic = result.topic.trim()
+      if (excludeSet.size > 0 && excludeSet.has(topic.toLowerCase())) {
+        if (attempt < MAX_ATTEMPTS - 1) {
+          continue
+        }
+        return { topic: null, category: null, emoji: null, error: 'DUPLICATE_TOPIC' }
+      }
+
+      return {
+        topic,
+        category: result.category?.trim() || 'General',
+        emoji: result.emoji || '✨',
+        error: null,
+      }
+    }
+    return { topic: null, category: null, emoji: null, error: 'DUPLICATE_TOPIC' }
+  } catch (error) {
+    console.error('[Gemini] Random topic error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { topic: null, category: null, emoji: null, error: 'RATE_LIMITED' }
+    }
+
+    return { topic: null, category: null, emoji: null, error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
+ * Classify a topic into a world zone for World Builder gamification
+ * WB007: Topic to zone mapping
+ *
+ * Zones:
+ * - nature: Animals, plants, geology, weather, oceans, space, biology
+ * - civilization: History, cultures, inventions, buildings, people, society
+ * - arcane: Math, philosophy, abstract concepts, logic, music theory, language
+ *
+ * @param {string} topicName - The topic name
+ * @param {string} topicDescription - Brief description or slide summary (optional)
+ * @returns {Promise<{zone: string, confidence: number, error: string|null}>}
+ */
+export async function classifyTopicZone(topicName, topicDescription = '') {
+  const ai = getAIClient()
+  if (!ai) {
+    return { zone: null, confidence: 0, error: 'API_NOT_AVAILABLE' }
+  }
+
+  // Validate input
+  if (!topicName || typeof topicName !== 'string' || topicName.trim().length === 0) {
+    return { zone: null, confidence: 0, error: 'INVALID_TOPIC' }
+  }
+
+  const prompt = `You are a classifier for an educational world-building game. Classify the following topic into exactly ONE zone.
+
+ZONES:
+1. "nature" - Natural world topics: animals, plants, geology (volcanoes, earthquakes), weather, oceans, space/astronomy, biology, ecosystems, chemistry of natural processes
+2. "civilization" - Human civilization topics: history, cultures, ancient civilizations (Egypt, Rome, etc.), inventions, architecture/buildings, famous people, society, geography of human settlements, wars, politics
+3. "arcane" - Abstract/intellectual topics: mathematics, philosophy, logic, music theory, language/linguistics, abstract physics concepts, economics theory, psychology concepts, computer science theory
+
+RULES:
+- Concrete, tangible topics about the physical world → nature
+- Topics about human history, society, or physical creations → civilization
+- Abstract, theoretical, or conceptual topics → arcane
+- When in doubt between civilization and arcane: if it's about DOING something in society → civilization; if it's about UNDERSTANDING a concept → arcane
+- "History of math" → civilization (because it's about historical development)
+- "How calculus works" → arcane (because it's about the abstract concept)
+
+TOPIC: "${topicName}"
+${topicDescription ? `DESCRIPTION: "${topicDescription}"` : ''}
+
+Respond with ONLY a JSON object:
+{
+  "zone": "nature" | "civilization" | "arcane",
+  "confidence": 0.0-1.0,
+  "reasoning": "Brief explanation"
+}`
 
   try {
     const response = await ai.models.generateContent({
       model: FAST_MODEL,
       contents: prompt,
       config: {
-        temperature: 0.7,
+        temperature: 0.1, // Low temperature for consistent classification
+        maxOutputTokens: 128,
+        responseMimeType: 'application/json',
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    // Validate zone is one of the expected values
+    const validZones = ['nature', 'civilization', 'arcane']
+    const zone = validZones.includes(parsed.zone) ? parsed.zone : null
+
+    if (!zone) {
+      return { zone: null, confidence: 0, error: 'INVALID_ZONE_RESPONSE' }
+    }
+
+    // Validate and normalize confidence
+    let confidence = parseFloat(parsed.confidence)
+    if (isNaN(confidence) || confidence < 0) confidence = 0.5
+    if (confidence > 1) confidence = 1
+
+    return {
+      zone,
+      confidence,
+      error: null
+    }
+  } catch (error) {
+    console.error('[Gemini] Zone classification error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { zone: null, confidence: 0, error: 'RATE_LIMITED' }
+    }
+    if (error.message?.includes('JSON')) {
+      return { zone: null, confidence: 0, error: 'PARSE_ERROR' }
+    }
+
+    return { zone: null, confidence: 0, error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
+ * Generate an image prompt for a world piece based on topic
+ * WB008: World piece prompt generation
+ *
+ * Generates a whimsical, child-friendly prompt for a world piece image
+ * that represents what the user learned about a topic. The prompt describes
+ * elements suitable for an isometric game art diorama.
+ *
+ * @param {string} topicName - The topic learned
+ * @param {string} zone - 'nature' | 'civilization' | 'arcane'
+ * @param {string} summary - Brief topic summary from slides
+ * @returns {Promise<{ prompt: string, elements: string[], error: string|null }>}
+ */
+export async function generateWorldPiecePrompt(topicName, zone, summary) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { prompt: null, elements: null, error: 'API_NOT_AVAILABLE' }
+  }
+
+  // Validate zone
+  const validZones = ['nature', 'civilization', 'arcane']
+  if (!validZones.includes(zone)) {
+    return { prompt: null, elements: null, error: 'INVALID_ZONE' }
+  }
+
+  // Zone-specific style modifiers
+  const zoneModifiers = {
+    nature: 'lush greenery, natural elements, animals or plants, organic shapes, earthy colors with vibrant accents',
+    civilization: 'architectural elements, historical or cultural artifacts, buildings, monuments, inventions, warm stone and metal textures',
+    arcane: 'magical elements, floating objects, glowing particles, ethereal effects, mystical symbols, crystals, nebula colors'
+  }
+
+  const aiPrompt = `You are a creative artist designing collectible world pieces for an educational game.
+The player just learned about "${topicName}" and earned a world piece for their island diorama.
+
+Topic summary: ${summary || 'No summary provided'}
+Zone category: ${zone}
+
+Generate a WHIMSICAL, CHILD-FRIENDLY image prompt for a world piece that:
+1. Represents a key visual element or concept from this topic
+2. Is suitable for isometric game art style
+3. Works as a collectible piece that can be placed in a parallax diorama
+4. Has a transparent or simple background for layering
+5. Is charming and appealing to children ages 8-14
+
+Zone style guidance: ${zoneModifiers[zone]}
+
+For ABSTRACT topics (math, philosophy, logic, etc.):
+- Use metaphorical representations (e.g., algebra → balance scales with glowing equations)
+- Create whimsical visualizations (e.g., prime numbers → a crystalline tower with numbered facets)
+- Don't be too literal - make it magical and interesting
+
+For CONCRETE topics (animals, buildings, historical figures):
+- Focus on the most iconic or recognizable visual element
+- Add whimsical or fantastical touches to make it special
+
+Output Format (JSON):
+{
+  "prompt": "Detailed image generation prompt here (1-3 sentences describing the visual)",
+  "elements": ["element1", "element2", "element3"]
+}
+
+The "elements" array should list 2-4 key visual elements that will appear in the image.
+The "prompt" should be a complete, detailed description ready for image generation.
+
+IMPORTANT: The prompt should specify "isometric game art style, vibrant colors, child-friendly, whimsical, transparent background, centered composition, no text".`
+
+  try {
+    const response = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: aiPrompt,
+      config: {
+        temperature: 0.8,
         maxOutputTokens: 256,
       }
     })
@@ -1752,105 +1935,188 @@ The expectedTopics should list 2-4 key concepts that a good answer should mentio
     const jsonStr = repairJSON(extractJSON(text))
     const parsed = JSON.parse(jsonStr)
 
-    const validTypes = ['comprehension', 'application', 'analysis', 'prediction']
-    const questionType = validTypes.includes(parsed.questionType) ? parsed.questionType : 'comprehension'
+    // Validate response
+    if (!parsed.prompt || typeof parsed.prompt !== 'string') {
+      return { prompt: null, elements: null, error: 'INVALID_RESPONSE' }
+    }
+
+    // Ensure the prompt includes style guidance
+    let finalPrompt = parsed.prompt
+    if (!finalPrompt.toLowerCase().includes('isometric')) {
+      finalPrompt = `Isometric game art style, vibrant colors, child-friendly, whimsical, transparent background, centered composition, no text. ${finalPrompt}`
+    }
 
     return {
-      question: parsed.question || null,
-      questionType,
-      expectedTopics: Array.isArray(parsed.expectedTopics) ? parsed.expectedTopics : [],
-      error: parsed.question ? null : 'EMPTY_RESPONSE'
+      prompt: finalPrompt,
+      elements: Array.isArray(parsed.elements) ? parsed.elements : [],
+      error: null
     }
   } catch (error) {
-    console.error('[Gemini] Socratic question generation error:', error.message)
+    console.error('[Gemini] World piece prompt generation error:', error.message)
 
     if (error.message?.includes('quota') || error.message?.includes('rate')) {
-      return { question: null, questionType: null, expectedTopics: null, error: 'RATE_LIMITED' }
+      return { prompt: null, elements: null, error: 'RATE_LIMITED' }
+    }
+    if (error.message?.includes('JSON')) {
+      return { prompt: null, elements: null, error: 'PARSE_ERROR' }
     }
 
-    return { question: null, questionType: null, expectedTopics: null, error: error.message || 'UNKNOWN_ERROR' }
+    return { prompt: null, elements: null, error: error.message || 'UNKNOWN_ERROR' }
   }
 }
 
 /**
- * Evaluate a user's answer to a Socratic question
- * SOCRATIC-002: Encouraging feedback with scoring
+ * Generate world piece image using Gemini's image generation
+ * WB009: World piece image generation
  *
- * @param {Object} params - Parameters for evaluation
- * @param {string} params.answer - User's transcribed answer
- * @param {string} params.question - The original Socratic question
- * @param {string[]} params.expectedTopics - Expected concepts from question generation
- * @param {Object} params.slideContext - The slide content for context
- * @param {string} params.language - Language code: 'en' or 'zh'
- * @returns {Promise<{feedback: string, score: number, correctAspects: string[], suggestions: string[], followUpQuestion: string|null, error: string|null}>}
+ * Creates an AI-generated image for a world piece that can be layered
+ * in the user's island diorama. The image should be consistent style,
+ * suitable for parallax layering with transparent or removable background.
+ *
+ * @param {string} prompt - The image generation prompt from generateWorldPiecePrompt
+ * @returns {Promise<{ imageUrl: string|null, error: string|null }>}
  */
-export async function evaluateSocraticAnswer(params) {
+export async function generateWorldPieceImage(prompt) {
   const ai = getAIClient()
   if (!ai) {
-    return { feedback: null, score: null, correctAspects: null, suggestions: null, followUpQuestion: null, error: 'API_NOT_AVAILABLE' }
+    return { imageUrl: null, error: 'API_NOT_AVAILABLE' }
   }
 
-  const { answer = '', question = '', expectedTopics = [], slideContext = {}, language = 'en' } = params
+  if (!prompt || typeof prompt !== 'string') {
+    return { imageUrl: null, error: 'INVALID_PROMPT' }
+  }
 
-  // Handle empty answer
-  if (!answer || answer.trim().length === 0) {
-    const emptyResponse = language === 'zh'
-      ? '没关系！想一想刚才学到的内容，再试一次吧。你可以从最让你印象深刻的部分开始说起。'
-      : "That's okay! Take a moment to think about what you just learned, and give it another try. Start with whatever part stood out to you most."
+  // Enhance prompt with world piece specific styling
+  const enhancedPrompt = `${prompt}
 
-    return {
-      feedback: emptyResponse,
-      score: 1,
-      correctAspects: [],
-      suggestions: [],
-      followUpQuestion: null,
-      error: null
+Additional style requirements for world piece:
+- Isometric game art style with clean lines
+- Vibrant, saturated colors suitable for children
+- Single centered object or small scene
+- Transparent or solid color background (for easy layering)
+- No text, labels, or UI elements
+- Suitable for parallax diorama display at approximately 512x512 pixels
+- Game asset quality, collectible item appearance`
+
+  let lastError = null
+
+  // Use the primary image model only to keep collectible style consistent
+  for (const model of [IMAGE_MODEL]) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: enhancedPrompt,
+        config: {
+          responseModalities: ['IMAGE'],
+        }
+      })
+
+      // Extract image data from response
+      const parts = response.candidates?.[0]?.content?.parts || []
+
+      for (const part of parts) {
+        if (part.inlineData) {
+          const mimeType = part.inlineData.mimeType || 'image/png'
+          const base64Data = (part.inlineData.data || '').replace(/\s/g, '')
+          const imageUrl = `data:${mimeType};base64,${base64Data}`
+
+          console.log('[Gemini] World piece image generated successfully', { model })
+          return { imageUrl, error: null }
+        }
+      }
+    } catch (error) {
+      lastError = error.message || 'UNKNOWN_ERROR'
+      console.warn('[Gemini] World piece image generation failed, trying next model:', {
+        model,
+        error: error.message,
+      })
     }
   }
 
-  const languageInstruction = language === 'zh'
-    ? 'Generate all feedback and text in Simplified Chinese (简体中文). Be warm and encouraging.'
-    : 'Generate all feedback and text in English. Be warm and encouraging.'
+  // All models failed - check error type
+  if (lastError?.includes('quota') || lastError?.includes('rate')) {
+    return { imageUrl: null, error: 'RATE_LIMITED' }
+  }
+  if (lastError?.includes('safety') || lastError?.includes('blocked')) {
+    return { imageUrl: null, error: 'CONTENT_FILTERED' }
+  }
 
-  const slideContextStr = typeof slideContext === 'object'
-    ? JSON.stringify(slideContext)
-    : slideContext
+  return { imageUrl: null, error: lastError || 'NO_IMAGE_GENERATED' }
+}
 
-  const prompt = `You are an encouraging Socratic tutor evaluating a student's answer.
+/**
+ * Generate a small, concrete evolution plan for the Living World.
+ * WB023: Used to choose a topic-specific element to add (and where), instead of relying
+ * solely on generic terrain progressions.
+ *
+ * @param {Object} params
+ * @param {string} params.topicName
+ * @param {string} [params.summary]
+ * @param {string[]} [params.existingElements]
+ * @param {string} [params.tier]
+ * @param {string} [params.styleDescriptor]
+ * @returns {Promise<{ elementToAdd: string|null, placementHint: string|null, targetLayer: string|null, error: string|null }>}
+ */
+export async function generateLivingWorldEvolutionPlan(params = {}) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { elementToAdd: null, placementHint: null, targetLayer: null, error: 'API_NOT_AVAILABLE' }
+  }
 
-Question asked: "${question}"
-Expected topics/concepts: ${expectedTopics.join(', ')}
-Slide context: ${slideContextStr}
+  const {
+    topicName,
+    summary = '',
+    existingElements = [],
+    tier = 'barren',
+    styleDescriptor = '',
+  } = params || {}
 
-Student's answer: "${answer}"
+  if (!topicName || typeof topicName !== 'string' || !topicName.trim()) {
+    return { elementToAdd: null, placementHint: null, targetLayer: null, error: 'INVALID_TOPIC' }
+  }
 
-${languageInstruction}
+  const safeSummary = typeof summary === 'string' ? summary.trim() : ''
+  const safeExisting = Array.isArray(existingElements) ? existingElements.filter(Boolean).slice(-12) : []
 
-Evaluate the answer and provide:
-1. Encouraging feedback (2-3 sentences) - focus on what they got right first
-2. Score from 1-5 (1=needs work, 3=good understanding, 5=excellent)
-3. What aspects they got correct
-4. Gentle suggestions for improvement (if any)
-5. Optional follow-up question for deeper exploration (only if score >= 3)
+  const prompt = `You are an art director for an evolving panoramic "Living World" (16:9 painterly landscape).
 
-TONE: Be warm, supportive, and celebratory for good answers. Never be critical or discouraging.
+Your job: propose ONE small, concrete visual element to ADD that directly represents the learned topic, and a short placement hint.
 
-Output Format (JSON):
+WORLD CONTEXT:
+- Tier: ${tier}
+- Style DNA: ${styleDescriptor}
+
+TOPIC:
+- Name: "${topicName.trim()}"
+${safeSummary ? `- Summary: "${safeSummary}"` : ''}
+
+EXISTING ELEMENTS (must be preserved):
+${safeExisting.length ? safeExisting.map(e => `- ${String(e).slice(0, 160)}`).join('\n') : '- (none yet)'}
+
+RULES:
+- Choose an element that is semantically literal for the topic (avoid unrelated metaphors).
+- Keep it SMALL and LOCAL. Do not repaint the whole scene.
+- The element must be grounded in the landscape (or water) unless the topic is explicitly about the sky/space.
+- Do NOT add auroras, sky ribbons, huge iridescent clouds, or dramatic new sky phenomena unless the topic is explicitly about the sky/space.
+- No text, labels, symbols, UI, or letters.
+
+Return ONLY JSON:
 {
-  "feedback": "Your encouraging feedback here",
-  "score": 3,
-  "correctAspects": ["aspect1", "aspect2"],
-  "suggestions": ["suggestion1"],
-  "followUpQuestion": "Optional deeper question?" or null
+  "elementToAdd": "One short noun-phrase describing the new element (max 14 words)",
+  "placementHint": "One short hint for placement in the 16:9 frame (e.g., 'midground center-left near horizon')",
+  "targetLayer": "One of: sky | background | midground | foreground"
 }`
 
   try {
     const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
+      // Use the image model as the sole "classifier" for topic -> world element.
+      // We request JSON output (no image) to keep this step deterministic and structured.
+      model: IMAGE_MODEL,
       contents: prompt,
       config: {
         temperature: 0.6,
-        maxOutputTokens: 512,
+        maxOutputTokens: 256,
+        responseMimeType: 'application/json',
       }
     })
 
@@ -1858,27 +2124,1083 @@ Output Format (JSON):
     const jsonStr = repairJSON(extractJSON(text))
     const parsed = JSON.parse(jsonStr)
 
-    // Validate score is in range
-    let score = parseInt(parsed.score, 10)
-    if (isNaN(score) || score < 1) score = 1
-    if (score > 5) score = 5
+    const elementToAdd = typeof parsed.elementToAdd === 'string' ? parsed.elementToAdd.trim() : ''
+    const placementHint = typeof parsed.placementHint === 'string' ? parsed.placementHint.trim() : ''
+    const targetLayer = typeof parsed.targetLayer === 'string' ? parsed.targetLayer.trim().toLowerCase() : ''
 
     return {
-      feedback: parsed.feedback || 'Great effort! Keep exploring.',
-      score,
-      correctAspects: Array.isArray(parsed.correctAspects) ? parsed.correctAspects : [],
-      suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
-      followUpQuestion: parsed.followUpQuestion || null,
+      elementToAdd: elementToAdd || null,
+      placementHint: placementHint || null,
+      targetLayer: ['sky', 'background', 'midground', 'foreground'].includes(targetLayer) ? targetLayer : null,
+      error: null,
+    }
+  } catch (error) {
+    console.error('[Gemini] Living World evolution plan error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { elementToAdd: null, placementHint: null, targetLayer: null, error: 'RATE_LIMITED' }
+    }
+    if (error.message?.includes('JSON')) {
+      return { elementToAdd: null, placementHint: null, targetLayer: null, error: 'PARSE_ERROR' }
+    }
+
+    return { elementToAdd: null, placementHint: null, targetLayer: null, error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
+ * Generate Living World image with optional reference image conditioning
+ * WB-EVOLUTION: Creates evolving world panoramas that maintain visual consistency
+ *
+ * When a referenceImageUrl is provided, the generated image will evolve from
+ * the previous world state while incorporating new elements from the prompt.
+ *
+ * @param {string} prompt - Description of the world state and elements to generate
+ * @param {Object} options - Generation options
+ * @param {string|null} options.referenceImageUrl - Previous world image (base64 data URL) for evolution
+ * @param {'16:9'|'1:1'} options.aspectRatio - Aspect ratio for the output (default: '16:9' for panoramas)
+ * @param {'2k'|'4k'} options.resolution - Resolution quality (default: '2k', use '4k' for milestones)
+ * @returns {Promise<{ imageUrl: string|null, error: string|null }>}
+ */
+export async function generateLivingWorldImage(prompt, options = {}) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { imageUrl: null, error: 'API_NOT_AVAILABLE' }
+  }
+
+  if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+    return { imageUrl: null, error: 'INVALID_PROMPT' }
+  }
+
+  const {
+    referenceImageUrl = null,
+    aspectRatio = '16:9',
+    resolution = '2k'
+  } = options
+
+  // Resolution specifications
+  const resolutionSpec = resolution === '4k'
+    ? 'ultra high resolution 4K quality (3840x2160 for 16:9, 2160x2160 for 1:1)'
+    : 'high resolution 2K quality (1920x1080 for 16:9, 1080x1080 for 1:1)'
+
+  // Build the enhanced prompt with living world style requirements
+  const styleRequirements = `
+Living World Style Requirements:
+- Aspect ratio: ${aspectRatio} panoramic landscape view
+- Resolution: ${resolutionSpec}
+- Style: Enchanting illustrated world, soft painterly style with rich colors
+- Atmosphere: Magical educational world that evolves over time
+- Composition: Layered depth with sky, background (mountains/distant features), midground (forests/structures), foreground (water/terrain details)
+- Lighting: Dynamic natural lighting appropriate to the world's tier
+- No text, labels, or UI elements in the image
+- Seamless, cohesive world that can evolve with new elements`
+
+  let contents
+  let evolutionInstruction = ''
+
+  if (referenceImageUrl && referenceImageUrl.startsWith('data:')) {
+    // Parse the base64 data URL to extract mime type and data
+    const dataUrlMatch = referenceImageUrl.match(/^data:([^;]+);base64,(.+)$/)
+    if (dataUrlMatch) {
+      const mimeType = dataUrlMatch[1]
+      const base64Data = dataUrlMatch[2]
+
+      evolutionInstruction = `
+IMPORTANT: Evolve from the provided reference image.
+- Maintain the same overall world composition and style
+- Keep existing elements and their positions
+- Seamlessly integrate the new elements described in the prompt
+- Preserve visual consistency with the reference world`
+
+      // Multipart content with reference image
+      contents = [
+        {
+          role: 'user',
+          parts: [
+            { text: `${prompt}\n${evolutionInstruction}\n${styleRequirements}` },
+            {
+              inlineData: {
+                mimeType,
+                data: base64Data
+              }
+            }
+          ]
+        }
+      ]
+    } else {
+      // Invalid data URL format, proceed without reference
+      contents = [
+        {
+          role: 'user',
+          parts: [{ text: `${prompt}\n${styleRequirements}` }]
+        }
+      ]
+    }
+  } else {
+    // No reference image - initial world generation
+    contents = [
+      {
+        role: 'user',
+        parts: [{ text: `${prompt}\n${styleRequirements}` }]
+      }
+    ]
+  }
+
+  let lastError = null
+
+  // Living World must use the image model only (no heuristic fallbacks),
+  // so evolution stays consistent and debuggable.
+  for (const model of [IMAGE_MODEL]) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents,
+        config: {
+          responseModalities: ['IMAGE'],
+        }
+      })
+
+      // Extract image data from response
+      const parts = response.candidates?.[0]?.content?.parts || []
+
+      for (const part of parts) {
+        if (part.inlineData) {
+          const mimeType = part.inlineData.mimeType || 'image/png'
+          const base64Data = (part.inlineData.data || '').replace(/\s/g, '')
+          const imageUrl = `data:${mimeType};base64,${base64Data}`
+
+          console.log('[Gemini] Living World image generated successfully', {
+            model,
+            hasReference: !!referenceImageUrl,
+            aspectRatio,
+            resolution
+          })
+          return { imageUrl, error: null }
+        }
+      }
+    } catch (error) {
+      lastError = error.message || 'UNKNOWN_ERROR'
+      console.warn('[Gemini] Living World image generation failed, trying next model:', {
+        model,
+        error: error.message,
+      })
+    }
+  }
+
+  // All models failed - check error type
+  if (lastError?.includes('quota') || lastError?.includes('rate')) {
+    return { imageUrl: null, error: 'RATE_LIMITED' }
+  }
+  if (lastError?.includes('safety') || lastError?.includes('blocked')) {
+    return { imageUrl: null, error: 'CONTENT_FILTERED' }
+  }
+
+  return { imageUrl: null, error: lastError || 'NO_IMAGE_GENERATED' }
+}
+
+/**
+ * Generate a "What If?" scenario with prediction cards.
+ * Creates an engaging hypothetical scenario with 4 prediction cards (2 correct, 2 wrong).
+ *
+ * @param {Object} params
+ * @param {Array} params.slides - The slides from the lesson
+ * @param {string} params.topicName - The topic being explored
+ * @param {string} params.explanationLevel - 'simple' | 'standard' | 'deep'
+ * @param {string} params.language - 'en' or 'zh'
+ * @returns {Object} { scenario, scenarioImagePrompt, scenarioNarration, predictionCards, bonusFact, bonusFactNarration, error }
+ */
+export async function generateWhatIfScenario({ slides, topicName, explanationLevel, language }) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { error: 'API_NOT_AVAILABLE' }
+  }
+
+  try {
+    // Build slide context summary
+    const slideContext = slides
+      .map((slide, i) => `Slide ${i + 1}: ${slide.script || slide.subtitle || ''}`)
+      .join('\n')
+
+    // Language-specific prompt
+    const languageNote = language === 'zh'
+      ? 'Generate all content in Simplified Chinese (简体中文).'
+      : 'Generate all content in English.'
+
+    const levelGuidance = {
+      simple: 'Keep the scenario simple and concrete. Use everyday language.',
+      standard: 'Balance accessibility with depth. Include key scientific concepts.',
+      deep: 'Create a sophisticated scenario that requires deep conceptual understanding.'
+    }
+
+    const prompt = `You are creating an engaging "What If?" scenario for a learning experience.
+
+Topic: ${topicName}
+Level: ${explanationLevel}
+${languageNote}
+
+Lesson content:
+${slideContext}
+
+Create a counterfactual "What If?" scenario that:
+1. Changes one key aspect of the topic in an interesting way
+2. Requires understanding the lesson to reason through
+3. Is thought-provoking but not overwhelming
+
+${levelGuidance[explanationLevel] || levelGuidance.standard}
+
+Generate exactly 4 prediction cards. Exactly 2 should be correct (scientifically accurate consequences) and 2 should be wrong (plausible-sounding but incorrect).
+
+For correct predictions:
+- Include "revealNarration": dramatic TTS-friendly explanation of why it's correct
+- Include "revealImagePrompt": description for generating a visual of this consequence
+
+For wrong predictions:
+- Only include "id", "text", and "isCorrect: false"
+
+Respond with ONLY valid JSON (no markdown, no code blocks):
+{
+  "scenario": "What if [interesting counterfactual]?",
+  "scenarioImagePrompt": "Description for generating a dramatic visual of this scenario",
+  "scenarioNarration": "Dramatic, engaging TTS text to introduce the scenario (2-3 sentences)",
+  "predictionCards": [
+    {
+      "id": "card-1",
+      "text": "Correct prediction statement",
+      "isCorrect": true,
+      "revealNarration": "Dramatic explanation of why this is correct",
+      "revealImagePrompt": "Visual description of this consequence"
+    },
+    {
+      "id": "card-2",
+      "text": "Wrong prediction statement",
+      "isCorrect": false
+    },
+    {
+      "id": "card-3",
+      "text": "Correct prediction statement",
+      "isCorrect": true,
+      "revealNarration": "Dramatic explanation of why this is correct",
+      "revealImagePrompt": "Visual description of this consequence"
+    },
+    {
+      "id": "card-4",
+      "text": "Wrong prediction statement",
+      "isCorrect": false
+    }
+  ],
+  "bonusFact": "Mind-expanding fact related to the scenario",
+  "bonusFactNarration": "TTS-friendly dramatic narration of the bonus fact"
+}`
+
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.7,
+        maxOutputTokens: 3000,
+        responseMimeType: 'application/json',
+      }
+    })
+
+    const text = response.text || ''
+    let extracted
+    try {
+      const jsonStr = repairJSON(extractJSON(text))
+      extracted = JSON.parse(jsonStr)
+    } catch (parseError) {
+      console.error('[Gemini] What If generation failed to parse JSON:', {
+        error: parseError.message,
+        preview: text.substring(0, 400),
+      })
+      return { error: 'PARSE_ERROR' }
+    }
+
+    // Validate response structure
+    if (!extracted.scenario || typeof extracted.scenario !== 'string') {
+      console.error('[Gemini] What If generation: missing or invalid scenario')
+      return { error: 'INVALID_RESPONSE' }
+    }
+
+    if (!Array.isArray(extracted.predictionCards)) {
+      console.error('[Gemini] What If generation: predictionCards is not an array')
+      return { error: 'INVALID_RESPONSE' }
+    }
+
+    // Validate cards: 3-4 cards, at least 2 correct (3 accepted due to occasional truncation)
+    const cards = extracted.predictionCards
+      .filter(c => c && typeof c === 'object' && typeof c.text === 'string' && typeof c.isCorrect === 'boolean')
+      .slice(0, 4)
+
+    if (cards.length < 3) {
+      console.error('[Gemini] What If generation: expected 3-4 cards, got', cards.length)
+      return { error: 'INVALID_RESPONSE' }
+    }
+
+    const correctCards = cards.filter(c => c.isCorrect === true)
+    const wrongCards = cards.filter(c => c.isCorrect === false)
+
+    // Attempt to fix if count is off
+    if (correctCards.length !== 2) {
+      console.warn('[Gemini] What If generation: expected 2 correct cards, got', correctCards.length, '- attempting fix')
+
+      if (correctCards.length < 2) {
+        console.error('[Gemini] What If generation: cannot fix - insufficient correct cards')
+        return { error: 'INVALID_RESPONSE' }
+      }
+    }
+
+    // Build immutable set of extra correct card IDs to demote
+    const extraCorrectIds = new Set(
+      correctCards.slice(2).map(c => c.id || cards.indexOf(c))
+    )
+
+    // Validate correct cards have required fields
+    const validatedCards = cards.map((c, i) => {
+      const isDemoted = extraCorrectIds.has(c.id || i)
+      const isCorrect = c.isCorrect && !isDemoted
+
+      const card = {
+        id: typeof c.id === 'string' ? c.id : `card-${i + 1}`,
+        text: c.text.trim(),
+        isCorrect
+      }
+
+      if (isCorrect) {
+        if (!c.revealNarration || typeof c.revealNarration !== 'string' || !c.revealNarration.trim()) {
+          console.error('[Gemini] What If generation: correct card missing revealNarration')
+          return null
+        }
+        if (!c.revealImagePrompt || typeof c.revealImagePrompt !== 'string' || !c.revealImagePrompt.trim()) {
+          console.error('[Gemini] What If generation: correct card missing revealImagePrompt')
+          return null
+        }
+        card.revealNarration = c.revealNarration.trim()
+        card.revealImagePrompt = c.revealImagePrompt.trim()
+      }
+
+      return card
+    })
+
+    if (validatedCards.some(c => c === null)) {
+      return { error: 'INVALID_RESPONSE' }
+    }
+
+    return {
+      scenario: extracted.scenario.trim(),
+      scenarioImagePrompt: (typeof extracted.scenarioImagePrompt === 'string' && extracted.scenarioImagePrompt.trim())
+        ? extracted.scenarioImagePrompt.trim()
+        : `Visual representation of: ${extracted.scenario}`,
+      scenarioNarration: (typeof extracted.scenarioNarration === 'string' && extracted.scenarioNarration.trim())
+        ? extracted.scenarioNarration.trim()
+        : extracted.scenario.trim(),
+      predictionCards: validatedCards,
+      bonusFact: typeof extracted.bonusFact === 'string' ? extracted.bonusFact.trim() : '',
+      bonusFactNarration: (typeof extracted.bonusFactNarration === 'string' && extracted.bonusFactNarration.trim())
+        ? extracted.bonusFactNarration.trim()
+        : (typeof extracted.bonusFact === 'string' ? extracted.bonusFact.trim() : ''),
       error: null
     }
   } catch (error) {
-    console.error('[Gemini] Socratic evaluation error:', error.message)
+    console.error('[Gemini] What If generation error:', error.message)
 
     if (error.message?.includes('quota') || error.message?.includes('rate')) {
-      return { feedback: null, score: null, correctAspects: null, suggestions: null, followUpQuestion: null, error: 'RATE_LIMITED' }
+      return { error: 'RATE_LIMITED' }
+    }
+    if (error.message?.includes('JSON')) {
+      return { error: 'PARSE_ERROR' }
     }
 
-    return { feedback: null, score: null, correctAspects: null, suggestions: null, followUpQuestion: null, error: error.message || 'UNKNOWN_ERROR' }
+    return { error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
+ * Generate story prompt with concept checklist for Story Studio learning mode.
+ *
+ * @param {Object} params
+ * @param {Array} params.slides - Lesson slides (expects subtitle/script fields)
+ * @param {string} params.topicName - The topic being learned
+ * @param {string} params.language - 'en' or 'zh'
+ * @returns {Promise<{storyPrompt: string, conceptChecklist: string[], starterSuggestion: string, imageStyle: string, missionHook: string, sceneImagePrompt: string, conceptCards: Array<{concept: string, icon: string, description: string}>, chapters: Object, error: string|null}>}
+ */
+export async function generateStoryPrompt({ slides, topicName, language }) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', missionHook: '', sceneImagePrompt: '', conceptCards: [], chapters: {}, error: 'API_NOT_AVAILABLE' }
+  }
+
+  try {
+    const slideContext = (Array.isArray(slides) ? slides : [])
+      .map((slide, index) => {
+        const subtitle = typeof slide?.subtitle === 'string' ? slide.subtitle : ''
+        const script = typeof slide?.script === 'string' ? slide.script : ''
+        const content = (script || subtitle).trim()
+        return content ? `Slide ${index + 1}: ${content}` : null
+      })
+      .filter(Boolean)
+      .join('\n')
+
+    const languageNote = language === 'zh'
+      ? 'Return all text in Simplified Chinese (简体中文).'
+      : 'Return all text in English.'
+
+    const prompt = language === 'zh'
+      ? `基于这个教育主题，为小朋友创建一个创意故事提示。
+
+主题: ${topicName}
+
+教学内容:
+${slideContext}
+
+请返回一个JSON对象，包含:
+{
+  "storyPrompt": "创意写作提示，引导孩子使用学到的概念创作故事",
+  "conceptChecklist": ["概念1", "概念2", "概念3"],
+  "starterSuggestion": "故事的开头建议，帮助孩子开始",
+  "imageStyle": "插图风格描述，用于生成儿童友好的插图",
+  "missionHook": "简短2-3句话的激动人心的介绍钩子，适合TTS朗读",
+  "sceneImagePrompt": "用于生成彩色场景图像的详细提示",
+  "conceptCards": [{"concept": "概念名称", "icon": "表情符号", "description": "1句话描述"}],
+  "chapters": {
+    "1": {
+      "prompt": "我们的故事从哪里开始？",
+      "icon": "表情符号",
+      "choices": [
+        {"id": "1a", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]},
+        {"id": "1b", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]},
+        {"id": "1c", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]}
+      ]
+    },
+    "2": {
+      "prompt": "下一步会发生什么？",
+      "icon": "表情符号",
+      "choices": [
+        {"id": "2a", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]},
+        {"id": "2b", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]},
+        {"id": "2c", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]}
+      ]
+    },
+    "3": {
+      "prompt": "故事如何收尾？",
+      "icon": "表情符号",
+      "choices": [
+        {"id": "3a", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]},
+        {"id": "3b", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]},
+        {"id": "3c", "emoji": "表情", "text": "故事选择文本（1-2句话）", "conceptHints": ["概念"]}
+      ]
+    }
+  }
+}
+
+要求:
+- 故事提示应该有趣、适合儿童
+- 概念清单应包含3-5个关键概念
+- 开头建议应该引人入胜
+- 插图风格应该是"儿童图书插图，色彩鲜艳，友好"
+- missionHook应该激动人心且适合儿童，最多2-3句话
+- sceneImagePrompt应该描述生成插图的生动场景
+- conceptCards应该为每个概念配一张卡片，带有相关的表情符号图标
+- 第1、2、3章都应有正好3个选择，每个都融入不同的概念
+- 每个选择应该是1-2句引人入胜的叙述
+
+只返回JSON，不要其他文本。`
+      : `Based on this educational topic, create a creative story prompt for a kid.
+
+Topic: ${topicName}
+
+Lesson content:
+${slideContext}
+
+Return a JSON object with:
+{
+  "storyPrompt": "A creative writing prompt that encourages using learned concepts",
+  "conceptChecklist": ["concept1", "concept2", "concept3"],
+  "starterSuggestion": "An opening line to help the kid start their story",
+  "imageStyle": "Style description for generating kid-friendly illustrations",
+  "missionHook": "A short 2-3 sentence exciting hook to narrate via TTS",
+  "sceneImagePrompt": "A detailed prompt for generating a colorful scene image",
+  "conceptCards": [{"concept": "name", "icon": "emoji", "description": "1 sentence"}],
+  "chapters": {
+    "1": {
+      "prompt": "Where does our story begin?",
+      "icon": "emoji",
+      "choices": [
+        {"id": "1a", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]},
+        {"id": "1b", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]},
+        {"id": "1c", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]}
+      ]
+    },
+    "2": {
+      "prompt": "What challenge appears next?",
+      "icon": "emoji",
+      "choices": [
+        {"id": "2a", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]},
+        {"id": "2b", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]},
+        {"id": "2c", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]}
+      ]
+    },
+    "3": {
+      "prompt": "How should the story end?",
+      "icon": "emoji",
+      "choices": [
+        {"id": "3a", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]},
+        {"id": "3b", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]},
+        {"id": "3c", "emoji": "emoji", "text": "Story choice text (1-2 sentences)", "conceptHints": ["concept"]}
+      ]
+    }
+  }
+}
+
+Requirements:
+- Story prompt should be engaging and age-appropriate
+- Concept checklist should have 3-5 key concepts from the lesson
+- Starter suggestion should hook the imagination
+- Image style should be \"children's book illustration, colorful, friendly\"
+- Keep concepts concise (2-4 words each)
+- missionHook should be exciting and kid-friendly, 2-3 sentences max
+- sceneImagePrompt should describe a vivid scene for generating an illustration
+- conceptCards should have one card per concept with a relevant emoji icon
+- Chapters 1, 2, and 3 should each have exactly 3 choices, each weaving in different concepts
+- Each choice should be 1-2 sentences of engaging narrative
+
+${languageNote}
+
+Return ONLY the JSON object, no other text.`
+
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.9,
+        maxOutputTokens: 1800,
+        responseMimeType: 'application/json',
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    if (!parsed || typeof parsed !== 'object') {
+      return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', missionHook: '', sceneImagePrompt: '', conceptCards: [], chapters: {}, error: 'INVALID_RESPONSE' }
+    }
+
+    const storyPrompt = typeof parsed.storyPrompt === 'string' ? parsed.storyPrompt.trim() : ''
+    const conceptChecklist = Array.isArray(parsed.conceptChecklist)
+      ? parsed.conceptChecklist.filter(c => typeof c === 'string' && c.trim()).map(c => c.trim()).slice(0, 5)
+      : []
+    const starterSuggestion = typeof parsed.starterSuggestion === 'string' ? parsed.starterSuggestion.trim() : ''
+    const imageStyle = typeof parsed.imageStyle === 'string' ? parsed.imageStyle.trim() : ''
+    const missionHook = typeof parsed.missionHook === 'string' ? parsed.missionHook.trim() : storyPrompt
+    const sceneImagePrompt = typeof parsed.sceneImagePrompt === 'string' ? parsed.sceneImagePrompt.trim() : ''
+    const conceptCards = Array.isArray(parsed.conceptCards)
+      ? parsed.conceptCards.filter(c => c && typeof c === 'object').map(c => ({
+          concept: typeof c.concept === 'string' ? c.concept.trim() : '',
+          icon: typeof c.icon === 'string' ? c.icon.trim() : '📝',
+          description: typeof c.description === 'string' ? c.description.trim() : ''
+        })).filter(c => c.concept)
+      : conceptChecklist.map(c => ({ concept: c, icon: '📝', description: '' }))
+
+    const defaultChapterPrompts = language === 'zh'
+      ? {
+          1: '我们的故事从哪里开始？',
+          2: '下一步会发生什么？',
+          3: '故事如何收尾？',
+        }
+      : {
+          1: 'Where does our story begin?',
+          2: 'What challenge appears next?',
+          3: 'How should the story end?',
+        }
+
+    const chapters = {}
+    if (parsed.chapters && typeof parsed.chapters === 'object') {
+      for (const chapterNumber of [1, 2, 3]) {
+        const chapterKey = String(chapterNumber)
+        const chapterData = parsed.chapters?.[chapterKey]
+        if (!chapterData || typeof chapterData !== 'object') {
+          continue
+        }
+
+        const chapterChoices = Array.isArray(chapterData.choices)
+          ? chapterData.choices.filter(c => c && typeof c === 'object').map((choice, choiceIndex) => ({
+              id: typeof choice.id === 'string' && choice.id.trim()
+                ? choice.id.trim()
+                : `${chapterNumber}${String.fromCharCode(97 + choiceIndex)}`,
+              emoji: typeof choice.emoji === 'string' && choice.emoji.trim()
+                ? choice.emoji.trim()
+                : '📖',
+              text: typeof choice.text === 'string' ? choice.text.trim() : '',
+              conceptHints: Array.isArray(choice.conceptHints)
+                ? choice.conceptHints.filter(h => typeof h === 'string' && h.trim()).map(h => h.trim()).slice(0, 3)
+                : []
+            })).filter(choice => choice.text).slice(0, 3)
+          : []
+
+        chapters[chapterKey] = {
+          prompt: typeof chapterData.prompt === 'string' && chapterData.prompt.trim()
+            ? chapterData.prompt.trim()
+            : defaultChapterPrompts[chapterNumber],
+          icon: typeof chapterData.icon === 'string' && chapterData.icon.trim()
+            ? chapterData.icon.trim()
+            : '📖',
+          choices: chapterChoices,
+        }
+      }
+    }
+
+    if (!storyPrompt || conceptChecklist.length === 0 || !starterSuggestion || !imageStyle) {
+      return { storyPrompt, conceptChecklist, starterSuggestion, imageStyle, missionHook, sceneImagePrompt, conceptCards, chapters, error: 'INVALID_RESPONSE' }
+    }
+
+    return { storyPrompt, conceptChecklist, starterSuggestion, imageStyle, missionHook, sceneImagePrompt, conceptCards, chapters, error: null }
+  } catch (error) {
+    console.error('[Gemini] Story prompt generation error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', missionHook: '', sceneImagePrompt: '', conceptCards: [], chapters: {}, error: 'RATE_LIMITED' }
+    }
+
+    if (error.message?.includes('JSON')) {
+      return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', missionHook: '', sceneImagePrompt: '', conceptCards: [], chapters: {}, error: 'PARSE_ERROR' }
+    }
+
+    return { storyPrompt: '', conceptChecklist: [], starterSuggestion: '', imageStyle: '', missionHook: '', sceneImagePrompt: '', conceptCards: [], chapters: {}, error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
+ * Generate next story chapter choices and illustration prompt based on previous selections.
+ *
+ * @param {Object} params
+ * @param {string} params.topicName
+ * @param {string[]} params.conceptChecklist
+ * @param {Array<{chapter: number, selectedText: string}>} params.previousChapters
+ * @param {number} params.currentChapter - 2, 3, or 4
+ * @param {string} params.imageStyle
+ * @param {string} params.language - 'en' or 'zh'
+ * @returns {Promise<{illustration: {imagePrompt: string, sceneDescription: string, panelCaptions: string[]}, nextChapter: Object|null, conceptsFound: string[], error: string|null}>}
+ */
+export async function generateStoryChapter({ topicName, conceptChecklist = [], previousChapters = [], currentChapter, imageStyle, language = 'en' }) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { illustration: { imagePrompt: '', sceneDescription: '', panelCaptions: [] }, nextChapter: null, conceptsFound: [], error: 'API_NOT_AVAILABLE' }
+  }
+
+  try {
+    // Build context from previous chapters
+    const previousContext = previousChapters
+      .map(ch => `Chapter ${ch.chapter}: ${ch.selectedText}`)
+      .join('\n')
+
+    const conceptList = conceptChecklist.join(', ')
+
+    const chapterNames = { 2: 'The Adventure', 3: 'The Ending', 4: 'Final Illustration' }
+    const chapterName = chapterNames[currentChapter] || `Chapter ${currentChapter}`
+
+    const isLastChapter = currentChapter >= 4
+
+    // Build the prompt
+    const nextChapterSection = isLastChapter
+      ? '"nextChapter": null'
+      : `"nextChapter": {
+      "prompt": "Question for chapter ${currentChapter + 1}",
+      "icon": "emoji",
+      "choices": [
+        {"id": "${currentChapter + 1}a", "emoji": "emoji", "text": "Story choice (1-2 sentences)", "conceptHints": ["concept"]},
+        {"id": "${currentChapter + 1}b", "emoji": "emoji", "text": "Story choice (1-2 sentences)", "conceptHints": ["concept"]},
+        {"id": "${currentChapter + 1}c", "emoji": "emoji", "text": "Story choice (1-2 sentences)", "conceptHints": ["concept"]}
+      ]
+    }`
+
+    const prompt = language === 'zh'
+      ? `你是一个儿童故事助手。根据之前的章节选择，继续这个故事。
+
+主题: ${topicName}
+概念清单: ${conceptList}
+之前的章节:
+${previousContext}
+
+当前章节: ${currentChapter} - ${chapterName}
+
+返回JSON:
+{
+  "illustration": {
+    "imagePrompt": "4格漫画页插图提示：描述一个2x2网格，包含Panel 1到Panel 4连续剧情（${imageStyle}）",
+    "sceneDescription": "本页场景摘要（1句话）",
+    "panelCaptions": [
+      "Panel 1 字幕（1句话）",
+      "Panel 2 字幕（1句话）",
+      "Panel 3 字幕（1句话）",
+      "Panel 4 字幕（1句话）"
+    ]
+  },
+  ${isLastChapter ? '"nextChapter": null' : `"nextChapter": {
+    "prompt": "下一章的问题",
+    "icon": "表情符号",
+    "choices": [
+      {"id": "${currentChapter + 1}a", "emoji": "表情", "text": "故事选择（1-2句话）", "conceptHints": ["概念"]}
+    ]
+  }`},
+  "conceptsFound": ["在之前选择中检测到的概念"]
+}
+
+要求:
+- 插图提示应明确描述4格漫画页（2x2布局），每格展示连续剧情，风格为${imageStyle}
+- imagePrompt应强调：清晰分格边框、从左上到右上再到左下到右下的阅读顺序、画面中不含文字
+- 场景描述简洁（1句话）
+- panelCaptions必须有4条短句，每条对应一个分镜
+- 如果不是最后一章，下一章应有3个选择
+- 选择应与之前的故事连贯
+- 每个选择应融入不同的概念
+- 检测之前选择中使用的概念
+
+只返回JSON。`
+      : `You are a children's story assistant. Continue this story based on previous chapter selections.
+
+Topic: ${topicName}
+Concept checklist: ${conceptList}
+Previous chapters:
+${previousContext}
+
+Current chapter: ${currentChapter} - ${chapterName}
+
+Return a JSON object:
+{
+  "illustration": {
+    "imagePrompt": "4-panel manga page prompt: describe a 2x2 grid with sequential beats [Panel 1]...[Panel 4] (${imageStyle})",
+    "sceneDescription": "Overall scene summary in 1 sentence",
+    "panelCaptions": [
+      "Panel 1 caption (1 sentence)",
+      "Panel 2 caption (1 sentence)",
+      "Panel 3 caption (1 sentence)",
+      "Panel 4 caption (1 sentence)"
+    ]
+  },
+  ${nextChapterSection},
+  "conceptsFound": ["concepts detected in previous selections"]
+}
+
+Requirements:
+- illustration imagePrompt should explicitly describe a 4-panel manga/comic page in a 2x2 grid, suitable for ${imageStyle}
+- imagePrompt should enforce: clear panel borders, sequential flow (top-left -> top-right -> bottom-left -> bottom-right), and no text in the image
+- sceneDescription should be concise (1 sentence)
+- panelCaptions must contain exactly 4 short sentences (one per panel) that narrate sequential story beats
+- If not the last chapter, nextChapter should have exactly 3 choices
+- Choices must be coherent with the story so far
+- Each choice should weave in different concepts from the checklist
+- conceptsFound should list concepts from the checklist that appeared in previous selections
+- Keep choice text to 1-2 engaging sentences
+${isLastChapter ? '- This is the final chapter, so nextChapter should be null' : currentChapter === 3 ? '- nextChapter choices should be about how the story concludes - these are the final choices before the ending' : `- Chapter ${currentChapter + 1} name: ${chapterNames[currentChapter + 1] || 'Next'}`}
+
+Return ONLY the JSON object, no other text.`
+
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.9,
+        maxOutputTokens: 1200,
+        responseMimeType: 'application/json',
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    if (!parsed || typeof parsed !== 'object') {
+      return { illustration: { imagePrompt: '', sceneDescription: '', panelCaptions: [] }, nextChapter: null, conceptsFound: [], error: 'INVALID_RESPONSE' }
+    }
+
+    // Parse illustration
+    const illustration = {
+      imagePrompt: typeof parsed.illustration?.imagePrompt === 'string' ? parsed.illustration.imagePrompt.trim() : '',
+      sceneDescription: typeof parsed.illustration?.sceneDescription === 'string' ? parsed.illustration.sceneDescription.trim() : '',
+      panelCaptions: Array.isArray(parsed.illustration?.panelCaptions)
+        ? parsed.illustration.panelCaptions
+          .filter((caption) => typeof caption === 'string' && caption.trim())
+          .map((caption) => caption.trim())
+          .slice(0, 4)
+        : []
+    }
+
+    // Parse next chapter (null for last chapter)
+    let nextChapter = null
+    if (parsed.nextChapter && typeof parsed.nextChapter === 'object') {
+      nextChapter = {
+        prompt: typeof parsed.nextChapter.prompt === 'string' ? parsed.nextChapter.prompt.trim() : 'What happens next?',
+        icon: typeof parsed.nextChapter.icon === 'string' ? parsed.nextChapter.icon.trim() : '📖',
+        choices: Array.isArray(parsed.nextChapter.choices)
+          ? parsed.nextChapter.choices.filter(c => c && typeof c === 'object').map(c => ({
+              id: typeof c.id === 'string' ? c.id : '',
+              emoji: typeof c.emoji === 'string' ? c.emoji : '📖',
+              text: typeof c.text === 'string' ? c.text.trim() : '',
+              conceptHints: Array.isArray(c.conceptHints) ? c.conceptHints.filter(h => typeof h === 'string') : []
+            })).filter(c => c.text).slice(0, 3)
+          : []
+      }
+    }
+
+    // Parse concepts found
+    const conceptsFound = Array.isArray(parsed.conceptsFound)
+      ? parsed.conceptsFound.filter(c => typeof c === 'string' && c.trim()).map(c => c.trim())
+      : []
+
+    return { illustration, nextChapter, conceptsFound, error: null }
+  } catch (error) {
+    console.error('[Gemini] Story chapter generation error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { illustration: { imagePrompt: '', sceneDescription: '', panelCaptions: [] }, nextChapter: null, conceptsFound: [], error: 'RATE_LIMITED' }
+    }
+    if (error.message?.includes('JSON')) {
+      return { illustration: { imagePrompt: '', sceneDescription: '', panelCaptions: [] }, nextChapter: null, conceptsFound: [], error: 'PARSE_ERROR' }
+    }
+
+    return { illustration: { imagePrompt: '', sceneDescription: '', panelCaptions: [] }, nextChapter: null, conceptsFound: [], error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
+ * Generate finalized story scenes from all selected answers in a single pass.
+ *
+ * @param {Object} params
+ * @param {string} params.topicName
+ * @param {string[]} params.conceptChecklist
+ * @param {Array<{chapterNumber: number, selectedText: string, conceptHints?: string[]}>} params.answers
+ * @param {string} params.imageStyle
+ * @param {string} params.language - 'en' or 'zh'
+ * @returns {Promise<{scenes: Array<{chapterNumber: number, chapterTitle: string, narrativeText: string, sceneDescription: string, imagePrompt: string, panelCaptions: string[]}>, conceptsFound: string[], error: string|null}>}
+ */
+export async function generateFinalStoryFromAnswers({
+  topicName,
+  conceptChecklist = [],
+  answers = [],
+  imageStyle,
+  language = 'en',
+}) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { scenes: [], conceptsFound: [], error: 'API_NOT_AVAILABLE' }
+  }
+
+  try {
+    const normalizedAnswers = Array.isArray(answers)
+      ? answers
+        .filter(answer => answer && typeof answer === 'object' && typeof answer.selectedText === 'string' && answer.selectedText.trim())
+        .map((answer, index) => ({
+          chapterNumber: typeof answer.chapterNumber === 'number' && Number.isFinite(answer.chapterNumber)
+            ? answer.chapterNumber
+            : index + 1,
+          selectedText: answer.selectedText.trim(),
+          conceptHints: Array.isArray(answer.conceptHints)
+            ? answer.conceptHints.filter((hint) => typeof hint === 'string' && hint.trim()).map((hint) => hint.trim()).slice(0, 4)
+            : [],
+        }))
+      : []
+
+    const answerContext = normalizedAnswers
+      .map(answer => {
+        const hints = answer.conceptHints.length > 0 ? ` (concept hints: ${answer.conceptHints.join(', ')})` : ''
+        return `Chapter ${answer.chapterNumber} answer: ${answer.selectedText}${hints}`
+      })
+      .join('\n')
+
+    const conceptList = conceptChecklist.join(', ')
+
+    const prompt = language === 'zh'
+      ? `你是一个儿童故事助手。请根据用户已经选择的三段剧情，生成完整的三页漫画故事（每页4格）。\n\n主题: ${topicName}\n概念清单: ${conceptList}\n用户选择:\n${answerContext}\n\n请返回JSON:\n{\n  \"scenes\": [\n    {\n      \"chapterNumber\": 1,\n      \"chapterTitle\": \"第1章标题\",\n      \"narrativeText\": \"该章完整叙述（2-4句）\",\n      \"sceneDescription\": \"本页场景摘要（1句）\",\n      \"imagePrompt\": \"4格漫画页提示：描述2x2网格，按顺序讲述剧情（${imageStyle}）\",\n      \"panelCaptions\": [\"第1格字幕\", \"第2格字幕\", \"第3格字幕\", \"第4格字幕\"]\n    },\n    {\n      \"chapterNumber\": 2,\n      \"chapterTitle\": \"第2章标题\",\n      \"narrativeText\": \"该章完整叙述（2-4句）\",\n      \"sceneDescription\": \"本页场景摘要（1句）\",\n      \"imagePrompt\": \"4格漫画页提示：描述2x2网格，按顺序讲述剧情（${imageStyle}）\",\n      \"panelCaptions\": [\"第1格字幕\", \"第2格字幕\", \"第3格字幕\", \"第4格字幕\"]\n    },\n    {\n      \"chapterNumber\": 3,\n      \"chapterTitle\": \"第3章标题\",\n      \"narrativeText\": \"该章完整叙述（2-4句）\",\n      \"sceneDescription\": \"本页场景摘要（1句）\",\n      \"imagePrompt\": \"4格漫画页提示：描述2x2网格，按顺序讲述剧情（${imageStyle}）\",\n      \"panelCaptions\": [\"第1格字幕\", \"第2格字幕\", \"第3格字幕\", \"第4格字幕\"]\n    }\n  ],\n  \"conceptsFound\": [\"命中的概念\"]\n}\n\n要求:\n- scenes必须正好3章，对应chapterNumber 1,2,3\n- 每章都必须有panelCaptions且正好4条短句\n- imagePrompt必须强调：2x2分格、清晰边框、从左上到右上再到左下到右下、画面里不要文字\n- chapterTitle要简短有趣\n- narrativeText要和用户选择一致\n- conceptsFound仅包含概念清单中的词\n\n只返回JSON。`
+      : `You are a children's story assistant. Based on the user's selected answers, generate a complete 3-page manga story (4 panels per page).\n\nTopic: ${topicName}\nConcept checklist: ${conceptList}\nSelected answers:\n${answerContext}\n\nReturn JSON:\n{\n  \"scenes\": [\n    {\n      \"chapterNumber\": 1,\n      \"chapterTitle\": \"Chapter 1 title\",\n      \"narrativeText\": \"Full chapter narration (2-4 sentences)\",\n      \"sceneDescription\": \"One-sentence scene summary\",\n      \"imagePrompt\": \"4-panel manga page prompt describing a 2x2 sequential layout (${imageStyle})\",\n      \"panelCaptions\": [\"Panel 1 caption\", \"Panel 2 caption\", \"Panel 3 caption\", \"Panel 4 caption\"]\n    },\n    {\n      \"chapterNumber\": 2,\n      \"chapterTitle\": \"Chapter 2 title\",\n      \"narrativeText\": \"Full chapter narration (2-4 sentences)\",\n      \"sceneDescription\": \"One-sentence scene summary\",\n      \"imagePrompt\": \"4-panel manga page prompt describing a 2x2 sequential layout (${imageStyle})\",\n      \"panelCaptions\": [\"Panel 1 caption\", \"Panel 2 caption\", \"Panel 3 caption\", \"Panel 4 caption\"]\n    },\n    {\n      \"chapterNumber\": 3,\n      \"chapterTitle\": \"Chapter 3 title\",\n      \"narrativeText\": \"Full chapter narration (2-4 sentences)\",\n      \"sceneDescription\": \"One-sentence scene summary\",\n      \"imagePrompt\": \"4-panel manga page prompt describing a 2x2 sequential layout (${imageStyle})\",\n      \"panelCaptions\": [\"Panel 1 caption\", \"Panel 2 caption\", \"Panel 3 caption\", \"Panel 4 caption\"]\n    }\n  ],\n  \"conceptsFound\": [\"matched concepts\"]\n}\n\nRequirements:\n- scenes must include exactly 3 chapters with chapterNumber 1, 2, and 3\n- each scene must contain exactly 4 short panelCaptions\n- imagePrompt must enforce: 2x2 panel grid, clear panel borders, top-left -> top-right -> bottom-left -> bottom-right story flow, and no text in the image\n- chapterTitle should be short and kid-friendly\n- narrativeText must stay coherent with the selected answers\n- conceptsFound must only include concepts from the checklist\n\nReturn ONLY JSON.`
+
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.85,
+        maxOutputTokens: 2400,
+        responseMimeType: 'application/json',
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    if (!parsed || typeof parsed !== 'object') {
+      return { scenes: [], conceptsFound: [], error: 'INVALID_RESPONSE' }
+    }
+
+    const scenes = Array.isArray(parsed.scenes)
+      ? parsed.scenes
+        .filter(scene => scene && typeof scene === 'object')
+        .slice(0, 3)
+        .map((scene, index) => {
+          const chapterNumber = index + 1
+          return {
+            chapterNumber,
+            chapterTitle: typeof scene.chapterTitle === 'string' && scene.chapterTitle.trim()
+              ? scene.chapterTitle.trim()
+              : `Chapter ${chapterNumber}`,
+            narrativeText: typeof scene.narrativeText === 'string' && scene.narrativeText.trim()
+              ? scene.narrativeText.trim()
+              : normalizedAnswers[index]?.selectedText || '',
+            sceneDescription: typeof scene.sceneDescription === 'string' ? scene.sceneDescription.trim() : '',
+            imagePrompt: typeof scene.imagePrompt === 'string' ? scene.imagePrompt.trim() : '',
+            panelCaptions: Array.isArray(scene.panelCaptions)
+              ? scene.panelCaptions
+                .filter((caption) => typeof caption === 'string' && caption.trim())
+                .map((caption) => caption.trim())
+                .slice(0, 4)
+              : [],
+          }
+        })
+      : []
+
+    if (scenes.length !== 3 || scenes.some((scene) => !scene.imagePrompt || scene.panelCaptions.length === 0)) {
+      return { scenes: [], conceptsFound: [], error: 'INVALID_RESPONSE' }
+    }
+
+    const checklistSet = new Set(conceptChecklist.map((concept) => String(concept || '').trim()).filter(Boolean))
+    const conceptsFound = Array.isArray(parsed.conceptsFound)
+      ? parsed.conceptsFound
+        .filter(concept => typeof concept === 'string' && concept.trim())
+        .map(concept => concept.trim())
+        .filter(concept => checklistSet.size === 0 || checklistSet.has(concept))
+      : []
+
+    return { scenes, conceptsFound, error: null }
+  } catch (error) {
+    console.error('[Gemini] Final story generation error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { scenes: [], conceptsFound: [], error: 'RATE_LIMITED' }
+    }
+    if (error.message?.includes('JSON')) {
+      return { scenes: [], conceptsFound: [], error: 'PARSE_ERROR' }
+    }
+
+    return { scenes: [], conceptsFound: [], error: error.message || 'UNKNOWN_ERROR' }
+  }
+}
+
+/**
+ * Extract a scene from a story transcript for Story Studio and return structured JSON.
+ *
+ * @param {Object} params
+ * @param {string} params.transcript
+ * @param {string} params.topicName
+ * @param {string[]} params.conceptChecklist
+ * @param {string[]} params.previousScenes
+ * @param {string} params.language - 'en' or 'zh'
+ * @returns {Promise<{sceneDescription: string, imagePrompt: string, conceptsFound: string[], narrativeText: string, error: string|null}>}
+ */
+export async function extractStoryScene({ transcript, topicName, conceptChecklist = [], previousScenes = [], language }) {
+  const ai = getAIClient()
+  if (!ai) {
+    return { sceneDescription: '', imagePrompt: '', conceptsFound: [], narrativeText: '', error: 'API_NOT_AVAILABLE' }
+  }
+
+  try {
+    const sceneContext = Array.isArray(previousScenes) && previousScenes.length > 0
+      ? `\nPrevious scenes:\n${previousScenes.map((s, i) => `${i + 1}. ${String(s || '').slice(0, 200)}`).join('\n')}`
+      : ''
+
+    const checklistText = Array.isArray(conceptChecklist)
+      ? conceptChecklist.filter(Boolean).join(', ')
+      : ''
+
+    const prompt = language === 'zh'
+      ? `从这段孩子讲述的故事中提取一个场景。
+
+主题: ${topicName}
+概念清单: ${checklistText}
+${sceneContext}
+
+故事文本:
+${transcript}
+
+生成JSON对象:
+{
+  "sceneDescription": "简短的场景描述（用于内部）",
+  "imagePrompt": "详细的插图提示（卡通风格，友好，色彩鲜艳）",
+  "conceptsFound": ["检测到的概念"],
+  "narrativeText": "这个场景的清理后的叙述文本"
+}
+
+要求:
+- 场景描述应该简洁
+- 图像提示应该详细，适合生成儿童友好的插图
+- 只检测概念清单中出现的概念（尽量匹配）
+- 叙述文本应该是完整的句子
+
+只返回JSON。`
+      : `Extract a scene from this kid's story narration.
+
+Topic: ${topicName}
+Concept checklist: ${checklistText}
+${sceneContext}
+
+Story text:
+${transcript}
+
+Return a JSON object:
+{
+  "sceneDescription": "Brief scene description (for internal use)",
+  "imagePrompt": "Detailed prompt for illustration (cartoon style, friendly, colorful)",
+  "conceptsFound": ["detected concepts from checklist"],
+  "narrativeText": "Clean narrative text for this scene"
+}
+
+Requirements:
+- Scene description should be concise
+- Image prompt should be detailed and suitable for kid-friendly illustration
+- Detect which concepts from the checklist appear in this scene
+- Narrative text should be a complete sentence or two
+
+Return ONLY JSON.`
+
+    const response = await ai.models.generateContent({
+      model: FAST_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.7,
+        maxOutputTokens: 500,
+        responseMimeType: 'application/json',
+      }
+    })
+
+    const text = response.text || ''
+    const jsonStr = repairJSON(extractJSON(text))
+    const parsed = JSON.parse(jsonStr)
+
+    if (!parsed || typeof parsed !== 'object') {
+      return { sceneDescription: '', imagePrompt: '', conceptsFound: [], narrativeText: '', error: 'INVALID_RESPONSE' }
+    }
+
+    const sceneDescription = typeof parsed.sceneDescription === 'string' ? parsed.sceneDescription.trim() : ''
+    const imagePrompt = typeof parsed.imagePrompt === 'string' ? parsed.imagePrompt.trim() : ''
+    const narrativeText = typeof parsed.narrativeText === 'string' ? parsed.narrativeText.trim() : ''
+    const conceptsFound = Array.isArray(parsed.conceptsFound)
+      ? parsed.conceptsFound.filter(c => typeof c === 'string' && c.trim()).map(c => c.trim()).slice(0, 10)
+      : []
+
+    if (!sceneDescription || !imagePrompt || !narrativeText) {
+      return { sceneDescription, imagePrompt, conceptsFound, narrativeText, error: 'INVALID_RESPONSE' }
+    }
+
+    return { sceneDescription, imagePrompt, conceptsFound, narrativeText, error: null }
+  } catch (error) {
+    console.error('[Gemini] Story scene extraction error:', error.message)
+
+    if (error.message?.includes('quota') || error.message?.includes('rate')) {
+      return { sceneDescription: '', imagePrompt: '', conceptsFound: [], narrativeText: '', error: 'RATE_LIMITED' }
+    }
+    if (error.message?.includes('JSON')) {
+      return { sceneDescription: '', imagePrompt: '', conceptsFound: [], narrativeText: '', error: 'PARSE_ERROR' }
+    }
+
+    return { sceneDescription: '', imagePrompt: '', conceptsFound: [], narrativeText: '', error: error.message || 'UNKNOWN_ERROR' }
   }
 }
 
@@ -1897,6 +3219,15 @@ export default {
   generateSuggestedQuestions,
   determineQueryComplexity,
   determineSemanticRelation,
-  generateSocraticQuestion,
-  evaluateSocraticAnswer,
+  classifyTopicZone,
+  generateWorldPiecePrompt,
+  generateWorldPieceImage,
+  generateLivingWorldEvolutionPlan,
+  generateLivingWorldImage,
+  generateWhatIfScenario,
+  detectLanguage,
+  generateStoryPrompt,
+  generateStoryChapter,
+  generateFinalStoryFromAnswers,
+  extractStoryScene,
 }

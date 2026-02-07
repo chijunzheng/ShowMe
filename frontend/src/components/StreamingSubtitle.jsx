@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { SUBTITLE_STREAMING_CONFIG } from '../constants/appConfig.js'
 
 /**
  * StreamingSubtitle - Karaoke-style subtitle display with smooth gradient reveal
@@ -8,10 +9,11 @@ import { useState, useEffect, useRef } from 'react'
  * @param {string} props.text - The full subtitle text to display
  * @param {number} props.duration - Total audio duration in milliseconds
  * @param {boolean} props.isPlaying - Whether audio is currently playing
+ * @param {boolean} props.isLoading - Whether TTS audio is being fetched
  * @param {boolean} props.showAll - If true, show all text immediately (for manual navigation)
  * @param {Object} props.audioRef - React ref to the audio element for precise sync
  */
-function StreamingSubtitle({ text, duration, isPlaying, showAll = false, audioRef }) {
+function StreamingSubtitle({ text, duration, isPlaying, isLoading = false, showAll = false, audioRef }) {
   // Progress percentage (0-100) for the reveal animation
   const [progress, setProgress] = useState(0)
   // Animation frame ID for cleanup
@@ -50,7 +52,10 @@ function StreamingSubtitle({ text, duration, isPlaying, showAll = false, audioRe
 
       // Calculate progress as percentage of audio playback (exact 1:1 sync)
       const currentMs = audio.currentTime * 1000
-      const newProgress = Math.min(100, (currentMs / duration) * 100)
+      const newProgress = Math.min(
+        100,
+        (currentMs / duration) * 100 * SUBTITLE_STREAMING_CONFIG.SPEED_MULTIPLIER
+      )
 
       setProgress(newProgress)
 
@@ -70,19 +75,31 @@ function StreamingSubtitle({ text, duration, isPlaying, showAll = false, audioRe
     }
   }, [isPlaying, showAll, duration, audioRef])
 
-  // Fallback: if audio doesn't start within 500ms, show all text
+  // Fallback: if audio doesn't start within 500ms and we're NOT loading, show all text
+  // When loading, we wait for TTS to complete before showing subtitles
   useEffect(() => {
-    if (!isPlaying && !showAll && progress === 0) {
+    if (!isPlaying && !showAll && !isLoading && progress === 0) {
       const fallbackTimeout = setTimeout(() => {
         setProgress(prev => prev === 0 ? 100 : prev)
       }, 500)
       return () => clearTimeout(fallbackTimeout)
     }
-  }, [isPlaying, showAll, progress])
+  }, [isPlaying, showAll, isLoading, progress])
 
   // Handle empty or invalid text
   if (!text || typeof text !== 'string') {
     return null
+  }
+
+  // Show loading indicator while TTS is being fetched
+  // This prevents subtitles from appearing before audio is ready
+  if (isLoading && !showAll && progress === 0) {
+    return (
+      <span className="inline-flex items-center gap-2 text-gray-400">
+        <span className="inline-block w-4 h-4 border-2 border-gray-300 border-t-primary rounded-full animate-spin" />
+        <span>Loading audio...</span>
+      </span>
+    )
   }
 
   const displayProgress = showAll ? 100 : progress

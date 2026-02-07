@@ -9,6 +9,7 @@ import {
   generateSlideResponse,
   generateTopicMetadata,
   detectLanguage,
+  generateTTS,
 } from '../services/gemini.js'
 
 const router = express.Router()
@@ -122,6 +123,7 @@ function generateMockSlides(query, topicId, segmentId) {
   const slideCount = 3 + Math.floor(Math.random() * 4) // 3-6 slides
 
   const introSubtitle = `Let's explore the fascinating topic of "${query.replace(/[?]/g, '')}".`
+  const titles = ['Introduction', 'Core Concepts', 'Key Components', 'Interactions', 'Implications', 'Summary']
   const subtitles = [
     introSubtitle,
     'Understanding the fundamental concepts helps us grasp the bigger picture.',
@@ -135,6 +137,7 @@ function generateMockSlides(query, topicId, segmentId) {
   for (let i = 0; i < slideCount; i++) {
     slides.push({
       id: generateId('slide'),
+      title: titles[i] || `Slide ${i + 1}`,
       imageUrl: getMockImageUrl(i),
       audioUrl: null, // Would be populated by TTS service with real AI
       subtitle: subtitles[i] || subtitles[subtitles.length - 1],
@@ -268,6 +271,7 @@ router.post('/', async (req, res) => {
 
         return {
           id: generateId('slide'),
+          title: slideScript.title || null,
           imageUrl: content.imageUrl || getMockImageUrl(index),
           audioUrl: content.audioUrl || null,
           subtitle: slideScript.subtitle,
@@ -441,6 +445,7 @@ router.post('/follow-up', async (req, res) => {
 
           return {
             id: generateId('slide'),
+            title: slideScript.title || null,
             imageUrl: content.imageUrl || getMockImageUrl(index),
             audioUrl: content.audioUrl || null,
             subtitle: slideScript.subtitle,
@@ -521,7 +526,7 @@ router.post('/follow-up', async (req, res) => {
  */
 router.post('/engagement', async (req, res) => {
   try {
-    const { query, explanationLevel = 'standard' } = req.body
+    const { query, explanationLevel = 'standard', skipTTS = false } = req.body
 
     // F004: Sanitize and validate query input
     const { sanitized: sanitizedQuery, error: queryError } = sanitizeQuery(query)
@@ -539,22 +544,32 @@ router.post('/engagement', async (req, res) => {
       !aiEngagement.funFact ||
       !Array.isArray(aiEngagement.suggestedQuestions)) {
       const fallbackEngagement = buildFallbackEngagement(fallbackTopic)
+      let ttsResult = { audioUrl: null, duration: 0 }
+      if (!skipTTS) {
+        ttsResult = await generateTTS(`While we wait, here's a fun fact: ${fallbackEngagement.funFact.text}`).catch(() => ({ audioUrl: null, duration: 0 }))
+      }
       return res.json({
         funFact: {
           ...fallbackEngagement.funFact,
-          audioUrl: null,
-          duration: 0,
+          audioUrl: ttsResult.audioUrl || null,
+          duration: ttsResult.duration || 0,
         },
         suggestedQuestions: fallbackEngagement.suggestedQuestions,
         fallback: true,
       })
     }
 
+    // Generate TTS with conversational intro (card text stays unchanged)
+    let ttsResult = { audioUrl: null, duration: 0 }
+    if (!skipTTS) {
+      ttsResult = await generateTTS(`While we wait, here's a fun fact: ${aiEngagement.funFact.text}`).catch(() => ({ audioUrl: null, duration: 0 }))
+    }
+
     res.json({
       funFact: {
         ...aiEngagement.funFact,
-        audioUrl: null,
-        duration: 0,
+        audioUrl: ttsResult.audioUrl || null,
+        duration: ttsResult.duration || 0,
       },
       suggestedQuestions: aiEngagement.suggestedQuestions.slice(0, 3),
       fallback: false,

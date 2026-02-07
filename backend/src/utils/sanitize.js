@@ -80,7 +80,9 @@ export function sanitizeQuery(query) {
 
 /**
  * Validate that a string is a valid ID format
- * IDs should be alphanumeric with underscores, following pattern: prefix_timestamp_random
+ * IDs can be:
+ * - Alphanumeric with underscores: prefix_timestamp_random (e.g., client_1234567890_abc123)
+ * - UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
  *
  * @param {string} id - The ID to validate
  * @returns {boolean} Whether the ID is valid
@@ -92,7 +94,11 @@ export function isValidId(id) {
 
   // Match pattern: word_numbers_alphanumeric (e.g., topic_1234567890_abc123)
   const idPattern = /^[a-z]+_\d+_[a-z0-9]+$/i
-  return idPattern.test(id)
+
+  // Match UUID format (e.g., 690bbf04-1a23-4edd-adf9-e6c605eb4d66)
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+  return idPattern.test(id) || uuidPattern.test(id)
 }
 
 /**

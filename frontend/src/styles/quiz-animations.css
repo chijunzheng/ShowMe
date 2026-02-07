@@ -1,0 +1,302 @@
+/**
+ * Quiz Animations CSS
+ *
+ * Keyframes and utility classes for quiz gamification animations.
+ * Includes XP float effects, celebration particles, streaks, and option transitions.
+ */
+
+/* ============================================
+   Float Up Animation - XP points rising
+   ============================================ */
+@keyframes float-up {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-20px) scale(1.1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-40px) scale(0.9);
+  }
+}
+
+.animate-float-up {
+  animation: float-up 0.8s ease-out forwards;
+}
+
+/* ============================================
+   Pop In Animation - Messages and notifications
+   ============================================ */
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-pop {
+  animation: pop-in 0.3s ease-out forwards;
+}
+
+/* ============================================
+   Burst Out Animation - Celebration particles
+   ============================================ */
+@keyframes burst-out {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(2);
+  }
+}
+
+.animate-burst {
+  animation: burst-out 0.6s ease-out forwards;
+}
+
+/* ============================================
+   Pulse Glow Animation - Anticipation effect
+   ============================================ */
+@keyframes pulse-glow {
+  0% {
+    box-shadow: 0 0 0 0 currentColor;
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 20px 10px currentColor;
+    opacity: 0.7;
+  }
+  100% {
+    box-shadow: 0 0 0 0 currentColor;
+    opacity: 1;
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 0.8s ease-in-out;
+}
+
+/* ============================================
+   Screen Shake Animation - Big streak milestones
+   ============================================ */
+@keyframes screen-shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  10%, 30%, 50%, 70%, 90% {
+    transform: translateX(-4px);
+  }
+  20%, 40%, 60%, 80% {
+    transform: translateX(4px);
+  }
+}
+
+.animate-shake {
+  animation: screen-shake 0.3s ease-in-out;
+}
+
+/* ============================================
+   Option Entrance Animation - Staggered reveal
+   ============================================ */
+@keyframes option-entrance {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.option-enter {
+  opacity: 0;
+  animation: option-entrance 0.3s ease-out forwards;
+}
+
+.option-enter:nth-child(1) {
+  animation-delay: 0.1s;
+}
+
+.option-enter:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.option-enter:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+.option-enter:nth-child(4) {
+  animation-delay: 0.4s;
+}
+
+/* ============================================
+   XP Counter Animation - Score increment
+   ============================================ */
+@keyframes xp-increment {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.3);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.animate-xp-increment {
+  animation: xp-increment 0.3s ease-out;
+}
+
+/* ============================================
+   Streak Fire Animation - Growing flames
+   ============================================ */
+@keyframes streak-fire {
+  0%, 100% {
+    transform: scaleY(1) translateY(0);
+    filter: brightness(1);
+  }
+  50% {
+    transform: scaleY(1.2) translateY(-2px);
+    filter: brightness(1.2);
+  }
+}
+
+.animate-streak-fire {
+  animation: streak-fire 0.5s ease-in-out infinite;
+}
+
+/* ============================================
+   Correct Answer Glow - Green success pulse
+   ============================================ */
+@keyframes correct-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 20px 8px rgba(74, 222, 128, 0.4);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0);
+  }
+}
+
+.animate-correct-glow {
+  animation: correct-glow 0.6s ease-out;
+}
+
+/* ============================================
+   Incorrect Answer Shake - Red error wiggle
+   ============================================ */
+@keyframes incorrect-shake {
+  0%, 100% {
+    transform: translateX(0);
+    background-color: rgba(248, 113, 113, 0.1);
+  }
+  20%, 60% {
+    transform: translateX(-5px);
+    background-color: rgba(248, 113, 113, 0.2);
+  }
+  40%, 80% {
+    transform: translateX(5px);
+    background-color: rgba(248, 113, 113, 0.2);
+  }
+}
+
+.animate-incorrect-shake {
+  animation: incorrect-shake 0.4s ease-in-out;
+}
+
+/* ============================================
+   Progress Bar Fill Animation
+   ============================================ */
+@keyframes progress-fill {
+  0% {
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+  100% {
+    transform: scaleX(1);
+    transform-origin: left;
+  }
+}
+
+.animate-progress-fill {
+  animation: progress-fill 0.5s ease-out forwards;
+}
+
+/* ============================================
+   Star Burst Animation - Achievement unlock
+   ============================================ */
+@keyframes star-burst {
+  0% {
+    opacity: 0;
+    transform: rotate(0deg) scale(0);
+  }
+  50% {
+    opacity: 1;
+    transform: rotate(180deg) scale(1.5);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(360deg) scale(0);
+  }
+}
+
+.animate-star-burst {
+  animation: star-burst 0.8s ease-out forwards;
+}
+
+/* ============================================
+   Slide In From Bottom - Modal/overlay entrance
+   ============================================ */
+@keyframes slide-in-bottom {
+  0% {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-in-bottom {
+  animation: slide-in-bottom 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* ============================================
+   Fade Scale Out - Dismissal animation
+   ============================================ */
+@keyframes fade-scale-out {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+
+.animate-fade-scale-out {
+  animation: fade-scale-out 0.2s ease-in forwards;
+}

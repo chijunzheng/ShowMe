@@ -19,6 +19,7 @@ import logger from './utils/logger.js'
 
 // Import request logging middleware (F077)
 import requestLogger from './middleware/requestLogger.js'
+import createJsonBodyParserMiddleware from './middleware/jsonBodyParser.js'
 
 // Import WebSocket progress utilities for client management
 import {
@@ -29,9 +30,12 @@ import {
 const app = express()
 const PORT = process.env.PORT || 3002
 
-// Allowed origins for CORS - only allow frontend
+// Allowed origins for CORS - only allow frontend (multiple ports for Vite fallback)
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5175',
+  'http://localhost:5176',
   'http://localhost:3002',
   process.env.CORS_ORIGIN,
 ].filter(Boolean)
@@ -101,16 +105,8 @@ app.use(cors({
   optionsSuccessStatus: 204,
 }))
 
-// Parse JSON bodies with size limit (security measure)
-// Slides payloads can be large (base64 images), so allow a larger limit on /api/slides.
-const smallJson = express.json({ limit: '10kb' })
-const largeJson = express.json({ limit: '20mb' })
-app.use((req, res, next) => {
-  if (req.path.startsWith('/api/slides')) {
-    return largeJson(req, res, next)
-  }
-  return smallJson(req, res, next)
-})
+// Parse JSON bodies with size limits (security measure)
+app.use(createJsonBodyParserMiddleware())
 
 // F077: Request logging middleware - logs all requests with timing
 app.use(requestLogger)
@@ -150,8 +146,14 @@ import topicRoutes from './routes/topic.js'
 import voiceRoutes from './routes/voice.js'
 import chitchatRoutes from './routes/chitchat.js'
 import slidesRoutes from './routes/slides.js'
-import socraticRoutes from './routes/socratic.js'
 import userRoutes from './routes/user.js'
+import worldRoutes from './routes/world.js'
+import randomTopicRoutes from './routes/randomTopic.js'
+import learnRoutes from './routes/learn.js'
+import graphRoutes from './routes/graph.js'
+import storiesRoutes from './routes/stories.js'
+import modesRoutes from './routes/modes.js'
+import migrationRoutes from './routes/migration.js'
 
 app.use('/api/generate', generateRoutes)
 app.use('/api/classify', classifyRoutes)
@@ -161,8 +163,14 @@ app.use('/api/topic', topicRoutes)
 app.use('/api/voice', voiceRoutes)
 app.use('/api/chitchat', chitchatRoutes)
 app.use('/api/slides', slidesRoutes)
-app.use('/api/socratic', socraticRoutes)
 app.use('/api/user', userRoutes)
+app.use('/api/world', worldRoutes)
+app.use('/api/random-topic', randomTopicRoutes)
+app.use('/api/learn', learnRoutes)
+app.use('/api/graph', graphRoutes)
+app.use('/api/stories', storiesRoutes)
+app.use('/api/modes', modesRoutes)
+app.use('/api/migration', migrationRoutes)
 
 // Serve frontend static files in production
 if (process.env.NODE_ENV === 'production') {

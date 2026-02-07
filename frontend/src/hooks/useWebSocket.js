@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import logger from '../utils/logger'
+import { getClientId as getStableClientId } from '../utils/clientId'
 
 /**
  * Progress message types that match the backend PROGRESS_TYPES
@@ -61,17 +62,6 @@ const WS_CONFIG = {
 }
 
 /**
- * Generate a unique client ID for WebSocket registration
- * Uses timestamp + random string for uniqueness across sessions
- * @returns {string} Unique client ID
- */
-function generateClientId() {
-  const timestamp = Date.now()
-  const random = Math.random().toString(36).substring(2, 10)
-  return `client_${timestamp}_${random}`
-}
-
-/**
  * useWebSocket - Custom hook for managing WebSocket connections
  *
  * F015: Manages connection to /ws/generation for real-time progress updates
@@ -127,7 +117,7 @@ export function useWebSocket({
    */
   const getClientId = useCallback(() => {
     if (!clientIdRef.current) {
-      clientIdRef.current = generateClientId()
+      clientIdRef.current = getStableClientId()
     }
     return clientIdRef.current
   }, [])

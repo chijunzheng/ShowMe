@@ -241,42 +241,159 @@ export function playAchievementSound() {
 }
 
 /**
- * Play the "streak increment" sound.
- * A quick, energetic double-beep for streak milestones.
+ * Play the "tier up" sound.
+ * UI008: Celebratory fanfare for tier upgrades with triumphant ascending sequence.
+ * More elaborate than achievement sound to signify major milestone.
  */
-export function playStreakSound() {
-  // Quick double-beep with rising pitch
+export function playTierUpSound() {
+  // Triumphant ascending fanfare: C5 -> E5 -> G5 -> C6 with sustained finish
+  // More dramatic and longer than standard achievement
   playSequence([
     {
-      frequency: 880, // A5
-      duration: 0.08,
-      volume: 0.15,
-      waveform: 'triangle',
+      frequency: 523.25, // C5
+      duration: 0.15,
+      volume: 0.22,
+      waveform: 'sine',
       attackTime: 0.005,
-      releaseTime: 0.05,
+      releaseTime: 0.1,
     },
     {
-      frequency: 1108.73, // C#6
-      delay: 0.1,
-      duration: 0.12,
-      volume: 0.18,
-      waveform: 'triangle',
+      frequency: 659.25, // E5
+      delay: 0.12,
+      duration: 0.15,
+      volume: 0.24,
+      waveform: 'sine',
       attackTime: 0.005,
-      releaseTime: 0.08,
+      releaseTime: 0.1,
+    },
+    {
+      frequency: 783.99, // G5
+      delay: 0.24,
+      duration: 0.15,
+      volume: 0.26,
+      waveform: 'sine',
+      attackTime: 0.005,
+      releaseTime: 0.1,
+    },
+    {
+      frequency: 1046.50, // C6 - triumphant high note
+      delay: 0.36,
+      duration: 0.5,
+      volume: 0.3,
+      waveform: 'sine',
+      attackTime: 0.01,
+      releaseTime: 0.35,
+    },
+    // Add a subtle harmonizing note for richness
+    {
+      frequency: 1318.51, // E6 - harmonic third above C6
+      delay: 0.40,
+      duration: 0.45,
+      volume: 0.15,
+      waveform: 'triangle',
+      attackTime: 0.02,
+      releaseTime: 0.35,
     },
   ])
 }
 
 /**
- * Preload the audio context to reduce latency on first sound.
- * Call this on user interaction (e.g., first button click).
+ * Play the "correct answer" sound.
+ * Quick ascending chime that rewards correct answers in quizzes.
+ * Uses bright, cheerful tones that feel satisfying without being overwhelming.
  */
-export function preloadAudioContext() {
-  try {
-    getAudioContext()
-  } catch (error) {
-    // Silently fail - will retry on first sound
-  }
+export function playCorrectSound() {
+  // Ascending two-note chime: G5 -> C6 (perfect fourth up)
+  // Bright and affirming, quick reward feedback
+  playSequence([
+    {
+      frequency: 783.99, // G5 - affirming start
+      duration: 0.1,
+      volume: 0.18,
+      waveform: 'sine',
+      attackTime: 0.005,
+      releaseTime: 0.06,
+    },
+    {
+      frequency: 1046.50, // C6 - happy resolution
+      delay: 0.08,
+      duration: 0.15,
+      volume: 0.2,
+      waveform: 'sine',
+      attackTime: 0.005,
+      releaseTime: 0.1,
+    },
+  ])
+}
+
+/**
+ * Play the "partial credit" sound.
+ * Encouraging tone for partially correct answers.
+ * Warm and supportive, not as triumphant as correct but still positive.
+ */
+export function playPartialSound() {
+  // Single warm tone with slight rise: E5 -> F5
+  // Encouraging but indicates room for improvement
+  playSequence([
+    {
+      frequency: 659.25, // E5 - warm, encouraging
+      endFrequency: 698.46, // F5 - slight upward bend
+      duration: 0.2,
+      volume: 0.16,
+      waveform: 'triangle',
+      attackTime: 0.01,
+      releaseTime: 0.12,
+    },
+  ])
+}
+
+/**
+ * Play the "incorrect answer" sound.
+ * Gentle low tone for wrong answers - not punishing, just informative.
+ * Designed to be kind to kids while signaling "try again".
+ */
+export function playIncorrectSound() {
+  // Single soft, low tone: A3
+  // Gentle and brief, not discouraging
+  playSequence([
+    {
+      frequency: 220.00, // A3 - soft low note
+      duration: 0.18,
+      volume: 0.12, // Quieter than success sounds
+      waveform: 'sine',
+      attackTime: 0.02,
+      releaseTime: 0.12,
+    },
+  ])
+}
+
+/**
+ * Play the "option select" sound.
+ * Soft tap/click when selecting an option in quizzes.
+ * Very brief and subtle, just tactile feedback.
+ */
+export function playSelectSound() {
+  // Ultra-short high tap: B5
+  // Like a soft button click
+  playSequence([
+    {
+      frequency: 987.77, // B5 - crisp tap
+      duration: 0.04,
+      volume: 0.1, // Very quiet
+      waveform: 'triangle',
+      attackTime: 0.003,
+      releaseTime: 0.025,
+    },
+  ])
+}
+
+/**
+ * Reset the audio context (for testing purposes only).
+ * This allows tests to inject mocked AudioContext instances.
+ * @private
+ */
+export function _resetAudioContext() {
+  audioContext = null
 }
 
 // Export all functions as named exports
@@ -284,6 +401,9 @@ export default {
   playMicOnSound,
   playRecordingCompleteSound,
   playAchievementSound,
-  playStreakSound,
-  preloadAudioContext,
+  playTierUpSound,
+  playSelectSound,
+  playCorrectSound,
+  playPartialSound,
+  playIncorrectSound,
 }

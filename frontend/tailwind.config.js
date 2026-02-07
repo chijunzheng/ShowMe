@@ -8,10 +8,9 @@ export default {
   theme: {
     extend: {
       colors: {
-        // POLISH-002: Updated color palette for student-focused branding
+        // Curious Explorer: Kid-friendly color palette
         primary: {
-          DEFAULT: '#6366F1', // Indigo
-          dark: '#818CF8',
+          DEFAULT: '#6366F1',
           50: '#EEF2FF',
           100: '#E0E7FF',
           200: '#C7D2FE',
@@ -21,17 +20,48 @@ export default {
           600: '#4F46E5',
           700: '#4338CA',
         },
-        // T001: Primary gradient colors
-        cyan: {
-          DEFAULT: '#06B6D4',
-          dark: '#22D3EE',
-          50: '#ECFEFF',
-          100: '#CFFAFE',
-          200: '#A5F3FC',
-          300: '#67E8F9',
-          400: '#22D3EE',
-          500: '#06B6D4',
-          600: '#0891B2',
+        secondary: {
+          DEFAULT: '#00B4A0',
+          50: '#ECFDF9',
+          100: '#D1FAF0',
+          200: '#A7F3E2',
+          300: '#6EE7D0',
+          400: '#2DD4C4',
+          500: '#00B4A0',
+          600: '#009688',
+          700: '#007A6E',
+        },
+        accent: {
+          DEFAULT: '#FFB830',
+          50: '#FFFBEB',
+          100: '#FEF3C7',
+          200: '#FDE68A',
+          300: '#FFCB5C',
+          400: '#FFB830',
+          500: '#F5A623',
+          600: '#D97706',
+        },
+        cream: {
+          50: '#FFFDFB',
+          100: '#FFF9F5',
+          200: '#FFF5EE',
+          300: '#FFEEE3',
+        },
+        night: {
+          900: '#1A1625',
+          800: '#252033',
+          700: '#2D2640',
+          600: '#3D3555',
+        },
+        stardust: {
+          DEFAULT: '#FFD866',
+          50: '#FFFDF0',
+          100: '#FFF9D6',
+          200: '#FFF3B0',
+          300: '#FFEC88',
+          400: '#FFD866',
+          500: '#E6C24E',
+          600: '#BFA030',
         },
         surface: {
           DEFAULT: '#F8FAFC',
@@ -41,13 +71,6 @@ export default {
           DEFAULT: '#FFFFFF',
           dark: '#0F172A',
         },
-        // T002: Accent orange color
-        accent: {
-          DEFAULT: '#F59E0B', // Orange for accents
-          dark: '#FBBF24',
-          orange: '#F59E0B',
-        },
-        // T003: Success green for streaks
         success: {
           DEFAULT: '#22C55E',
           dark: '#4ADE80',
@@ -59,14 +82,14 @@ export default {
           500: '#22C55E',
           600: '#16A34A',
         },
-        // Streak gradient colors (orange to red)
         streak: {
           orange: '#F59E0B',
           red: '#EF4444',
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['Nunito', 'Inter', 'system-ui', 'sans-serif'],
+        display: ['Quicksand', 'Nunito', 'system-ui', 'sans-serif'],
       },
       animation: {
         'pulse-slow': 'pulse 1.5s ease-in-out infinite',
@@ -74,6 +97,11 @@ export default {
         'breathe': 'breathe 3s ease-in-out infinite',
         'fade-in': 'fadeIn 0.3s ease-out',
         'float': 'float 2s ease-in-out infinite',
+        // Tree seed animations
+        'seed-bob': 'seedBob 2.8s ease-in-out infinite',
+        'sprout-grow': 'sproutGrow 2.4s ease-in-out infinite',
+        'seed-glow': 'seedGlow 3.2s ease-in-out infinite',
+        'sparkle-drift': 'sparkleDrift 1.8s ease-in-out infinite',
         // POLISH-001: New animations for gamification
         'confetti-fall': 'confettiFall 3s ease-out forwards',
         'toast-enter': 'toastEnter 0.3s ease-out forwards',
@@ -81,6 +109,20 @@ export default {
         'flame-flicker': 'flameFlicker 0.5s ease-in-out infinite',
         'scale-up': 'scaleUp 0.3s ease-out',
         'bounce-in': 'bounceIn 0.5s ease-out',
+        // WB010: Sparkle animation for piece unlock celebration
+        'sparkle': 'sparkle 1.5s ease-out forwards',
+        // UI008: Tier upgrade celebration animations
+        'tier-particle': 'tierParticle 1.8s ease-out forwards',
+        'fade-in-up': 'fadeInUp 0.5s ease-out forwards',
+        // WB020: Evolution celebration animation
+        'evolution-particle': 'evolutionParticle 1.5s ease-out forwards',
+        // Mic pulse animation for selected level cards
+        'pulse-mic': 'pulseMic 2s ease-in-out infinite',
+        // GAMIFY-004: Mission UI animations
+        'claim': 'claim 0.4s ease-out',
+        'scale-in': 'scaleIn 0.3s ease-out forwards',
+        'bounce-once': 'bounceOnce 0.6s ease-out',
+        'fade-out-down': 'fadeOutDown 0.3s ease-in forwards',
       },
       keyframes: {
         waveform: {
@@ -98,6 +140,25 @@ export default {
         float: {
           '0%': { transform: 'translateY(0)', opacity: '1' },
           '100%': { transform: 'translateY(-40px)', opacity: '0' },
+        },
+        // Tree seed keyframes
+        seedBob: {
+          '0%, 100%': { transform: 'translateY(0) rotate(-1deg)' },
+          '50%': { transform: 'translateY(-6px) rotate(1deg)' },
+        },
+        sproutGrow: {
+          '0%': { transform: 'translateY(6px) scaleY(0.85)' },
+          '50%': { transform: 'translateY(0) scaleY(1.05)' },
+          '100%': { transform: 'translateY(2px) scaleY(1)' },
+        },
+        seedGlow: {
+          '0%, 100%': { opacity: '0.35', transform: 'scale(0.95)' },
+          '50%': { opacity: '0.7', transform: 'scale(1.05)' },
+        },
+        sparkleDrift: {
+          '0%': { transform: 'translateY(4px) scale(0.6)', opacity: '0' },
+          '40%': { opacity: '1' },
+          '100%': { transform: 'translateY(-12px) scale(1)', opacity: '0' },
         },
         // POLISH-001: Confetti falling animation (T001, T002)
         confettiFall: {
@@ -138,12 +199,108 @@ export default {
           '50%': { transform: 'scale(1.2)' },
           '100%': { transform: 'scale(1)', opacity: '1' },
         },
+        // WB010: Sparkle particle animation for piece unlock
+        sparkle: {
+          '0%': {
+            transform: 'scale(0) rotate(0deg)',
+            opacity: '0',
+          },
+          '20%': {
+            transform: 'scale(1.2) rotate(45deg)',
+            opacity: '1',
+          },
+          '50%': {
+            transform: 'scale(1) rotate(90deg)',
+            opacity: '1',
+          },
+          '100%': {
+            transform: 'scale(0) rotate(180deg)',
+            opacity: '0',
+          },
+        },
+        // UI008: Tier particle animation - particles radiate outward
+        tierParticle: {
+          '0%': {
+            transform: 'translate(-50%, -50%) scale(0) rotate(0deg)',
+            opacity: '0',
+          },
+          '20%': {
+            transform: 'translate(-50%, -50%) scale(1.5) rotate(45deg)',
+            opacity: '1',
+          },
+          '50%': {
+            transform: 'translate(-50%, -50%) scale(1.2) rotate(90deg)',
+            opacity: '1',
+          },
+          '100%': {
+            transform: 'translate(-50%, -50%) scale(0) rotate(180deg)',
+            opacity: '0',
+          },
+        },
+        // UI008: Fade in up animation for text reveals
+        fadeInUp: {
+          '0%': {
+            transform: 'translateY(20px)',
+            opacity: '0',
+          },
+          '100%': {
+            transform: 'translateY(0)',
+            opacity: '1',
+          },
+        },
+        // WB020: Evolution particle animation - sparkles radiate outward and fade
+        evolutionParticle: {
+          '0%': {
+            transform: 'translate(-50%, -50%) scale(0) rotate(0deg)',
+            opacity: '0',
+          },
+          '30%': {
+            transform: 'translate(-50%, -50%) scale(1.5) rotate(90deg)',
+            opacity: '1',
+          },
+          '60%': {
+            transform: 'translate(-50%, -50%) scale(1.2) rotate(180deg)',
+            opacity: '1',
+          },
+          '100%': {
+            transform: 'translate(-50%, -50%) scale(0) rotate(360deg)',
+            opacity: '0',
+          },
+        },
+        // Mic pulse animation keyframes
+        pulseMic: {
+          '0%, 100%': { transform: 'scale(1)', opacity: '1' },
+          '50%': { transform: 'scale(1.1)', opacity: '0.8' },
+        },
+        // GAMIFY-004: Mission UI keyframes
+        claim: {
+          '0%': { transform: 'scale(1)' },
+          '30%': { transform: 'scale(1.05)' },
+          '60%': { transform: 'scale(0.98)' },
+          '100%': { transform: 'scale(1)' },
+        },
+        scaleIn: {
+          '0%': { transform: 'scale(0.9)', opacity: '0' },
+          '100%': { transform: 'scale(1)', opacity: '1' },
+        },
+        bounceOnce: {
+          '0%': { transform: 'scale(0.8)', opacity: '0' },
+          '50%': { transform: 'scale(1.1)' },
+          '70%': { transform: 'scale(0.95)' },
+          '100%': { transform: 'scale(1)', opacity: '1' },
+        },
+        fadeOutDown: {
+          '0%': { transform: 'translateY(0)', opacity: '1' },
+          '100%': { transform: 'translateY(20px)', opacity: '0' },
+        },
       },
-      // T004: Gradient backgrounds for mic button
+      // Curious Explorer: Kid-friendly gradients
       backgroundImage: {
-        'gradient-primary': 'linear-gradient(135deg, #6366F1, #06B6D4)',
-        'gradient-streak': 'linear-gradient(135deg, #F59E0B, #EF4444)',
-        'gradient-success': 'linear-gradient(135deg, #22C55E, #06B6D4)',
+        'gradient-primary': 'linear-gradient(135deg, #6366F1 0%, #818CF8 100%)',
+        'gradient-success': 'linear-gradient(135deg, #4ADE80 0%, #00B4A0 100%)',
+        'gradient-mastery': 'linear-gradient(135deg, #00B4A0 0%, #60A5FA 100%)',
+        'gradient-streak': 'linear-gradient(135deg, #FFB830 0%, #F59E0B 100%)',
+        'gradient-ambient': 'radial-gradient(ellipse at top, #FFF5EE 0%, #FFF9F5 100%)',
       },
     },
   },
