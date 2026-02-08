@@ -9,7 +9,8 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import PropTypes from 'prop-types'
-import { getExplorerRank } from '../ExplorerRank/explorerRankUtils'
+import { getExplorerRank, getRankProgress } from '../ExplorerRank/explorerRankUtils'
+import { computeStreaksFromDates } from '../../utils/streakUtils'
 import { computeDisplayedMastery, getClusterStyle } from '../../hooks/useKnowledgeGraph'
 import TrophyShowcase from './TrophyShowcase'
 import MyStoriesSheet from '../ProgressTab/MyStoriesSheet'
@@ -19,9 +20,15 @@ import StoryReplaySheet from '../ProgressTab/StoryReplaySheet'
  * StreakContent - Shows streak details with monthly calendar view
  */
 function StreakContent({ streak }) {
-  const current = typeof streak === 'number' ? streak : streak?.current || 0
-  const longest = typeof streak === 'number' ? streak : streak?.longest || current
+  const storedCurrent = typeof streak === 'number' ? streak : streak?.current || 0
+  const storedLongest = typeof streak === 'number' ? streak : streak?.longest || storedCurrent
   const activeDates = typeof streak === 'object' ? streak?.activeDates : null
+
+  // Derive streak from activeDates when available (more reliable than stored counters)
+  const derived = useMemo(() => computeStreaksFromDates(activeDates), [activeDates])
+  const current = activeDates?.length > 0 ? derived.current : storedCurrent
+  const longest = activeDates?.length > 0 ? Math.max(derived.longest, storedLongest) : storedLongest
+
   const activeDateSet = useMemo(() => {
     if (!Array.isArray(activeDates)) return new Set()
     const normalized = activeDates
@@ -164,13 +171,11 @@ StreakContent.propTypes = {
 function XPContent({ totalXP, topicCount }) {
   const rankInfo = getExplorerRank(topicCount, totalXP)
   const nextRank = rankInfo?.nextRank
+  const progressPercent = getRankProgress(topicCount, totalXP)
 
-  const denominator = (nextRank?.minXP || 150) - (rankInfo.currentRankXP || 0)
-  const progressPercent = nextRank && denominator > 0
-    ? Math.min(100, Math.round(
-        ((totalXP - (rankInfo.currentRankXP || 0)) / denominator) * 100
-      ))
-    : 100
+  // Determine the bottleneck for rank-up
+  const topicsNeeded = rankInfo?.topicsToNextRank || 0
+  const xpNeeded = rankInfo?.xpToNextRank || 0
 
   return (
     <div className="space-y-4">
@@ -188,9 +193,12 @@ function XPContent({ totalXP, topicCount }) {
           <span className="font-semibold text-slate-700 dark:text-slate-300">
             {rankInfo?.icon} {rankInfo?.title}
           </span>
-          {nextRank && (
+          {nextRank && (topicsNeeded > 0 || xpNeeded > 0) && (
             <span className="text-slate-500 dark:text-slate-400 text-xs">
-              {rankInfo?.xpToNextRank || 0} XP to {nextRank.title}
+              {[
+                topicsNeeded > 0 && `${topicsNeeded} topics`,
+                xpNeeded > 0 && `${xpNeeded} XP`,
+              ].filter(Boolean).join(', ')} to {nextRank.title}
             </span>
           )}
         </div>

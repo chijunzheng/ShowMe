@@ -31,6 +31,7 @@ import { toApiUrl } from './utils/api'
 import { getClientId } from './utils/clientId'
 import { loadGraphFromStorage } from './utils/graphMigration'
 import { loadStoriesFromStorage, loadStoryContent } from './utils/storyStorage'
+import { computeStreaksFromDates } from './utils/streakUtils'
 // WB021: Quiz flow screens for dedicated quiz experience
 
 // Import constants from centralized config
@@ -260,6 +261,12 @@ function App() {
     recordMysteryCompleted,
     recordWonderCompleted
   } = useUserProgress()
+
+  // Derive streak from activeDates (more reliable than stored counters)
+  const derivedStreak = useMemo(
+    () => computeStreaksFromDates(userProgress?.activeDates),
+    [userProgress?.activeDates]
+  )
 
   // UI002: World stats for home screen display
   const {
@@ -3472,7 +3479,7 @@ function App() {
           }}
           onDeleteTopic={handleDeleteTopic}
           onQuickQuizTopic={(topic) => requestTopicQuiz(topic)}
-          streakCount={userProgress?.streakCount || 0}
+          streakCount={derivedStreak.current}
           totalXP={userProgress?.points || 0}
 
         />
@@ -3592,8 +3599,8 @@ function App() {
               onLaunchMode={handleLaunchLearningMode}
               totalXP={userProgress?.points || 0}
               streak={{
-                current: userProgress?.streakCount || 0,
-                longest: userProgress?.longestStreak || 0,
+                current: derivedStreak.current,
+                longest: Math.max(derivedStreak.longest, userProgress?.longestStreak || 0),
                 todayCompleted: false,
                 activeDates: userProgress?.activeDates || [],
               }}

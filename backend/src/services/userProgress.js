@@ -297,16 +297,21 @@ const POINTS = {
 }
 
 /**
- * Get the start of day for a given date (used for streak comparison)
+ * Get the date key for a given date using local time (YYYY-MM-DD).
+ * Uses local time consistently (same basis as isNextDay/isSameDay).
  * @param {Date} date
- * @returns {string} ISO date string (YYYY-MM-DD)
+ * @returns {string} Local date string (YYYY-MM-DD)
  */
 function getDateKey(date) {
-  return date.toISOString().split('T')[0]
+  const d = new Date(date)
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 /**
- * Check if two dates are consecutive days
+ * Check if two dates are consecutive days (local time)
  * @param {Date} date1 - Earlier date
  * @param {Date} date2 - Later date
  * @returns {boolean}
@@ -323,13 +328,17 @@ function isNextDay(date1, date2) {
 }
 
 /**
- * Check if two dates are the same day
+ * Check if two dates are the same day (local time)
  * @param {Date} date1
  * @param {Date} date2
  * @returns {boolean}
  */
 function isSameDay(date1, date2) {
-  return getDateKey(new Date(date1)) === getDateKey(new Date(date2))
+  const d1 = new Date(date1)
+  const d2 = new Date(date2)
+  return d1.getFullYear() === d2.getFullYear()
+    && d1.getMonth() === d2.getMonth()
+    && d1.getDate() === d2.getDate()
 }
 
 /**
