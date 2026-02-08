@@ -20,39 +20,55 @@ const DEPTH_INDENT_PX = 16
  */
 const MAX_PICKER_LABEL_LENGTH = 40
 
+function getSlideLabel(slide) {
+  if (!slide || typeof slide !== 'object') return 'Slide'
+  if (typeof slide.title === 'string' && slide.title.trim()) return slide.title.trim()
+  if (typeof slide.subtitle === 'string' && slide.subtitle.trim()) {
+    return slide.subtitle
+      .trim()
+      .split(/\s+/)
+      .slice(0, 6)
+      .join(' ')
+      .replace(/[.,!?]$/, '')
+  }
+  return 'Slide'
+}
+
 /**
  * ChapterPicker - Expandable chapter list for quick navigation
  *
  * @param {Object} props
  * @param {Array} props.segments - All SlideSegment objects
  * @param {number} props.currentSegmentIndex - Currently active segment
+ * @param {number} props.currentSlideInSegment - Currently active slide within segment (0=parent, 1..N=child)
  * @param {boolean} props.isOpen - Whether picker is expanded
  * @param {Function} props.onClose - Close the picker
- * @param {Function} props.onSelectSegment - Select a segment (segmentIndex)
+ * @param {Function} props.onSelectPosition - Select a slide position (segmentIndex, slideInSegment)
  */
 export default function ChapterPicker({
   segments = [],
   currentSegmentIndex = 0,
+  currentSlideInSegment = 0,
   isOpen = false,
   onClose,
-  onSelectSegment,
+  onSelectPosition,
 }) {
   const panelRef = useRef(null)
   const firstButtonRef = useRef(null)
 
   /**
-   * Handle segment selection
+   * Handle position selection
    */
   const handleSelect = useCallback(
-    (index) => {
-      if (onSelectSegment) {
-        onSelectSegment(index)
+    (segmentIndex, slideInSegment = 0) => {
+      if (onSelectPosition) {
+        onSelectPosition(segmentIndex, slideInSegment)
       }
       if (onClose) {
         onClose()
       }
     },
-    [onSelectSegment, onClose]
+    [onSelectPosition, onClose]
   )
 
   /**
@@ -200,109 +216,200 @@ export default function ChapterPicker({
         {/* Chapter list */}
         <div className="flex-1 overflow-y-auto py-2">
           {segments.map((segment, index) => {
-            const isActive = index === currentSegmentIndex
+            const isActiveSegment = index === currentSegmentIndex
+            const isActiveParent = isActiveSegment && currentSlideInSegment === 0
             const isComplete = index < currentSegmentIndex
             const depth = segment.depth || 0
             const displayLabel = truncateLabel(segment.label, MAX_PICKER_LABEL_LENGTH)
+            const childSlides = Array.isArray(segment.slides) ? segment.slides.slice(1) : []
 
             return (
-              <button
-                key={segment.id}
-                ref={index === 0 ? firstButtonRef : null}
-                type="button"
-                onClick={() => handleSelect(index)}
-                className={`
-                  w-full flex items-center gap-3
-                  px-4 py-3
-                  text-left
-                  transition-colors
-                  min-h-[48px]
-                  ${isActive
-                    ? 'bg-primary/10 dark:bg-primary/20'
-                    : 'hover:bg-gray-50 dark:hover:bg-gray-800'
-                  }
-                `}
-                style={{ paddingLeft: `${16 + depth * DEPTH_INDENT_PX}px` }}
-                aria-current={isActive ? 'true' : undefined}
-              >
-                {/* Status indicator */}
-                <div
+              <div key={segment.id} className="flex flex-col">
+                <button
+                  ref={index === 0 ? firstButtonRef : null}
+                  type="button"
+                  onClick={() => handleSelect(index, 0)}
                   className={`
-                    flex-shrink-0 w-6 h-6 rounded-full
-                    flex items-center justify-center
-                    ${isActive
-                      ? 'bg-primary text-white'
-                      : isComplete
-                        ? 'bg-primary/20 dark:bg-primary/30 text-primary'
-                        : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
+                    w-full flex items-center gap-3
+                    px-4 py-3
+                    text-left
+                    transition-colors
+                    min-h-[48px]
+                    ${isActiveSegment
+                      ? 'bg-primary/10 dark:bg-primary/20'
+                      : 'hover:bg-gray-50 dark:hover:bg-gray-800'
                     }
                   `}
+                  style={{ paddingLeft: `${16 + depth * DEPTH_INDENT_PX}px` }}
+                  aria-current={isActiveParent ? 'true' : undefined}
                 >
-                  {isComplete ? (
+                  {/* Status indicator */}
+                  <div
+                    className={`
+                      flex-shrink-0 w-6 h-6 rounded-full
+                      flex items-center justify-center
+                      ${isActiveSegment
+                        ? 'bg-primary text-white'
+                        : isComplete
+                          ? 'bg-primary/20 dark:bg-primary/30 text-primary'
+                          : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
+                      }
+                    `}
+                  >
+                    {isComplete ? (
+                      <svg
+                        className="w-4 h-4"
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    ) : isActiveSegment ? (
+                      <div className="w-2 h-2 bg-white rounded-full" />
+                    ) : (
+                      <span className="text-xs font-medium">{index + 1}</span>
+                    )}
+                  </div>
+
+                  {/* Label and slide count */}
+                  <div className="flex-1 min-w-0">
+                    <div
+                      className={`
+                        text-sm font-medium truncate
+                        ${isActiveSegment
+                          ? 'text-primary dark:text-primary-400'
+                          : 'text-gray-800 dark:text-gray-200'
+                        }
+                      `}
+                    >
+                      {displayLabel}
+                    </div>
+                    <div
+                      className={`
+                        text-xs
+                        ${isActiveSegment
+                          ? 'text-primary/70 dark:text-primary-400/70'
+                          : 'text-gray-500 dark:text-gray-400'
+                        }
+                      `}
+                    >
+                      {segment.slides.length} slide{segment.slides.length !== 1 ? 's' : ''}
+                      {depth > 0 && (
+                        <span className="ml-2 text-gray-400 dark:text-gray-500">
+                          {'\u2022'} Follow-up
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Active arrow */}
+                  {isActiveSegment && (
                     <svg
-                      className="w-4 h-4"
+                      className="w-4 h-4 text-primary flex-shrink-0"
                       fill="currentColor"
                       viewBox="0 0 20 20"
                     >
                       <path
                         fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                        d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
                         clipRule="evenodd"
                       />
                     </svg>
-                  ) : isActive ? (
-                    <div className="w-2 h-2 bg-white rounded-full" />
-                  ) : (
-                    <span className="text-xs font-medium">{index + 1}</span>
                   )}
-                </div>
+                </button>
 
-                {/* Label and slide count */}
-                <div className="flex-1 min-w-0">
-                  <div
-                    className={`
-                      text-sm font-medium truncate
-                      ${isActive
-                        ? 'text-primary dark:text-primary-400'
-                        : 'text-gray-800 dark:text-gray-200'
-                      }
-                    `}
-                  >
-                    {displayLabel}
-                  </div>
-                  <div
-                    className={`
-                      text-xs
-                      ${isActive
-                        ? 'text-primary/70 dark:text-primary-400/70'
-                        : 'text-gray-500 dark:text-gray-400'
-                      }
-                    `}
-                  >
-                    {segment.slides.length} slide{segment.slides.length !== 1 ? 's' : ''}
-                    {depth > 0 && (
-                      <span className="ml-2 text-gray-400 dark:text-gray-500">
-                        {'\u2022'} Follow-up
-                      </span>
-                    )}
-                  </div>
-                </div>
+                {/* Follow-up slides (children) */}
+                {childSlides.length > 0 && (
+                  <div className="pb-2">
+                    {childSlides.map((slide, childIdx) => {
+                      const slideInSegment = childIdx + 1
+                      const isActiveChild = isActiveSegment && currentSlideInSegment === slideInSegment
+                      const isCompleteChild = isComplete || (isActiveSegment && currentSlideInSegment > slideInSegment)
+                      const childLabel = truncateLabel(getSlideLabel(slide), MAX_PICKER_LABEL_LENGTH)
+                      const childKey = slide?.id ? `${segment.id}:${slide.id}` : `${segment.id}:child:${childIdx}`
 
-                {/* Active arrow */}
-                {isActive && (
-                  <svg
-                    className="w-4 h-4 text-primary flex-shrink-0"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
+                      return (
+                        <button
+                          key={childKey}
+                          type="button"
+                          onClick={() => handleSelect(index, slideInSegment)}
+                          className={`
+                            w-full flex items-center gap-3
+                            px-4 py-2
+                            text-left
+                            transition-colors
+                            min-h-[44px]
+                            ${isActiveChild
+                              ? 'bg-primary/5 dark:bg-primary/15'
+                              : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                            }
+                          `}
+                          style={{ paddingLeft: `${16 + depth * DEPTH_INDENT_PX + DEPTH_INDENT_PX}px` }}
+                          aria-current={isActiveChild ? 'true' : undefined}
+                        >
+                          <div
+                            className={`
+                              flex-shrink-0 w-6 h-6 rounded-full
+                              flex items-center justify-center
+                              ${isActiveChild
+                                ? 'bg-primary text-white'
+                                : isCompleteChild
+                                  ? 'bg-primary/15 dark:bg-primary/25 text-primary'
+                                  : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
+                              }
+                            `}
+                          >
+                            {isCompleteChild ? (
+                              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                <path
+                                  fillRule="evenodd"
+                                  d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                  clipRule="evenodd"
+                                />
+                              </svg>
+                            ) : isActiveChild ? (
+                              <div className="w-2 h-2 bg-white rounded-full" />
+                            ) : (
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h8m0 0v8m0-8L6 19" />
+                              </svg>
+                            )}
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div
+                              className={`
+                                text-sm font-medium truncate
+                                ${isActiveChild
+                                  ? 'text-primary dark:text-primary-400'
+                                  : 'text-gray-800 dark:text-gray-200'
+                                }
+                              `}
+                            >
+                              {childLabel}
+                            </div>
+                            <div
+                              className={`
+                                text-xs
+                                ${isActiveChild
+                                  ? 'text-primary/70 dark:text-primary-400/70'
+                                  : 'text-gray-500 dark:text-gray-400'
+                                }
+                              `}
+                            >
+                              Follow-up slide
+                            </div>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
                 )}
-              </button>
+              </div>
             )
           })}
         </div>
@@ -334,7 +441,8 @@ ChapterPicker.propTypes = {
     })
   ),
   currentSegmentIndex: PropTypes.number,
+  currentSlideInSegment: PropTypes.number,
   isOpen: PropTypes.bool,
   onClose: PropTypes.func,
-  onSelectSegment: PropTypes.func,
+  onSelectPosition: PropTypes.func,
 }

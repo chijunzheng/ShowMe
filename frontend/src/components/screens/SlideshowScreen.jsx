@@ -39,6 +39,7 @@ import StreamingSubtitle from '../StreamingSubtitle.jsx'
  * @param {number} props.currentSegmentIndex - Active segment index
  * @param {number} props.currentSlideInSegment - Active slide within segment
  * @param {Function} props.goToSegment - Navigate to segment start
+ * @param {Function} props.goToSegmentPosition - Navigate to a slide within a segment (segmentIndex, slideInSegment)
  * @param {boolean} props.isChapterPickerOpen - Whether chapter picker is open
  * @param {Function} props.setIsChapterPickerOpen - Set chapter picker open state
  */
@@ -71,6 +72,7 @@ export default function SlideshowScreen({
   currentSegmentIndex,
   currentSlideInSegment,
   goToSegment,
+  goToSegmentPosition,
   isChapterPickerOpen,
   setIsChapterPickerOpen,
 }) {
@@ -176,9 +178,10 @@ export default function SlideshowScreen({
       <ChapterPicker
         segments={segments}
         currentSegmentIndex={currentSegmentIndex}
+        currentSlideInSegment={currentSlideInSegment}
         isOpen={isChapterPickerOpen}
         onClose={() => setIsChapterPickerOpen(false)}
-        onSelectSegment={goToSegment}
+        onSelectPosition={goToSegmentPosition}
       />
     </div>
   )

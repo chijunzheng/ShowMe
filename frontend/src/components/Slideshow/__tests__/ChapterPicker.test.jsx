@@ -109,15 +109,48 @@ describe('ChapterPicker', () => {
       <ChapterPicker
         segments={mockSegments}
         isOpen={true}
-        onSelectSegment={handleSelect}
+        onSelectPosition={handleSelect}
         onClose={handleClose}
       />
     )
 
     fireEvent.click(screen.getByText('First Follow-up'))
 
-    expect(handleSelect).toHaveBeenCalledWith(1)
+    expect(handleSelect).toHaveBeenCalledWith(1, 0)
     expect(handleClose).toHaveBeenCalled()
+  })
+
+  it('shows follow-up slides within a chapter and can jump to them', () => {
+    const handleSelect = vi.fn()
+    const nested = [
+      {
+        id: 'seg-1',
+        label: 'Chapter One',
+        depth: 0,
+        slides: [
+          { id: 'p1', title: 'Parent' },
+          { id: 'c1', title: 'Follow-up A' },
+          { id: 'c2', subtitle: 'Second follow up subtitle goes here' },
+        ],
+      },
+    ]
+
+    render(
+      <ChapterPicker
+        segments={nested}
+        currentSegmentIndex={0}
+        currentSlideInSegment={0}
+        isOpen={true}
+        onSelectPosition={handleSelect}
+      />
+    )
+
+    expect(screen.getByText('Follow-up A')).toBeInTheDocument()
+    // Subtitle-derived label uses first words
+    expect(screen.getByText('Second follow up subtitle goes here')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Follow-up A'))
+    expect(handleSelect).toHaveBeenCalledWith(0, 1)
   })
 
   it('highlights current segment', () => {
@@ -125,6 +158,7 @@ describe('ChapterPicker', () => {
       <ChapterPicker
         segments={mockSegments}
         currentSegmentIndex={1}
+        currentSlideInSegment={0}
         isOpen={true}
       />
     )

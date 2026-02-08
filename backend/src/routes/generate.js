@@ -55,6 +55,51 @@ const QUESTION_WORDS = new Set([
   'explain',
 ])
 
+// Used only for the emergency topic-name fallback when Gemini metadata is unavailable/overloaded.
+// Intentionally broader than QUESTION_WORDS to avoid garbage topics like "It Have Such A".
+const FALLBACK_STOP_WORDS = new Set([
+  ...QUESTION_WORDS,
+  // Pronouns
+  'it',
+  'its',
+  'this',
+  'that',
+  'these',
+  'those',
+  'they',
+  'them',
+  'he',
+  'she',
+  'we',
+  'us',
+  'you',
+  'i',
+  'me',
+  'my',
+  'your',
+  'our',
+  'their',
+  // Auxiliary / glue words
+  'have',
+  'has',
+  'had',
+  'such',
+  'a',
+  'an',
+  'the',
+  'and',
+  'or',
+  'but',
+  'to',
+  'of',
+  'in',
+  'on',
+  'for',
+  'with',
+  'about',
+  'please',
+])
+
 function toTitleCase(value) {
   return value
     .split(/\s+/)
@@ -73,8 +118,12 @@ function buildFallbackTopicName(query) {
   if (!cleaned) return 'New Topic'
 
   const words = cleaned.split(/\s+/)
-  const filtered = words.filter((word) => !QUESTION_WORDS.has(word.toLowerCase()))
-  const baseWords = (filtered.length > 0 ? filtered : words).slice(0, 4)
+  const filtered = words.filter((word) => !FALLBACK_STOP_WORDS.has(word.toLowerCase()))
+  const baseWords = (filtered.length > 0 ? filtered : words.filter((w) => !QUESTION_WORDS.has(w.toLowerCase()))).slice(0, 4)
+
+  if (!baseWords || baseWords.length === 0) {
+    return 'New Topic'
+  }
 
   return toTitleCase(baseWords.join(' '))
 }

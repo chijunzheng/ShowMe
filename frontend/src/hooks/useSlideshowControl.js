@@ -182,6 +182,37 @@ export default function useSlideshowControl({
   // Segment index maps 1:1 to parent slide index since each parent = one segment
   const goToSegment = goToSlide
 
+  /**
+   * Navigate to a specific slide within a segment.
+   * slideInSegment: 0 = parent, 1..N = child index + 1
+   */
+  const goToSegmentPosition = useCallback((segmentIndex, slideInSegment = 0) => {
+    if (segmentIndex < 0 || segmentIndex >= visibleSlides.length) return
+
+    wasManualNavRef.current = true
+    setCurrentIndex(segmentIndex)
+
+    if (!slideInSegment || slideInSegment <= 0) {
+      setCurrentChildIndex(null)
+      return
+    }
+
+    const parent = visibleSlides[segmentIndex]
+    if (!parent) {
+      setCurrentChildIndex(null)
+      return
+    }
+
+    const children = allTopicSlides.filter((s) => s.parentId === parent.id)
+    if (children.length === 0) {
+      setCurrentChildIndex(null)
+      return
+    }
+
+    const targetChildIndex = Math.max(0, Math.min(children.length - 1, slideInSegment - 1))
+    setCurrentChildIndex(targetChildIndex)
+  }, [visibleSlides, allTopicSlides])
+
   // Keyboard navigation
   useEffect(() => {
     if (uiState !== UI_STATE.SLIDESHOW) return
@@ -378,6 +409,7 @@ export default function useSlideshowControl({
     goToChildPrev,
     goToSlide,
     goToSegment,
+    goToSegmentPosition,
     togglePlayPause,
 
     // Slideshow completion

@@ -64,6 +64,8 @@ export function sanitizeSlidesForStorage(slides, topicId) {
     .map((slide, index) => ({
       // Use fallback ID if missing to ensure slide is always persisted
       id: slide.id || `slide_${topicId}_${index}_${Date.now()}`,
+      // Preserve Gemini-generated titles for chapter/slide navigation UI.
+      ...(typeof slide.title === 'string' && slide.title.trim() && { title: slide.title.trim() }),
       // Use placeholder image if missing - slide content is more important than image
       imageUrl: slide.imageUrl || FALLBACK_SLIDE_IMAGE_URL,
       subtitle: slide.subtitle || '',
@@ -75,6 +77,10 @@ export function sanitizeSlidesForStorage(slides, topicId) {
       ...(slide.audioUrl && { audioUrl: slide.audioUrl }),
       // Preserve slide type for section dividers and other special slides
       ...(slide.type && { type: slide.type }),
+      // Preserve section divider question text (used by SectionDivider UI).
+      ...(typeof slide.question === 'string' && slide.question.trim() && { question: slide.question.trim() }),
+      // Preserve suggestion questions if present (defensive: older data may include these).
+      ...(Array.isArray(slide.questions) && { questions: slide.questions }),
       // Preserve parent relationship for follow-up slides
       ...(slide.parentId && { parentId: slide.parentId }),
     }))

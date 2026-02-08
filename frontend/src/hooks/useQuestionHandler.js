@@ -200,6 +200,27 @@ export default function useQuestionHandler({
         return
       }
 
+      // UX: If the user raises their hand during an active slideshow and speaks,
+      // they almost always mean "follow up on what I'm currently watching",
+      // even if classification is uncertain (pronoun-heavy queries like "How does it work?").
+      // Without this, we can accidentally create a brand new topic and break chapter/topic continuity.
+      if (
+        source === 'voice' &&
+        uiState === UI_STATE.SLIDESHOW &&
+        activeTopic &&
+        classifyResult.classification === 'new_topic'
+      ) {
+        logger.info('GENERATION', 'Forcing follow-up for voice query during slideshow', {
+          query: trimmedQuery,
+          topicId: activeTopic.id,
+          topicName: activeTopic.name,
+        })
+        classifyResult.classification = 'follow_up'
+        classifyResult.reasoning = classifyResult.reasoning
+          ? `${classifyResult.reasoning} (forced follow-up during slideshow)`
+          : 'Forced follow-up during slideshow'
+      }
+
       // Handle complexity for follow-ups
       if (classifyResult.classification === 'follow_up' && classifyResult.complexity) {
         const complexity = classifyResult.complexity

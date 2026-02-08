@@ -811,7 +811,6 @@ function App() {
   const isRaiseHandPendingRef = useRef(false)
   const selectedLevelRef = useRef(EXPLANATION_LEVEL.STANDARD)
   // Note: isPlayingRef now comes from useSlideshowControl
-  const handleQuestionRef = useRef(null)
 
   // Sync state to refs for use in callbacks
   // Note: isPlayingRef is synced inside useSlideshowControl hook
@@ -904,16 +903,16 @@ function App() {
         from: prevUiStateRef.current,
         to: uiState,
       })
+
+      // Clear stale transcription when ENTERING the listening UI.
+      // Important: don't clear on `isListening` toggles, otherwise we erase
+      // "Transcribing..." / the final transcript after recording stops.
+      if (uiState === UI_STATE.LISTENING) {
+        setLiveTranscription('')
+      }
       prevUiStateRef.current = uiState
     }
   }, [uiState])
-
-  // Clear stale transcription text when returning to listening without active recording.
-  useEffect(() => {
-    if (uiState === UI_STATE.LISTENING && !isListening) {
-      setLiveTranscription('')
-    }
-  }, [uiState, isListening])
 
   // POLISH-001: Handle new badge unlocks with celebration
   useEffect(() => {
@@ -1043,6 +1042,7 @@ function App() {
     goToChildNext,
     goToChildPrev,
     goToSegment,
+    goToSegmentPosition,
     togglePlayPause,
     triggerSlideshowFinished,
     wasManualNavRef,
@@ -1442,7 +1442,7 @@ function App() {
       setUiState(UI_STATE.LISTENING)
       // Use setTimeout to ensure state is updated before calling handleQuestion
       setTimeout(() => {
-        const runHandleQuestion = handleQuestionRef.current
+        const runHandleQuestion = questionHandlerRef.current
         if (runHandleQuestion) {
           runHandleQuestion(lastFailedQuery)
         }
@@ -1851,7 +1851,7 @@ function App() {
       setSlideshowFinished(false)
 
       // Trigger the question
-      const runHandleQuestion = handleQuestionRef.current
+      const runHandleQuestion = questionHandlerRef.current
       if (runHandleQuestion) {
         runHandleQuestion(nextQuestion)
       }
@@ -2762,13 +2762,16 @@ function App() {
       setLastTranscription(transcription)
       setLiveTranscription(transcription)
 
+      // Give the user a moment to see what we heard before we move on.
+      await new Promise((resolve) => setTimeout(resolve, 800))
+
       logger.info('AUDIO', 'Triggering generation with transcription', {
         query: transcription,
       })
 
       // F030: Trigger generation with the actual transcribed text
       // Use a ref to avoid stale closures while keeping this callback stable.
-      const runHandleQuestion = handleQuestionRef.current || handleQuestion
+      const runHandleQuestion = questionHandlerRef.current || handleQuestion
       runHandleQuestion(transcription, { source: 'voice' })
     } catch (error) {
       // Handle network errors
@@ -3663,6 +3666,7 @@ function App() {
             currentSegmentIndex={currentSegmentIndex}
             currentSlideInSegment={currentSlideInSegment}
             goToSegment={goToSegment}
+            goToSegmentPosition={goToSegmentPosition}
             isChapterPickerOpen={isChapterPickerOpen}
             setIsChapterPickerOpen={setIsChapterPickerOpen}
           />
