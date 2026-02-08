@@ -42,6 +42,7 @@ import StreamingSubtitle from '../StreamingSubtitle.jsx'
  * @param {Function} props.goToSegmentPosition - Navigate to a slide within a segment (segmentIndex, slideInSegment)
  * @param {boolean} props.isChapterPickerOpen - Whether chapter picker is open
  * @param {Function} props.setIsChapterPickerOpen - Set chapter picker open state
+ * @param {Array} props.breadcrumbPath - Pre-computed breadcrumb path items
  */
 export default function SlideshowScreen({
   displayedSlide,
@@ -75,6 +76,7 @@ export default function SlideshowScreen({
   goToSegmentPosition,
   isChapterPickerOpen,
   setIsChapterPickerOpen,
+  breadcrumbPath,
 }) {
   return (
     <div className="flex flex-col items-center gap-4 px-4 md:px-0">
@@ -90,6 +92,7 @@ export default function SlideshowScreen({
             segments={segments}
             currentSegmentIndex={currentSegmentIndex}
             onSegmentClick={goToSegment}
+            breadcrumbPath={breadcrumbPath}
           />
         )}
 

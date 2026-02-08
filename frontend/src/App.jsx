@@ -1032,6 +1032,7 @@ function App() {
     segments,
     currentSegmentIndex,
     currentSlideInSegment,
+    breadcrumbPath,
     setCurrentIndex,
     setCurrentChildIndex,
     setIsPlaying,
@@ -2932,6 +2933,7 @@ function App() {
     uiState,
     visibleSlides,
     currentIndex,
+    displayedSlide,
     isListening,
     isRaiseHandPending,
     isMicEnabled,
@@ -3669,6 +3671,7 @@ function App() {
             goToSegmentPosition={goToSegmentPosition}
             isChapterPickerOpen={isChapterPickerOpen}
             setIsChapterPickerOpen={setIsChapterPickerOpen}
+            breadcrumbPath={breadcrumbPath}
           />
         )}
         </main>

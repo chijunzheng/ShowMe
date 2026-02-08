@@ -37,7 +37,7 @@ export default function LevelIndicator({
   const currentLevel = getCurrentVersionLevel(activeTopic)
 
   return (
-    <div className="flex flex-col items-center gap-3 mt-4 mb-16">
+    <div className="flex flex-col items-center gap-3 mt-4 mb-40">
       {/* Current level indicator with regenerate dropdown */}
       <div className="flex items-center gap-2">
         <span className="text-xs text-gray-400">Level:</span>

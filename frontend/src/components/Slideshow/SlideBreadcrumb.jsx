@@ -27,16 +27,25 @@ const SEPARATOR = '\u203A' // Single right-pointing angle quotation mark
  * @param {Array} props.segments - All SlideSegment objects
  * @param {number} props.currentSegmentIndex - Currently active segment
  * @param {Function} props.onSegmentClick - Navigate to a segment (segmentIndex)
+ * @param {Array} [props.breadcrumbPath] - Pre-computed breadcrumb path from parentId chain
  */
 export default function SlideBreadcrumb({
   segments = [],
   currentSegmentIndex = 0,
   onSegmentClick,
+  breadcrumbPath,
 }) {
-  // Build breadcrumb path from root to current segment
+  // Use pre-computed path when provided (supports nested follow-ups),
+  // otherwise fall back to segment-based path
   const breadcrumbs = useMemo(() => {
+    if (breadcrumbPath && breadcrumbPath.length > 1 && breadcrumbPath.every(item => item?.label)) {
+      return breadcrumbPath.map((item, index) => ({
+        label: item.label,
+        segmentIndex: index === 0 ? 0 : currentSegmentIndex,
+      }))
+    }
     return buildBreadcrumbPath(segments, currentSegmentIndex)
-  }, [segments, currentSegmentIndex])
+  }, [segments, currentSegmentIndex, breadcrumbPath])
 
   /**
    * Handle breadcrumb click
@@ -150,4 +159,10 @@ SlideBreadcrumb.propTypes = {
   ),
   currentSegmentIndex: PropTypes.number,
   onSegmentClick: PropTypes.func,
+  breadcrumbPath: PropTypes.arrayOf(
+    PropTypes.shape({
+      label: PropTypes.string.isRequired,
+      slideId: PropTypes.string,
+    })
+  ),
 }

@@ -10,6 +10,26 @@ const SLIDE_TRANSITION_PAUSE_MS = SLIDE_TIMING.TRANSITION_PAUSE_MS
 const MANUAL_FINISH_GRACE_MS = SLIDE_TIMING.MANUAL_FINISH_GRACE_MS
 
 /**
+ * Recursively collect all descendants of a parent slide in depth-first order.
+ * Supports arbitrary nesting depth (children, grandchildren, etc.)
+ * @param {Array} allSlides - All slides in the topic
+ * @param {string} parentId - ID of the parent slide
+ * @param {Set} [visited] - Tracks visited IDs to prevent cycles
+ * @returns {Array} Flattened array of descendant slides in depth-first order
+ */
+function collectDescendants(allSlides, parentId, visited = new Set()) {
+  if (visited.has(parentId)) return []
+  visited.add(parentId)
+  const directChildren = allSlides.filter(s => s.parentId === parentId)
+  const result = []
+  for (const child of directChildren) {
+    result.push(child)
+    result.push(...collectDescendants(allSlides, child.id, visited))
+  }
+  return result
+}
+
+/**
  * Hook for managing slideshow control
  * @param {Object} options - Configuration options
  * @returns {Object} Slideshow control state and functions
@@ -43,11 +63,11 @@ export default function useSlideshowControl({
     isPlayingRef.current = isPlaying
   }, [isPlaying])
 
-  // Compute active child slides
+  // Compute active child slides (recursively includes grandchildren, etc.)
   const activeChildSlides = useMemo(() => {
     const currentParent = visibleSlides[currentIndex]
     if (!currentParent) return []
-    return allTopicSlides.filter(s => s.parentId === currentParent.id)
+    return collectDescendants(allTopicSlides, currentParent.id)
   }, [allTopicSlides, visibleSlides, currentIndex])
 
   // Compute the currently displayed slide
@@ -60,10 +80,42 @@ export default function useSlideshowControl({
 
   const parentSlide = visibleSlides[currentIndex] || null
 
-  // Chapter-based segments: each parent + its children = one segment
+  // Build breadcrumb path by walking up the parentId chain from displayed slide
+  const breadcrumbPath = useMemo(() => {
+    if (currentChildIndex === null || !displayedSlide) return []
+
+    const path = []
+    const visited = new Set()
+    let slide = displayedSlide
+
+    while (slide && !visited.has(slide.id)) {
+      visited.add(slide.id)
+      const label = slide.title
+        || (slide.subtitle && slide.subtitle.split(' ').slice(0, 5).join(' ').replace(/[.,!?]$/, ''))
+        || 'Slide'
+      path.unshift({ label, slideId: slide.id })
+
+      if (slide.parentId) {
+        const parent = allTopicSlides.find(s => s.id === slide.parentId)
+        if (!parent) break
+        slide = parent
+      } else {
+        break
+      }
+    }
+
+    // Replace the first entry (top-level parent) with topic name for cleaner display
+    if (path.length > 0 && activeTopic?.name) {
+      path[0] = { ...path[0], label: activeTopic.name }
+    }
+
+    return path
+  }, [currentChildIndex, displayedSlide, allTopicSlides, activeTopic])
+
+  // Chapter-based segments: each parent + all descendants = one segment
   const segments = useMemo(() => {
     return visibleSlides.map((parent) => {
-      const children = allTopicSlides.filter((s) => s.parentId === parent.id)
+      const descendants = collectDescendants(allTopicSlides, parent.id)
       let label
       if (parent.type === 'header') {
         label = parent.topicName || activeTopic?.name || 'Overview'
@@ -78,7 +130,7 @@ export default function useSlideshowControl({
       return {
         id: parent.id,
         label,
-        slides: [parent, ...children],
+        slides: [parent, ...descendants],
         depth: 0,
       }
     })
@@ -203,13 +255,13 @@ export default function useSlideshowControl({
       return
     }
 
-    const children = allTopicSlides.filter((s) => s.parentId === parent.id)
-    if (children.length === 0) {
+    const descendants = collectDescendants(allTopicSlides, parent.id)
+    if (descendants.length === 0) {
       setCurrentChildIndex(null)
       return
     }
 
-    const targetChildIndex = Math.max(0, Math.min(children.length - 1, slideInSegment - 1))
+    const targetChildIndex = Math.max(0, Math.min(descendants.length - 1, slideInSegment - 1))
     setCurrentChildIndex(targetChildIndex)
   }, [visibleSlides, allTopicSlides])
 
@@ -394,6 +446,7 @@ export default function useSlideshowControl({
     segments,
     currentSegmentIndex,
     currentSlideInSegment,
+    breadcrumbPath,
 
     // State setters
     setCurrentIndex,

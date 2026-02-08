@@ -20,6 +20,27 @@ const DEPTH_INDENT_PX = 16
  */
 const MAX_PICKER_LABEL_LENGTH = 40
 
+/**
+ * Compute nesting depth of a slide within a segment by walking up parentId chain.
+ * Direct children of segment parent = depth 1, grandchildren = depth 2, etc.
+ * @param {Object} slide - The slide to compute depth for
+ * @param {string} segmentParentId - ID of the segment's parent slide
+ * @param {Array} allSegmentSlides - All slides in the segment
+ * @returns {number} Nesting depth (1 for direct child, 2+ for nested)
+ */
+function getSlideDepth(slide, segmentParentId, allSegmentSlides) {
+  let depth = 1
+  let current = slide
+  const visited = new Set()
+  // Walk up parentId chain until we reach the segment's parent
+  while (current?.parentId && current.parentId !== segmentParentId && !visited.has(current.id)) {
+    visited.add(current.id)
+    depth++
+    current = allSegmentSlides.find(s => s.id === current.parentId)
+  }
+  return depth
+}
+
 function getSlideLabel(slide) {
   if (!slide || typeof slide !== 'object') return 'Slide'
   if (typeof slide.title === 'string' && slide.title.trim()) return slide.title.trim()
@@ -322,7 +343,7 @@ export default function ChapterPicker({
                   )}
                 </button>
 
-                {/* Follow-up slides (children) */}
+                {/* Follow-up slides (children, grandchildren, etc.) */}
                 {childSlides.length > 0 && (
                   <div className="pb-2">
                     {childSlides.map((slide, childIdx) => {
@@ -331,6 +352,7 @@ export default function ChapterPicker({
                       const isCompleteChild = isComplete || (isActiveSegment && currentSlideInSegment > slideInSegment)
                       const childLabel = truncateLabel(getSlideLabel(slide), MAX_PICKER_LABEL_LENGTH)
                       const childKey = slide?.id ? `${segment.id}:${slide.id}` : `${segment.id}:child:${childIdx}`
+                      const childDepth = getSlideDepth(slide, segment.id, segment.slides)
 
                       return (
                         <button
@@ -348,7 +370,7 @@ export default function ChapterPicker({
                               : 'hover:bg-gray-50 dark:hover:bg-gray-800'
                             }
                           `}
-                          style={{ paddingLeft: `${16 + depth * DEPTH_INDENT_PX + DEPTH_INDENT_PX}px` }}
+                          style={{ paddingLeft: `${16 + depth * DEPTH_INDENT_PX + childDepth * DEPTH_INDENT_PX}px` }}
                           aria-current={isActiveChild ? 'true' : undefined}
                         >
                           <div

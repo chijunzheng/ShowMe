@@ -65,6 +65,7 @@ export default function useQuestionHandler({
   uiState,
   visibleSlides,
   currentIndex,
+  displayedSlide,
   isListening,
   isRaiseHandPending,
   isMicEnabled,
@@ -451,7 +452,10 @@ export default function useQuestionHandler({
 
       const isFollowUp = classifyResult.classification === 'follow_up'
       // Get parent slide for 2D navigation (follow-up slides nest under current slide)
-      const followUpParentSlide = isFollowUp ? visibleSlides[currentIndex] : null
+      // When viewing a child slide, nest under that child for proper hierarchy
+      const followUpParentSlide = isFollowUp
+        ? (displayedSlide?.parentId ? displayedSlide : visibleSlides[currentIndex])
+        : null
       const followUpParentId = followUpParentSlide && !['header', 'suggestions'].includes(followUpParentSlide.type)
         ? followUpParentSlide.id
         : null
@@ -729,6 +733,7 @@ export default function useQuestionHandler({
     topics,
     visibleSlides,
     currentIndex,
+    displayedSlide,
     wsClientId,
     setUiState,
     setEngagement,
